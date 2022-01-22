@@ -29,7 +29,7 @@ OBJECT_FILES=$(OBJECT_FILES_0:.cpp=.o)
 
 build: $(EXECUTABLE)
 
-$(EXECUTABLE): $(OBJECT_FILES)
+$(EXECUTABLE): $(SOURCES) $(OBJECT_FILES)
 	@echo -------------------------------------------------
 	@echo building $@:
 	$(CC) $(LIBS_PATH) $(WIN_API_LIBS_PATH) $(LIBS) $(WIN_API_LIBS) $(OBJECT_FILES) -o "$@"

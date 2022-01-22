@@ -21,15 +21,8 @@ uint fragCount = 4;
 
 uniform float time;
 
-//uniform sampler2D bot;
-//uniform sampler2D side;
-//uniform sampler2D top;
 uniform sampler2D atlas;
 uniform vec2 atlasTileCount;
-
-#define side vec2(0, 0)
-#define top vec2(1, 0)
-#define bot vec2(2, 0)
 
 uniform float mouseX;
 
@@ -47,12 +40,40 @@ vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
     //return vec3(t, 0, 0 );
 }
 
-layout(std430, binding = 1) buffer terrain {
-    vec3 pos[];
+layout(packed, binding = 1) uniform Chunk {
+	vec3 relativeChunkPos; 							//12
+    uint data[16*16*16/2]; //indeces are shorts 	//8192
 };
 
-vec3 rgb2hsv(vec3 c)
-{
+struct Block {
+	uint id;
+};
+
+layout(binding = 2) buffer Blocks {
+    Block blocks[]; //block 0 is special
+};
+
+bool ch16(const int i) {
+	return (i >= 0 && i < 16);
+}
+
+bool checkBoundaries(const ivec3 i) {
+	return ch16(i.x) && ch16(i.y) && ch16(i.z);
+}
+
+bool isIntersection(const ivec3 i_v) {
+	int index = i_v.x + i_v.y * 16 + i_v.z * 16 * 16;
+	int packedIndex = index / 2;
+	int offset = (index % 2) * 16;
+	uint id = (data[packedIndex] >> offset) & 65535;
+	return id != 0;
+}
+
+bool isIntersection_s(const ivec3 i_v) {
+	return checkBoundaries(i_v) && isIntersection(i_v);
+}
+
+vec3 rgb2hsv(const vec3 c) {
     vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
     vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
     vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
@@ -62,14 +83,13 @@ vec3 rgb2hsv(vec3 c)
     return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
 }
 
-vec3 hsv2rgb(vec3 c)
-{
+vec3 hsv2rgb(const vec3 c) {
     vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
     vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
     return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
 
-float map(float value, float min1, float max1, float min2, float max2) {
+float map(const float value, const float min1, const float max1, const float min2, const float max2) {
     return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
 }
 
@@ -89,105 +109,81 @@ void swap(inout float v1, inout float v2) {
     v2 = t;
 }
 
-bool intersect(const Ray r, const vec3 min, const vec3 max, out vec3 mins, out vec3 maxs)
-{
-    float txmin = (min.x - r.orig.x) / r.dir.x;
-    float txmax = (max.x - r.orig.x) / r.dir.x;
+/*bool checkX(const Ray ray, out ivec3 index_out) {
+	const bool dir = ray.dir.x > 0;
+	const int dir_ = int(sign(ray.dir.x));
+	if(dir_ == 0) return false;
+	
+	const vec2 step = ray.dir.yz / ray.dir.x;
+	
+	const int nearest = clamp(int(ceil(ray.orig.x * dir_) * dir_), 0, 16);
+	
+	const vec2 startCoords = ray.orig.yz + (nearest - ray.orig.x) * step;
+	
+	for(int i = nearest; i != (dir ? 16 : 0); i+= dir_) {
+			const ivec3 index = ivec3(
+				min(i, 15),
+				ivec2(floor(startCoords + step * (i-nearest)))
+			);
+			Block out_block;
+			if(isIntersection_s(index, out_block)) {
+				index_out = index;
+				return true;
+			}
+		}
+	
+	return false;
+}*/
 
-    if (txmin > txmax) swap(txmin, txmax);
+struct BlockIntersection {
+	float t;
+	ivec3 index;
+	vec2 uv;
+	ivec3 side;
+};
 
-    float tymin = (min.y - r.orig.y) / r.dir.y;
-    float tymax = (max.y - r.orig.y) / r.dir.y;
-
-    if (tymin > tymax) swap(tymin, tymax);
-
-    if ((txmin > tymax) || (tymin > txmax))
-        return false;
-
-    if (tymin > txmin)
-        txmin = tymin;
-
-    if (tymax < txmax)
-        txmax = tymax;
-
-    float tzmin = (min.z - r.orig.z) / r.dir.z;
-    float tzmax = (max.z - r.orig.z) / r.dir.z;
-
-    if (tzmin > tzmax) swap(tzmin, tzmax);
-
-    if ((txmin > tzmax) || (tzmin > txmax))
-        return false;
-
-    if (tzmin > txmin)
-        txmin = tzmin;
-
-    if (tzmax < txmax)
-        txmax = tzmax;
-
-    mins.x = txmin;
-    mins.y = tymin;
-    mins.z = tzmin;
-
-    maxs.x = txmax;
-    maxs.y = tymax;
-    maxs.z = tzmax;
-    return true;
+//                 (const) Ray, (out) BlockIntersection, 'coord along', 'other coords'
+#define checkPlane(ray        , intersection_out       , ca           , co            ) {\
+	const bool dir = ray.dir.##ca > 0;\
+	const int dir_ = int(sign(ray.dir.##ca));\
+	if(dir_ == 0) return false;\
+	\
+	const float unscale = 1.0 / ray.dir.##ca;\
+	const vec2 step = ray.dir.##co * unscale;\
+	\
+	const int nearest = clamp(int(ceil(ray.orig.##ca * dir_) * dir_), 0, 16);\
+	\
+	const vec2 startCoords = ray.orig.##co + (nearest - ray.orig.##ca) * step;\
+	\
+	for(int i = nearest; i != (dir ? 16 : 0); i+= dir_) {\
+			ivec3 index;\
+			index.##ca = min(i, 15);\
+			index.##co = ivec2(floor(startCoords + step * (i-nearest)));\
+			if(isIntersection_s(index)) {\
+				ivec3 side = ivec3(0,0,0);\
+				side.##ca = -dir_;\
+				intersection_out = BlockIntersection(\
+					unscale * ((i-nearest) + (nearest - ray.orig.##ca))/*length(step * (i-nearest));*/,\
+					index,\
+					mod(startCoords + step * (i-nearest), 1.0),\
+					side\
+				);\
+				return true;\
+			}\
+		}\
+	\
+	return false;\
 }
 
-float intersectPlane(const Ray r, const vec3 center, const vec3 n) {
-    return dot(n, center - r.orig) / dot(n, r.dir);
+
+bool checkX(const Ray ray, out BlockIntersection intersection_out) {
+	/*return*/ checkPlane(ray, intersection_out, x, zy);
 }
-
-float intersectSquare(const Ray r, const vec3 center, const vec3 n, const vec3 up, const vec3 left, const float radius, inout vec2 uv) {
-    const vec3 c = center + n * radius; //plane center
-    const float t = intersectPlane(r, c, n);
-    const vec3 p = at(r, t); //point
-    vec3 l = p - c; //point local to plane
-    float u_ = dot(l, up);
-    float v_ = dot(l, left);
-    if (abs(u_) <= radius && abs(v_) <= radius) {
-        uv = (vec2(u_, v_) / 2 / radius + 0.5) * eps1m;
-        return t;
-    }
-    return 1.0 / 0.0;
+bool checkY(const Ray ray, out BlockIntersection intersection_out) {
+	/*return*/ checkPlane(ray, intersection_out, y, xz);
 }
-
-float intersectCube(const Ray ray, const vec3 center, const vec3 n1, const vec3 n2, const float size, out vec3 n_out, out vec2 uv_out) {
-    const vec3 n3 = cross(n2, n1);
-
-    const vec3 ns[3] = { 
-         n1 * -sign( dot(n1, ray.dir) )
-        ,n2 * -sign( dot(n2, ray.dir) )
-        ,n3 * -sign( dot(n3, ray.dir) )
-    };
-
-    vec2 uvs[3];
-
-    const uint sides = 3;
-    const float arr[sides] = {
-         intersectSquare(ray, center, ns[0], n3, n2, size / 2, uvs[0])
-        ,intersectSquare(ray, center, ns[1], n1, n3, size / 2, uvs[1])
-        ,intersectSquare(ray, center, ns[2], n1, n2, size / 2, uvs[2])
-        
-        // SquareInfo(intersectSquare(r, center,  n1, n2, n3, size),  n1)
-        //,SquareInfo(intersectSquare(r, center, -n1, n2, n3, size), -n1)
-        //,SquareInfo(intersectSquare(r, center,  n2, n1, n3, size),  n2)
-        //,SquareInfo(intersectSquare(r, center, -n2, n1, n3, size), -n2)
-        //,SquareInfo(intersectSquare(r, center,  n3, n2, n1, size),  n3)
-        //,SquareInfo(intersectSquare(r, center, -n3, n2, n1, size), -n3)
-    };
-
-    float shortestT = 1.0 / 0.0;
-    for (uint i = 0; i < sides; i++) {
-        float t = arr[i];
-        if (t > epsilon && t < shortestT) {
-            shortestT = t;
-            n_out = ns[i];
-            uv_out = uvs[i];
-        }
-    }
-
-    return shortestT;
+bool checkZ(const Ray ray, out BlockIntersection intersection_out) {
+	/*return*/ checkPlane(ray, intersection_out, z, xy);
 }
 
 vec3 background(const Ray ray) {
@@ -195,98 +191,88 @@ vec3 background(const Ray ray) {
     return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
 }
 
-bool trace_scene(const Ray ray, out vec2 uv_out, out vec3 n_out) {
-    vec3 n;
-    float minT = 1.0 / 0.0;
-    uint minI = 0;
-    vec2 uv;
-    for (uint i = 0; i < pos.length(); i++) {
-        vec3 normal_;
-        vec2 uv_;
-        float t = intersectCube(ray, pos[i], normalize(vec3(1, 0, 0)), normalize(vec3(0, 1, 0)), 1, normal_, uv_);
-        if (t < minT) {
-            minT = t;
-            n = normal_;
-            minI = i;
-            uv = uv_;
-        }
-    }
-
-    if (minT < 1000) {
-        uv_out = uv;
-        n_out = n;
-        return true;
-    }
-    else {
-        return false;
-    }
-}
-
-float rand(const vec2 co) {
-    return fract(sin(dot(co + vec2(time, time), vec2(12.9898, 78.233))) * 43758.5453);
-}
-
-vec3 trace(vec2 coord_) {
-    vec2 coord = (coord_.xy / windowSize.xy) * 2 - 1;
-
-    vec3 forwardDir = cross(topDir, rightDir);
-    vec3 rayDir = rightDir * coord.x + topDir * coord.y + forwardDir * 1;
-    rayDir = normalize(rayDir);
-
-    Ray ray = Ray(position, rayDir);
-
-    vec3 col;
-
-    //for (uint i = 0; i < 1; ++i) {
-    vec2 uv;
-    vec3 n;
-        if (trace_scene(ray, uv, n)) {
-            bool isTop = dot(n, vec3(0, 1, 0)) > 0.5;
-            bool isBot = dot(n, vec3(0, 1, 0)) < -0.5;
-            col = mix(
+void main() {
+    const vec2 coord = (gl_FragCoord.xy / windowSize.xy) * 2 - 1;
+	
+	//const ivec3 index = ivec3(floor(vec3(coord.xy, mouseX) * 16));
+	//int i_ = index.x + index.y * 16 + index.z * 16 * 16;
+	
+	//Block b;
+	//bool is_ = isIntersection(index, b);
+	
+	//color = vec4(vec3(index.xyz) / 16 * float(is_), 1);
+	//color = vec4(float(is_), 0, 0, 1);
+	
+	
+	//color = vec4(relativeChunkPos.xyz, 1);
+	
+	//if(true) return;
+	
+	const vec3 forwardDir = cross(topDir, rightDir);
+    const vec3 rayDir_ = rightDir * coord.x + topDir * coord.y + forwardDir * 1;
+    const vec3 rayDir = normalize(rayDir_);
+	
+	const Ray ray = Ray(-relativeChunkPos, rayDir);
+	
+	BlockIntersection min_intersection;
+	BlockIntersection cur_intersection;
+	float min_t = 1.0 / 0.0;
+	if(checkX(ray, cur_intersection)) {
+		if(min_t > cur_intersection.t) {
+			min_intersection = cur_intersection;
+			min_t = cur_intersection.t;
+		}
+	}
+	if(checkY(ray, cur_intersection)) {
+		if(min_t > cur_intersection.t) {
+			min_intersection = cur_intersection;
+			min_t = cur_intersection.t;
+		}
+	}
+	if(checkZ(ray, cur_intersection)) {
+		if(min_t > cur_intersection.t) {
+			min_intersection = cur_intersection;
+			min_t = cur_intersection.t;
+		}
+	}
+	
+	if(min_t < 1000) {
+		const BlockIntersection i = min_intersection;
+		const vec2 uv = i.uv;
+		bool isTop = i.side.y ==  1;
+		bool isBot = i.side.y == -1;
+            color = vec4(
+			mix(
                mix(
-                   sampleAtlas(side, uv.xy),
-                   sampleAtlas(top, uv.xy),
+                   sampleAtlas(vec2(0, 0), uv.xy),
+                   sampleAtlas(vec2(1, 0), uv.xy),
                    float(isTop)
                ),
-                sampleAtlas(bot, uv.xy),
+               sampleAtlas(vec2(2, 0), uv.xy),
                float(isBot)
-            );
-            //col = texture2D(top, uv.xy).rgb;
-            //col = n;
-            //col = vec3(uv, 0);
-            //ray.dir = normalize(ray.dir + .02 * vec3(
-            //    rand(coord_.xy), rand(coord_.xy * 1.3), rand(coord_.xy * 1.2)
-            //));
-        }
-        else {
-            col = background(ray);
-            //break;
-        }
-    //}
-
-    return col;
-}
-
-vec3 sampleN(const vec2 coord, const uint n) {
-    const vec2 pixelCoord = floor(coord);
-    const float fn = float(n);
-
-    vec3 result = vec3(0, 0, 0);
-    for (uint i = 0; i < n; i++) {
-        for (uint j = 0; j < n; j++) {
-            const vec2 offset = vec2(rand(coord.xy), rand(coord.xy + pixelCoord)) / fn / 2;
-            const vec2 coord = pixelCoord + vec2(0.5, 0.5) + (vec2(i / fn, j / fn) - vec2(0.5, 0.5)) + offset;
-
-            const vec3 sampl = trace(coord);
-            result += sampl;
-        }
-    }
-
-    return result / (fn * fn);
-}
-
-void main(void) {
-    //color = vec4(sampleN(gl_FragCoord.xy, 2), 1);
-    color = vec4(trace(gl_FragCoord.xy), 1);
+            ), 0);
+		
+		//color = vec4(uv, 0, 1);
+	}
+	else color = vec4(background(ray), 1);
+	
+	/*vec3 nearest_pos;
+	Block nearest_block;
+	float nearest_sqLen = 1.0 / 0.0;
+	for(uint i = 0; i < 3; ++i) {
+		vec3 pos;
+		Block block;
+		bool is = checkPlanes(ray, revativeChunkCoords[i], raySizeAlong[i], pos, block);
+		
+		if(is) {
+			const float sqLen = dot(pos, pos);
+			if(nearest_pos_sqLen > sqLen) {
+				nearest_pos = pos;
+				nearest_block = block;
+				nearest_sqLen = sqLen;
+			}
+		}
+	}*/
+	
+	
 }

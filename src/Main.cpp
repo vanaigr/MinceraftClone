@@ -149,6 +149,7 @@ static void update() {
     }
     if (movementDir.lengthSuqare() != 0) {
         vec3<double> movement = currentViewport.rightDir() * movementDir.x + currentViewport.forwardDir() * movementDir.y;
+		//vec3<double> movement = vec3<double>{ movementDir.x, movementDir.y, 0.0 };
         currentViewport.position += movement.normalized() * currentMovementSpeed
             * (shift ? 1.0*speedModifier : 1)
             * (ctrl  ? 1.0/speedModifier : 1);
@@ -164,9 +165,15 @@ static GLuint rightDir_u;
 static GLuint topDir_u;
 static GLuint time_u;
 static GLuint mouseX_u;
+static GLuint chunkUBO;
+
+static GLuint mainProgram = 0;
+
+uint32_t chunk[16 * 16 * 16/2];
 
 static void reloadShaders() {
-	GLuint mainProgram = glCreateProgram();
+	glDeleteProgram(mainProgram);
+	mainProgram = glCreateProgram();
     ShaderLoader sl{};
     sl.addScreenSizeTriangleStripVertexShader("vert");
     sl.addShaderFromProjectFileName("shaders/main.shader", GL_FRAGMENT_SHADER, "Main shader");
@@ -203,6 +210,23 @@ static void reloadShaders() {
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textures[0]);
+
+    /*GLuint ssbo;
+    glGenBuffers(1, &ssbo);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(field), field, GL_STATIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);*/
+	
+	GLuint chunkIndex = glGetUniformBlockIndex(mainProgram, "Chunk");
+	glGenBuffers(1, &chunkUBO);
+	glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO); 
+	glUniformBlockBinding(mainProgram, chunkIndex, 1);
+	glBindBufferBase(GL_UNIFORM_BUFFER, 1, chunkUBO);
+	assert(sizeof chunk == 8192);
+	glBufferData(GL_UNIFORM_BUFFER, 8192+12, NULL, GL_DYNAMIC_DRAW);
+	glBufferSubData(GL_UNIFORM_BUFFER, 12, 8192, &chunk);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
 int main(void) {
@@ -218,7 +242,7 @@ int main(void) {
     monitor = NULL;
 #endif // !FULLSCREEN
 
-    window = glfwCreateWindow(windowSize.x, windowSize.y, "Template", NULL, NULL);
+    window = glfwCreateWindow(windowSize.x, windowSize.y, "VMC", NULL, NULL);
 
     if (!window)
     {
@@ -237,55 +261,30 @@ int main(void) {
     }
     fprintf(stdout, "Using GLEW %s\n", glewGetString(GLEW_VERSION));
 
-    //load shaders
-	reloadShaders();
-    
-
     //callbacks
     glfwSetKeyCallback(window, key_callback);
     glfwSetCursorPosCallback(window, cursor_position_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetScrollCallback(window, scroll_callback);
 	
-    while ((err = glGetError()) != GL_NO_ERROR)
-    {
-        std::cout << err << std::endl;
-    }
-
-    constexpr unsigned width = 10;
-    constexpr unsigned length = 10;
-    float field[width * length][4]; //aligned!!
-    //float field[2][4]; //aligned!!
-
-    if (true) for (unsigned i = 0; i < width; ++i)
-        for (unsigned j = 0; j < length; ++j) {
-            float(&v)[4] = field[(i + j * width)];
-            float x = float(i) - (width / 2);
-            float y = float(j) - (length / 2);
-            v[0] = x;
-            v[1] = rand() % 3;
-            v[2] = y;
-            (void)v[3];
-        }
-    else {
-        field[0][0] = 2;
-        field[0][1] = 0;
-        field[0][2] = 0;
-
-        field[1][0] = -2;
-        field[1][1] = 0;
-        field[1][2] = 0;
-    }
-
-    GLuint ssbo;
-    glGenBuffers(1, &ssbo);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(field), field, GL_STATIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-
-
-    while ((err = glGetError()) != GL_NO_ERROR)
+	for(int i = 0; i < (16*16*16/2); i ++) 
+		chunk[i] = 0;
+	
+	for (unsigned z = 0; z < 16; ++z)
+		for (unsigned y = 0; y < 16; ++y)
+			for (unsigned x = 0; x < 16; ++x) {
+				bool is = (z > 14);//(rand() % 16) < (16 - z);
+				unsigned index_ = (x + y*16 + z*16*16);
+				unsigned index = index_ / 2;
+				unsigned shift = (index_ % 2) * 16;
+				chunk[index] |= uint32_t(is) << shift;
+			}
+			
+	
+	//load shaders
+	reloadShaders();
+	
+	while ((err = glGetError()) != GL_NO_ERROR)
     {
         std::cout << err << std::endl;
     }
@@ -296,13 +295,20 @@ int main(void) {
     {
         //sending
         auto& currentViewport = *viewport_current();
+        auto& pos = currentViewport.position;
         const auto rightDir{ currentViewport.rightDir() };
         const auto topDir{ currentViewport.topDir() };
-        glUniform3f(position_u, currentViewport.position.x, currentViewport.position.y, currentViewport.position.z);
+        glUniform3f(position_u, 0, 0, 0);//currentViewport.position.x, currentViewport.position.y, currentViewport.position.z);
         glUniform3f(rightDir_u, rightDir.x, rightDir.y, rightDir.z);
         glUniform3f(topDir_u, topDir.x, topDir.y, topDir.z);
+		
+		float arr[3] = { (float)-pos.x, (float)-pos.y, (float)-pos.z };
+		glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO); 
+		static_assert(sizeof arr == 12, "");
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, 12, &arr);
+		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-        glUniform1f(mouseX_u, (mousePos.x / windowSize_d.x * 2 - 1) / 10 + 1);
+        glUniform1f(mouseX_u, mousePos.x / windowSize_d.x);
 
         glUniform1f(time_u,
             sin(
@@ -327,5 +333,8 @@ int main(void) {
     }
 
     glfwTerminate();
+	
+	char dummy;
+	std::cin >> dummy;
     return 0;
 }
