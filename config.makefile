@@ -3,7 +3,7 @@ SOURCE_DIR=src
 OBJECT_DIR=obj
 CPP_EXCLUDES=  
 
-CFLAGS=-m64 -O2 -std=c++14 -pedantic -c -Wall -Wextra -Wdangling-else -Xlinker/NODEFAULTLIB
+CFLAGS=-m64 -O1 -std=c++14 -pedantic -c -Wall -Wextra -Wno-dangling-else -Wno-unused-parameter -Xlinker/NODEFAULTLIB
 PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU
 
 LIBS_PATH=-L .\dependencies
@@ -27,6 +27,9 @@ OBJECT_FILES_0=$(addprefix $(OBJECT_DIR)/,$(SOURCES_LOC))
 OBJECT_FILES=$(OBJECT_FILES_0:.cpp=.o)
 
 
+build-run: $(EXECUTABLE)
+	$(EXECUTABLE)
+	
 build: $(EXECUTABLE)
 
 $(EXECUTABLE): $(SOURCES) $(OBJECT_FILES)

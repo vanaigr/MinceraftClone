@@ -33,6 +33,15 @@ namespace misc {
     inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const C f) noexcept {
         return vec2<C>(misc::lerp(a.x, b.x, f), misc::lerp(a.y, b.y, f));
     }
+	
+	template<class C>
+    inline constexpr vec3<C> vec3lerp(const vec3<C> a, const vec3<C> b, const C f) noexcept {
+        return vec3<C>(
+			misc::lerp(a.x, b.x, f), 
+			misc::lerp(a.y, b.y, f),
+			misc::lerp(a.z, b.z, f)
+		);
+    }
 
     template <typename E>
     constexpr inline typename std::underlying_type<E>::type to_underlying(const E e) noexcept {

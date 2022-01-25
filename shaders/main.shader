@@ -11,7 +11,7 @@ precision mediump int;
 
 uniform uvec2 windowSize;
 
-uniform vec3 position;
+//uniform vec3 position;
 uniform vec3 rightDir, topDir;
 
 in vec4 gl_FragCoord;
@@ -25,6 +25,10 @@ uniform sampler2D atlas;
 uniform vec2 atlasTileCount;
 
 uniform float mouseX;
+
+uniform mat4 projection; //from local space to screen
+
+in vec3 vertColor;
 
 struct Ray {
     vec3 orig;
@@ -192,24 +196,10 @@ vec3 background(const Ray ray) {
 }
 
 void main() {
-    const vec2 coord = (gl_FragCoord.xy / windowSize.xy) * 2 - 1;
-	
-	//const ivec3 index = ivec3(floor(vec3(coord.xy, mouseX) * 16));
-	//int i_ = index.x + index.y * 16 + index.z * 16 * 16;
-	
-	//Block b;
-	//bool is_ = isIntersection(index, b);
-	
-	//color = vec4(vec3(index.xyz) / 16 * float(is_), 1);
-	//color = vec4(float(is_), 0, 0, 1);
-	
-	
-	//color = vec4(relativeChunkPos.xyz, 1);
-	
-	//if(true) return;
+    const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
 	
 	const vec3 forwardDir = cross(topDir, rightDir);
-    const vec3 rayDir_ = rightDir * coord.x + topDir * coord.y + forwardDir * 1;
+    const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;
     const vec3 rayDir = normalize(rayDir_);
 	
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
@@ -254,7 +244,7 @@ void main() {
 		
 		//color = vec4(uv, 0, 1);
 	}
-	else color = vec4(background(ray), 1);
+	else color = vec4(background(ray), 1.0);
 	
 	/*vec3 nearest_pos;
 	Block nearest_block;

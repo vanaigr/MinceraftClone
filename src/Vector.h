@@ -3,6 +3,7 @@
 #include<iostream>
 #include<cmath>
 #include<stdint.h>
+#include<type_traits>
 
 template<typename C>
 struct vec2
@@ -96,6 +97,15 @@ public:
 	constexpr vec3() : x(0), y(0), z(0) {};
 	constexpr vec3(C value) : x(value), y(value), z(value) {};
 	constexpr vec3(C x_, C y_, C z_) : x(x_), y(y_), z(z_) {};
+	
+	template<typename C2, typename = std::enable_if_t<std::is_convertible<C, C2>::value>>
+	inline constexpr operator vec3<C2>() const {
+		return vec3<C2>{
+			static_cast<C2>(x),
+			static_cast<C2>(y),
+			static_cast<C2>(z)
+		};
+	}
 
 	inline constexpr vec3<C> operator+(const vec3<C> o) const {
 		return vec3(x + o.x, y + o.y, z + o.z);
