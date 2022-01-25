@@ -158,10 +158,10 @@ struct BlockIntersection {
 	const int nearest = clamp(int(ceil(ray.orig.##ca * dir_) * dir_), 0, 16);\
 	\
 	const vec2 startCoords = ray.orig.##co + (nearest - ray.orig.##ca) * step;\
-	\
 	for(int i = nearest; i != (dir ? 16 : 0); i+= dir_) {\
 			ivec3 index;\
-			index.##ca = min(i, 15);\
+			if(dir)index.##ca = min(i, 15);\
+			else index.##ca = max(i-1, 0);\
 			index.##co = ivec2(floor(startCoords + step * (i-nearest)));\
 			if(isIntersection_s(index)) {\
 				ivec3 side = ivec3(0,0,0);\

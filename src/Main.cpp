@@ -570,7 +570,7 @@ int main(void) {
 	for (unsigned z = 0; z < 16; ++z)
 		for (unsigned y = 0; y < 16; ++y)
 			for (unsigned x = 0; x < 16; ++x) {
-				bool is = (rand() % 16) < (16 - y);
+				bool is =  (rand() % 16) < (16 - y);
 				unsigned index_ = (x + y*16 + z*16*16);
 				unsigned index = index_ / 2;
 				unsigned shift = (index_ % 2) * 16;
