@@ -3,7 +3,7 @@ SOURCE_DIR=src
 OBJECT_DIR=obj
 CPP_EXCLUDES=  
 
-CFLAGS=-m64 -O1 -std=c++14 -pedantic -c -Wall -Wextra -Wno-dangling-else -Wno-unused-parameter -Xlinker/NODEFAULTLIB
+CFLAGS=-m64 -O3 -std=c++17 -pedantic -c -Wall -Wextra -Wno-dangling-else -Wno-unused-parameter -Wno-unused-variable -Xlinker /NODEFAULTLIB
 PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU
 
 LIBS_PATH=-L .\dependencies

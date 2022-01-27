@@ -30,6 +30,8 @@ uniform mat4 projection; //from local space to screen
 
 in vec3 vertColor;
 
+uniform bool chunkNew;
+
 struct Ray {
     vec3 orig;
     vec3 dir;
@@ -190,11 +192,6 @@ bool checkZ(const Ray ray, out BlockIntersection intersection_out) {
 	/*return*/ checkPlane(ray, intersection_out, z, xy);
 }
 
-vec3 background(const Ray ray) {
-    const float t = 0.5 * (ray.dir.y + 1.0);
-    return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
-}
-
 void main() {
     const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
 	
@@ -226,12 +223,13 @@ void main() {
 		}
 	}
 	
+	vec4 col;
 	if(min_t < 1000) {
 		const BlockIntersection i = min_intersection;
 		const vec2 uv = i.uv;
 		bool isTop = i.side.y ==  1;
 		bool isBot = i.side.y == -1;
-            color = vec4(
+		col = vec4(
 			mix(
                mix(
                    sampleAtlas(vec2(0, 0), uv.xy),
@@ -240,29 +238,13 @@ void main() {
                ),
                sampleAtlas(vec2(2, 0), uv.xy),
                float(isBot)
-            ), 0);
+            ), 1);
 		
 		//color = vec4(uv, 0, 1);
 	}
-	else color = vec4(background(ray), 1.0);
+	else col = vec4(0,0,0,0);
 	
-	/*vec3 nearest_pos;
-	Block nearest_block;
-	float nearest_sqLen = 1.0 / 0.0;
-	for(uint i = 0; i < 3; ++i) {
-		vec3 pos;
-		Block block;
-		bool is = checkPlanes(ray, revativeChunkCoords[i], raySizeAlong[i], pos, block);
-		
-		if(is) {
-			const float sqLen = dot(pos, pos);
-			if(nearest_pos_sqLen > sqLen) {
-				nearest_pos = pos;
-				nearest_block = block;
-				nearest_sqLen = sqLen;
-			}
-		}
-	}*/
+	//if(chunkNew) col = mix(col, vec4(1,0,0,1),0.3);
 	
-	
+	color = col;
 }

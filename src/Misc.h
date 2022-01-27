@@ -29,26 +29,16 @@ namespace misc {
         return (f - a) / (b - a);
     }
 
-    template<class C>
-    inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const C f) noexcept {
-        return vec2<C>(misc::lerp(a.x, b.x, f), misc::lerp(a.y, b.y, f));
-    }
-	
-	template<class C>
-    inline constexpr vec3<C> vec3lerp(const vec3<C> a, const vec3<C> b, const C f) noexcept {
-        return vec3<C>(
-			misc::lerp(a.x, b.x, f), 
-			misc::lerp(a.y, b.y, f),
-			misc::lerp(a.z, b.z, f)
-		);
-    }
-
     template <typename E>
     constexpr inline typename std::underlying_type<E>::type to_underlying(const E e) noexcept {
         return static_cast<typename std::underlying_type<E>::type>(e);
     }
 
     inline float modf(const float x, const float y) noexcept {
+        return x - static_cast<double>(y) * floor(x / static_cast<double>(y));
+    }
+	
+	inline double modd(const double x, const double y) noexcept {
         return x - static_cast<double>(y) * floor(x / static_cast<double>(y));
     }
 
@@ -113,4 +103,42 @@ namespace misc {
     inline constexpr T map(const T value, const T va, const T vb, const T a, const T b) {
         return lerp(a, b, unlerp(va, vb, value));
     }
+	
+	/*void invertMatrix3To(double const (&m)[3][3], double (*minv)[3][3]) {//https://stackoverflow.com/a/18504573/15291447
+	double const det = 
+				m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) -
+				m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+				m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+				
+				std::cout << det << '\n';
+	
+	double const invdet = 1.0 / det;
+	
+	(*minv)[0][0] = (m[1][1] * m[2][2] - m[2][1] * m[1][2]) / invdet;
+	(*minv)[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / invdet;
+	(*minv)[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / invdet;
+	(*minv)[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) / invdet;
+	(*minv)[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / invdet;
+	(*minv)[1][2] = (m[1][0] * m[0][2] - m[0][0] * m[1][2]) / invdet;
+	(*minv)[2][0] = (m[1][0] * m[2][1] - m[2][0] * m[1][1]) / invdet;
+	(*minv)[2][1] = (m[2][0] * m[0][1] - m[0][0] * m[2][1]) / invdet;
+	(*minv)[2][2] = (m[0][0] * m[1][1] - m[1][0] * m[0][1]) / invdet;
+	}*/
+	
+	template<typename El, size_t r1, size_t c1r2, size_t c2>
+	inline constexpr void matMult(El const (&m1)[r1][c1r2], El const (&m2)[c1r2][c2], El (*o)[r1][c2]) {
+		for(size_t c = 0; c < c2; c++) {
+			for(size_t r = 0; r < r1; r++) {
+				El sum(0);
+				for(size_t cr = 0; cr < c1r2; cr++)
+					sum += m1[r][cr] * m2[cr][c];
+				(*o)[r][c] = sum;
+			}
+		}
+	}
+	
+	template<typename V>
+	inline constexpr bool in(V const v, V const b1, V const b2) {
+		return (b1 < b2) ? (b1 < v && v < b2) : (b2 < v && v < b1);
+	}
 }

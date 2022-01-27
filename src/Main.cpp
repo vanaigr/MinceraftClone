@@ -14,8 +14,10 @@
 
 #include"Read.h"
 #include"Misc.h"
+#include"PerlinNoise.h"
 
 #include<vector>
+#include<array>
 
 # define PI 3.14159265358979323846
 
@@ -24,7 +26,7 @@
 #ifdef FULLSCREEN
 static const vec2<uint32_t> windowSize{ 1920, 1080 };
 #else
-static const vec2<uint32_t> windowSize{ 600, 600 };
+static const vec2<uint32_t> windowSize{ 1000, 600 };
 #endif // FULLSCREEN
 
 static const vec2<double> windowSize_d{ windowSize.convertedTo<double>() };
@@ -40,137 +42,107 @@ static inline void copy2DArray(El const (&in)[i_][j_], El (&out)[i_][j_]) {
 	}
 }
 
-template<typename C>
-struct Triangle {
-	vec3<C> verts_[3];
+struct Chunks {
+private:
+	std::vector<int> vacant{};
+	std::vector<int> used_{};
+public:
+	static constexpr int const chunkDim = 16;
+	using ChunkData = std::array<uint16_t, chunkDim*chunkDim*chunkDim>;
+	std::vector<int> used{};
+	std::vector<vec3<int32_t>> chunksPos{};
+	std::vector<Chunks::ChunkData> chunksData{};
+	std::vector<uint8_t> chunkNew{};
 	
-	Triangle(vec3<C> vert1, vec3<C> vert2, vec3<C> vert3) : verts_{ vert1, vert2, vert3 } {}
-	
-	Triangle(vec3<C> vert1, vec3<C> col1, vec3<C> vert2, vec3<C> col2, vec3<C> vert3, vec3<C> col3) 
-		: verts_{ vert1, vert2, vert3 }
-		{}
+	//returns used[] position
+	int reserve() {
+		int index;
+		int usedSize = used.size();
+
+		if(!vacant.empty()) { 
+			index = vacant[vacant.size()-1];
+			vacant.pop_back();
+		}
+		else {
+			index = usedSize;
+			chunksPos.resize(index+1);
+			chunksData.resize(index+1);
+			chunkNew.resize(index+1);
+		}
+		used.push_back(index);
 		
-	vec3<C> const &verts(int i) const {
-		return verts_[i];
+		return usedSize;
 	}
-	vec3<C> &verts(int i) {
-		return verts_[i];
+
+	void recycle(int const index) {
+		auto chunkIndex = used[index];
+		used.erase(used.begin()+index);
+		vacant.push_back(chunkIndex);
 	}
 	
 	template<typename Action>
-	void apply(Action&& a) {
-		a(verts(0), 0);
-		a(verts(1), 1);
-		a(verts(2), 2);
+	void forEachUsed(Action &&action) const {
+		for(auto const chunkIndex : used) {
+			action(chunkIndex);
+		}
 	}
 	
-	template<typename Action>
-	Triangle<C> applied(Action&& a) const {
-		return Triangle<C>{
-			a(verts(0), 0),
-			a(verts(1), 1),
-			a(verts(2), 2)
-		};
-	}
-	
-	void intersectPlane(vec3<C> const orig, vec3<C> const n, std::vector<Triangle> &fls) const {
-		struct vertInfo {
-			vec3<C> to;
-			vec3<C> to_norm;
-			C cos;
-			C dist;//signed distance
-			
-			vertInfo(vec3<C> const vert, vec3<C> const orig, vec3<C> const n) : 
-			to{ vert - orig }, to_norm{ to.normalized() },
-			cos( n.dot(to_norm) ), dist( n.dot(to) )
-			{}
-		};
+	template<typename Predicate>
+	void filterUsed(Predicate&& keep) {
+		auto const sz = used.size();
 		
-		vertInfo const info[3] = {
-			{ verts(0), orig, n },
-			{ verts(1), orig, n },
-			{ verts(2), orig, n }
-		};
+		for(size_t i = 0; i < sz; ++i) {
+			auto const &chunkIndex = used[i];
+			if(keep(chunkIndex)) used_.push_back(chunkIndex);
+			else vacant.push_back(chunkIndex);
+		}
 		
-		int vertIndices[3];
-		int bads = 0, goods = 3;
-		for(int i = 0; i < 3; i ++) {
-			if(info[i].cos < 0) vertIndices[bads++] = i;
-			else vertIndices[--goods] = i;
+		used.resize(0);
+		used.swap(used_);
+			
+		/*for(size_t i = 0; i < sz; ++i) {
+			auto const &chunkIndex = used[i];
+			if(!keep(chunkIndex)) used[i]=-1;
 		}
-			
-		if(bads == 0) {
-			fls.push_back(*this);
-		}
-		else if(bads == 1) {
-			auto const bad = vertIndices[0];
-			
-			auto const good1 = vertIndices[2-0];
-			auto const good2 = vertIndices[2-1];
-			
-			vec3<C> newVerts[2];
-			
-			for(int i = 0; i < 2; ++i) {
-				auto const good = vertIndices[2-i];
-				auto const t = misc::unlerp(info[bad].dist, info[good].dist, C(0));
-				newVerts[i] = misc::vec3lerp(verts(bad), verts(good), t);
+		
+		int endIndex = sz-1;
+		for(int i = 0; i <= endIndex; ++i) {
+			if(used[i] == -1) {
+                for(;endIndex > -1; --endIndex) {
+                    if(used[endIndex]!=-1) {
+                        if(endIndex > i)  {
+							used[i] = used[endIndex];
+							used[endIndex] = -1;//
+							endIndex--;//for checking.   used[i] = used[endIndex--];
+							
+						}
+                        break;
+                    }	
+				}					
 			}
-			
-			fls.push_back(
-				Triangle{ 
-					verts(good1),
-					vec3<float>(1, 0, 0),
-					verts(good2),
-					vec3<float>(1, 0, 0),
-					newVerts[0],
-					vec3<float>(1, 0, 0)
+		}//produces chunk re-generation in the middle of already generated area
+		
+		
+		
+		if(true)
+			for(int i = 0; i < sz; i ++) {
+				if(i <= endIndex && used[i] == -1) {
+					std::cout << "Bug in algorithm ==-1: i=" << i << ",endIndex=" << endIndex << ",vector:\n";
+					for(int j = 0; j < sz; j ++) {
+						std::cout << used[j] << ' ';
+					}
+					exit(-1);
 				}
-			);
-			fls.push_back(
-				Triangle{ 
-					newVerts[0],
-					vec3<float>(1, 0, 0),
-					verts(good2),
-					vec3<float>(1, 0, 0),
-					newVerts[1],
-					vec3<float>(1, 0, 0)
+				else if(i > endIndex && used[i] != -1) {
+					std::cout << "Bug in algorithm !=-1: i=" << i << ",endIndex=" << endIndex << ",vector:" << std::endl;
+					for(int j = 0; j < sz; j ++) {
+						std::cout << used[j] << ' ';
+					}
+					exit(-1);
 				}
-			);
-		}
-		else if(bads == 2) {
-			vec3<float> color{
-				0, 1, 0
-			};
-			auto const good = vertIndices[2];
-			
-			vec3<C> newVerts[2];
-			
-			for(int i = 0; i < 2; ++i) {
-				auto const bad = vertIndices[i];
-				auto const t = misc::unlerp(info[bad].dist, info[good].dist, C(0));
-				newVerts[i] = misc::vec3lerp(verts(bad), verts(good), t);
 			}
-			
-			fls.push_back(
-				Triangle{ 
-					verts(good),
-					vec3<float>(0, 1, 0),
-					newVerts[0],
-					vec3<float>(0, 1, 0),
-					newVerts[1],
-					vec3<float>(0, 1, 0)
-				}
-			);
-		}
-		else //if(bads == 3) 
-			return;
-	}
-	
-	friend std::ostream &operator<<(std::ostream &o, Triangle const &it) {
-		o << '[' << it.verts(0) << ',' << '\n'
-		  << ' ' << it.verts(1) << ',' << '\n'
-		  << ' ' << it.verts(2) << ']';
-		return o;
+		
+		used.resize(endIndex+1);*/
 	}
 };
 
@@ -272,21 +244,21 @@ static double size = 1;
 
 static bool shift{ false }, ctrl{ false };
 
-static double const maxMovementSpeed = 1.0 / 30.0;
+static double const maxMovementSpeed = 1.0 / 7.5;
 static double currentMovementSpeed = 0;
-static vec2<double> movementDir{};
+static vec3<double> movementDir{};
 static double speedModifier = 2.5;
 
 
 static size_t const viewportCount = 1;
 static viewport viewports[viewportCount]{ 
 	viewport{
-		vec3<double>{ 0, 0, 0 },
-		vec2<double>{ 0, 0 },
+		vec3<double>{ 0, 20, 0 },
+		vec2<double>{ misc::pi / 2.0, 0 },
 		windowSize_d.y / windowSize_d.x,
 		90.0 / 180.0 * misc::pi,
 		0.001,
-		100
+		1000
 	} 
 };
 
@@ -306,8 +278,13 @@ static void reloadShaders();
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     bool isPress = !(action == GLFW_RELEASE);
     if (key == GLFW_KEY_W)
-        movementDir.y = 1 * isPress;
+        movementDir.z = 1 * isPress;
     else if(key == GLFW_KEY_S)
+        movementDir.z = -1 * isPress;
+	
+	if (key == GLFW_KEY_Q)
+        movementDir.y = 1 * isPress;
+    else if(key == GLFW_KEY_E)
         movementDir.y = -1 * isPress;
 
     if(key == GLFW_KEY_D)
@@ -380,7 +357,10 @@ static void update() {
         currentViewport.rotation.y = misc::clamp(currentViewport.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
     }
     if (movementDir.lengthSuqare() != 0) {
-        vec3<double> movement = currentViewport.rightDir() * movementDir.x + currentViewport.forwardDir() * movementDir.y;
+		double projection[3][3];
+		currentViewport.localToGlobalSpace(&projection);
+		
+        vec3<double> movement = vecMult(projection, movementDir);
 		//vec3<double> movement = vec3<double>{ movementDir.x, movementDir.y, 0.0 };
         currentViewport.position += movement.normalized() * currentMovementSpeed
             * (shift ? 1.0*speedModifier : 1)
@@ -399,27 +379,64 @@ static GLuint time_u;
 static GLuint mouseX_u;
 static GLuint chunkUBO;
 static GLuint projection_u;
+static GLuint model_matrix_u, chunkNew_u;
+
+static GLuint chunkIndex_b;
+
+static GLuint bgProjection_u;
+static GLuint bgRightDir_u;
+static GLuint bgTopDir_u;
 
 static GLuint mainProgram = 0;
+static GLuint bgProgram = 0;
 
-uint32_t chunk[16 * 16 * 16/2];
+//uint32_t chunk[16 * 16 * 16/2];
 
 static void reloadShaders() {
 	glDeleteProgram(mainProgram);
 	mainProgram = glCreateProgram();
     ShaderLoader sl{};
     //sl.addIdentityVertexShader("id");//.addScreenSizeTriangleStripVertexShader("vert");
-    sl.addShaderFromCode(R"(
-		#version 330
-		layout(location = 0) in vec3 in_position;
-		//layout(location = 1) in vec3 in_col;
+	
+	//https://gist.github.com/rikusalminen/9393151
+	//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
+	sl.addShaderFromCode(
+		R"(#version 420
+
 		uniform mat4 projection;
-		void main() {
-			gl_Position = projection * vec4(in_position, 1.0);// + vec4(in_col * 0.00001, 0);
-		})"
-		,
+		uniform mat4 model_matrix;
+		//uniform vec3 translation;
+		
+		void main()
+		{
+			int tri = gl_VertexID / 3;
+			int idx = gl_VertexID % 3;
+			int face = tri / 2;
+			int top = tri % 2;
+		
+			int dir = face % 3;
+			int pos = face / 3;
+		
+			int nz = dir >> 1;
+			int ny = dir & 1;
+			int nx = 1 ^ (ny | nz);
+		
+			vec3 d = vec3(nx, ny, nz);
+			float flip = 1 - 2 * pos;
+		
+			vec3 n = flip * d;
+			vec3 u = -d.yzx;
+			vec3 v = flip * d.zxy;
+		
+			float mirror = -1 + 2 * top;
+			vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
+			xyz = (xyz + 1) / 2 * 16;
+		
+			gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
+		}
+		)",
 		GL_VERTEX_SHADER,
-		"name"
+		"main vertex"
 	);
     sl.addShaderFromProjectFileName("shaders/main.shader", GL_FRAGMENT_SHADER, "Main shader");
 
@@ -439,10 +456,10 @@ static void reloadShaders() {
     mouseX_u = glGetUniformLocation(mainProgram, "mouseX");
 
 
-    //position_u = glGetUniformLocation(mainProgram, "position");
     rightDir_u = glGetUniformLocation(mainProgram, "rightDir");
     topDir_u = glGetUniformLocation(mainProgram, "topDir");
 	projection_u = glGetUniformLocation(mainProgram, "projection");
+	model_matrix_u = glGetUniformLocation(mainProgram, "model_matrix");
 	
 	//images
     GLuint textures[1];
@@ -451,6 +468,7 @@ static void reloadShaders() {
     loadGLImages<1>(textures, paths);
 
     GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
+    chunkNew_u = glGetUniformLocation(mainProgram, "chunkNew");
 
     glUniform1i(atlasTex_u, 0);
 
@@ -464,55 +482,70 @@ static void reloadShaders() {
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);*/
 	
-	GLuint chunkIndex = glGetUniformBlockIndex(mainProgram, "Chunk");
+	chunkIndex_b = glGetUniformBlockIndex(mainProgram, "Chunk");
 	glGenBuffers(1, &chunkUBO);
-	glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO); 
-	glUniformBlockBinding(mainProgram, chunkIndex, 1);
+	glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO);
+	glUniformBlockBinding(mainProgram, chunkIndex_b, 1);
 	glBindBufferBase(GL_UNIFORM_BUFFER, 1, chunkUBO);
-	assert(sizeof chunk == 8192);
 	glBufferData(GL_UNIFORM_BUFFER, 8192+12, NULL, GL_DYNAMIC_DRAW);
-	glBufferSubData(GL_UNIFORM_BUFFER, 12, 8192, &chunk);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-}
-
-/*void invertMatrix3To(double const (&m)[3][3], double (*minv)[3][3]) {//https://stackoverflow.com/a/18504573/15291447
-double const det = 
-			m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) -
-            m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
-            m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-			
-			std::cout << det << '\n';
-
-double const invdet = 1.0 / det;
-
-(*minv)[0][0] = (m[1][1] * m[2][2] - m[2][1] * m[1][2]) / invdet;
-(*minv)[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / invdet;
-(*minv)[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / invdet;
-(*minv)[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) / invdet;
-(*minv)[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / invdet;
-(*minv)[1][2] = (m[1][0] * m[0][2] - m[0][0] * m[1][2]) / invdet;
-(*minv)[2][0] = (m[1][0] * m[2][1] - m[2][0] * m[1][1]) / invdet;
-(*minv)[2][1] = (m[2][0] * m[0][1] - m[0][0] * m[2][1]) / invdet;
-(*minv)[2][2] = (m[0][0] * m[1][1] - m[1][0] * m[0][1]) / invdet;
-}*/
-
-template<typename El, size_t r1, size_t c1r2, size_t c2>
-void matMult(El const (&m1)[r1][c1r2], El const (&m2)[c1r2][c2], El (*o)[r1][c2]) {
-	for(size_t c = 0; c < c2; c++) {
-		for(size_t r = 0; r < r1; r++) {
-			El sum(0);
-			for(size_t cr = 0; cr < c1r2; cr++)
-				sum += m1[r][cr] * m2[cr][c];
-			(*o)[r][c] = sum;
+	
+	glDeleteProgram(bgProgram);
+	bgProgram = glCreateProgram();
+	ShaderLoader bgsl{};
+	bgsl.addScreenSizeTriangleStripVertexShader("bg vertex");
+	bgsl.addShaderFromCode(R"(#version 430
+		in vec4 gl_FragCoord;
+		out vec4 color;
+		
+		uniform mat4 projection; //from local space to screen
+		uniform uvec2 windowSize;
+		
+		uniform vec3 rightDir, topDir;
+		
+		vec3 background(const vec3 dir) {
+			const float t = 0.5 * (dir.y + 1.0);
+			return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
 		}
-	}
-}
-template<typename El>
-vec3<El> vecMult(El const (&m1)[3][3], vec3<El> const &m2) {
-	static_assert(sizeof(m2) == sizeof(float[3][1]), "");
-	vec3<El> o;
-	matMult<El, 3, 3>(m1, *(float(*)[3][1])(void*)&m2, (float(*)[3][1])(void*)&o);
-	return o;
+		void main() {
+			const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
+	
+			const vec3 forwardDir = cross(topDir, rightDir);
+			const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;
+			const vec3 rayDir = normalize(rayDir_);
+
+			color = vec4(background(rayDir), 1.0);
+		}
+	
+		)",
+		GL_FRAGMENT_SHADER,
+		"bg fragment"
+	);
+	
+	bgsl.attachShaders(bgProgram);
+
+    glLinkProgram(bgProgram);
+    glValidateProgram(bgProgram);
+	glUseProgram(bgProgram);
+	
+
+    bgsl.deleteShaders();
+	
+	glUniform2ui(glGetUniformLocation(bgProgram, "windowSize"), windowSize.x, windowSize.y);
+	bgProjection_u = glGetUniformLocation(bgProgram, "projection");
+	bgRightDir_u = glGetUniformLocation(bgProgram, "rightDir");
+	bgTopDir_u = glGetUniformLocation(bgProgram, "topDir");
+	
+	
+	float projection[4][4];
+	viewport_current().projectionMatrix(&projection);
+	
+	glUseProgram(bgProgram);
+	glUniformMatrix4fv(bgProjection_u, 1, GL_TRUE, &projection[0][0]);
+	
+	glUseProgram(mainProgram);
+	glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
+	
 }
 
 template<typename T, typename L>
@@ -523,6 +556,71 @@ inline void apply(size_t size, T &t, L&& l) {
 
 double sign(double const val) {
     return (0.0 < val) - (val < 0.0);
+}
+
+Chunks chunks{};
+
+siv::PerlinNoise perlin{ (uint32_t)rand() };
+static int viewDistance = 5;
+
+void generateChunk(vec3<int> const pos, Chunks::ChunkData &data) {
+	for(int y = 0; y < Chunks::chunkDim; ++y) 
+		for(int z = 0; z < Chunks::chunkDim; ++z)
+			for(int x = 0; x < Chunks::chunkDim; ++x) {
+				auto const value = perlin.octave2D(
+					(pos.x * Chunks::chunkDim + x) / 20.0, 
+					(pos.z * Chunks::chunkDim  + z) / 20.0, 
+					3);
+				auto const height = misc::map<double>(value, -1, 1, 5, 15);
+				if(height > (pos.y * Chunks::chunkDim + y))
+					data[x+y*Chunks::chunkDim+z*Chunks::chunkDim*Chunks::chunkDim] = 1;
+				else 
+					data[x+y*Chunks::chunkDim+z*Chunks::chunkDim*Chunks::chunkDim] = 0;
+			}
+	
+}
+
+void loadChunks() {
+	static std::vector<int8_t> chunksPresent{};
+	auto const viewWidth = (viewDistance*2+1);
+	chunksPresent.resize(viewWidth*viewWidth*viewWidth);
+	for(int i = 0; i< chunksPresent.size(); i++)
+		chunksPresent[i] = -1;
+	
+	auto const currentViewport{ viewport_current() };
+	vec3<int32_t> playerChunk{ static_cast<vec3<int32_t>>((currentViewport.position / Chunks::chunkDim).appliedFunc<double(*)(double)>(floor)) };
+	
+	vec3<int32_t> b{viewDistance, viewDistance, viewDistance};
+	
+	chunks.filterUsed([&](int chunkIndex) -> bool { 
+		auto const relativeChunkPos = chunks.chunksPos[chunkIndex] - playerChunk;
+		if(chunks.chunkNew[chunkIndex]>0) chunks.chunkNew[chunkIndex]--;
+		if(relativeChunkPos.in(-b, b)) {
+			auto const index2 = relativeChunkPos + b;
+			chunksPresent[index2.x + index2.y * viewWidth  + index2.z * viewWidth * viewWidth] = 1;
+			
+			return true;
+		} 
+		return false;
+	});
+	
+	for(int i = 0; i < viewWidth; i ++) {
+		for(int j = 0; j < viewWidth; j ++) {
+			for(int k = 0; k < viewWidth; k ++) {
+				int index = chunksPresent[i+j*viewWidth+k*viewWidth*viewWidth];
+				if(index == -1) {//generate chunk
+					vec3<int32_t> const relativeChunkPos{ vec3<int32_t>{i, j, k} - b };
+					vec3<int32_t> const chunkPos{ relativeChunkPos + playerChunk };
+				
+					int const chunkIndex{ chunks.used[chunks.reserve()] };
+					
+					chunks.chunksPos[chunkIndex] = chunkPos;
+					generateChunk(chunkPos, chunks.chunksData[chunkIndex]);
+					chunks.chunkNew[chunkIndex] = 30;
+				}
+			}
+		}
+	}
 }
 
 int main(void) {
@@ -538,7 +636,7 @@ int main(void) {
     monitor = NULL;
 #endif // !FULLSCREEN
 
-    window = glfwCreateWindow(windowSize.x, windowSize.y, "VMC", NULL, NULL);
+    window = glfwCreateWindow(windowSize.x, windowSize.y, "VMC", monitor, NULL);
 
     if (!window)
     {
@@ -556,6 +654,9 @@ int main(void) {
         return -1;
     }
 	
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	
     fprintf(stdout, "Using GLEW %s\n", glewGetString(GLEW_VERSION));
 
     //callbacks
@@ -564,149 +665,11 @@ int main(void) {
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetScrollCallback(window, scroll_callback);
 
-	for(int i = 0; i < (16*16*16/2); i ++) 
-		chunk[i] = 0;
-	
-	for (unsigned z = 0; z < 16; ++z)
-		for (unsigned y = 0; y < 16; ++y)
-			for (unsigned x = 0; x < 16; ++x) {
-				bool is =  (rand() % 16) < (16 - y);
-				unsigned index_ = (x + y*16 + z*16*16);
-				unsigned index = index_ / 2;
-				unsigned shift = (index_ % 2) * 16;
-				chunk[index] |= uint32_t(is) << shift;
-			}
-			
-  float near = 0.1;
-  float far = 100.0;
-  float fov = 90;
-  float aspect = (float) windowSize_d.y / (float) windowSize_d.x;
-  float fovRad = 1.0 / tan(fov / 360.0 * PI); 
-	
-Triangle<float> chunk_1[] = {
-    Triangle<float>{
-		vec3<float>{-1.0f,-1.0f,-1.0f},
-		vec3<float>{-1.0f,-1.0f, 1.0f},
-		vec3<float>{-1.0f, 1.0f, 1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f, 1.0f,-1.0f}, 
-    	vec3<float>{-1.0f,-1.0f,-1.0f},
-    	vec3<float>{-1.0f, 1.0f,-1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f,-1.0f, 1.0f},
-    	vec3<float>{-1.0f,-1.0f,-1.0f},
-    	vec3<float>{1.0f,-1.0f,-1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f, 1.0f,-1.0f},
-    	vec3<float>{1.0f,-1.0f,-1.0f},
-    	vec3<float>{-1.0f,-1.0f,-1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{-1.0f,-1.0f,-1.0f},
-    	vec3<float>{-1.0f, 1.0f, 1.0f},
-    	vec3<float>{-1.0f, 1.0f,-1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f,-1.0f, 1.0f},
-    	vec3<float>{-1.0f,-1.0f, 1.0f},
-    	vec3<float>{-1.0f,-1.0f,-1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{-1.0f, 1.0f, 1.0f},
-    	vec3<float>{-1.0f,-1.0f, 1.0f},
-    	vec3<float>{1.0f,-1.0f, 1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f, 1.0f, 1.0f},
-    	vec3<float>{1.0f,-1.0f,-1.0f},
-    	vec3<float>{1.0f, 1.0f,-1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f,-1.0f,-1.0f},
-    	vec3<float>{1.0f, 1.0f, 1.0f},
-    	vec3<float>{1.0f,-1.0f, 1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f, 1.0f, 1.0f},
-    	vec3<float>{1.0f, 1.0f,-1.0f},
-    	vec3<float>{-1.0f, 1.0f,-1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f, 1.0f, 1.0f},
-    	vec3<float>{-1.0f, 1.0f,-1.0f},
-    	vec3<float>{-1.0f, 1.0f, 1.0f}
-	},
-    Triangle<float>{
-		vec3<float>{1.0f, 1.0f, 1.0f},
-    	vec3<float>{-1.0f, 1.0f, 1.0f},
-    	vec3<float>{1.0f,-1.0f, 1.0f}
-	}
-};
-	/*static const vec3<double> chunk[8] {
-		 vec3<double>(0, 0, 0)
-		,vec3<double>(0, 0, 1)
-		,vec3<double>(0, 1, 0)
-		,vec3<double>(0, 1, 1)
-		,vec3<double>(1, 0, 0)
-		,vec3<double>(1, 0, 1)
-		,vec3<double>(1, 1, 0)
-		,vec3<double>(1, 1, 1)
-	};*/
-
-	//rand();
-	//rand();
-	//rand();
-	//rand();
-	//rand();
-	//rand();
-	
-	/*//test
-	auto const t = Triangle<double> {
-		vec3<double>((rand()-16000.0) / 20000.0, (rand()-16000.0) / 20000.0, (rand()-20000.0) / 20000.0),
-		vec3<double>((rand()-16000.0) / 20000.0, (rand()-16000.0) / 20000.0, rand() / 20000.0),
-		vec3<double>((rand()-16000.0) / 20000.0, (rand()-16000.0) / 20000.0, rand() / 20000.0)
-	};
-	
-	std::vector<Triangle<double>> tris{};
-	t.intersectPlane(
-		vec3<double>(0.0, 0.0, 0.0),
-		vec3<double>(0.0, 0.0, 1.0),
-		tris
-	);
-	
-	std::cout << t << "\n\n";
-	
-	for(int i = 0; i < tris.size(); i ++) 
-		std::cout << tris[i] << ",\n";
-	
-	exit(0);*/
-	
-	apply(12, chunk_1, [](Triangle<float> &it, size_t i) -> bool {
-		it.apply(
-			[](vec3<float> &vert, int i_) {
-				vert = vert.applied([](float const el, int i__) -> double { return (el + 1) / 2 * 16; });
-			}
-		);
-		return false;
-	});
-	
-
-	GLuint vbo;
-	glGenBuffers(1, &vbo);
-	
-	GLuint vao;
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glBindVertexArray(0); 
 
 	//load shaders
 	reloadShaders();
+	
+	loadChunks();
 	
 	while ((err = glGetError()) != GL_NO_ERROR)
     {
@@ -717,20 +680,23 @@ Triangle<float> chunk_1[] = {
 
     while (!glfwWindowShouldClose(window))
     {
-        //sending
-        auto& currentViewport = viewport_current();
-        auto& pos = currentViewport.position;
-        const auto rightDir{ currentViewport.rightDir() };
-        const auto topDir{ currentViewport.topDir() };
-        //glUniform3f(position_u, currentViewport.position.x, currentViewport.position.y, currentViewport.position.z);
+		auto &currentViewport = viewport_current();
+        vec3<double> const pos{ currentViewport.position };
+        auto const rightDir{ currentViewport.rightDir() };
+        auto const topDir{ currentViewport.topDir() };
+		
+		//glClear(GL_COLOR_BUFFER_BIT);
+		
+		glUseProgram(bgProgram);
+		glUniform3f(bgRightDir_u, rightDir.x, rightDir.y, rightDir.z);
+        glUniform3f(bgTopDir_u, topDir.x, topDir.y, topDir.z);
+		
+		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
+		
+		
+		glUseProgram(mainProgram);
         glUniform3f(rightDir_u, rightDir.x, rightDir.y, rightDir.z);
         glUniform3f(topDir_u, topDir.x, topDir.y, topDir.z);
-		
-		float arr[3] = { (float)-pos.x, (float)-pos.y, (float)-pos.z };
-		glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO); 
-		static_assert(sizeof arr == 12, "");
-		glBufferSubData(GL_UNIFORM_BUFFER, 0, 12, &arr);
-		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
         glUniform1f(mouseX_u, mousePos.x / windowSize_d.x);
 
@@ -739,141 +705,85 @@ Triangle<float> chunk_1[] = {
                 std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count()
             )
         );
-
-        glClear(GL_COLOR_BUFFER_BIT);
 		
-		//GLfloat verts_proj[36*3];
-	
+		
 		float toLoc[3][3];
 		float toGlob[3][3];
-		viewport_current().localToGlobalSpace(&toGlob);
-		viewport_current().globalToLocalSpace(&toLoc);
-		
-		int const constexpr trisSize = 2;
-		struct Tris {
-			std::vector<Triangle<float>> (triss[trisSize]){};
-			int trissIndex = 0;
-
-			std::vector<Triangle<float>> &prev() {
-				return triss[(trissIndex+trisSize-1)%trisSize];
-			}
-			std::vector<Triangle<float>> &cur() {
-				return triss[trissIndex];
-			}
-			std::vector<Triangle<float>> &next() {
-				return triss[(trissIndex+1)%trisSize];
-			}
-			
-			Tris &operator++() {
-				cur().clear();
-				trissIndex = (trissIndex+1) % trisSize;
-				return *this;
-			}
+		currentViewport.localToGlobalSpace(&toGlob);
+		currentViewport.globalToLocalSpace(&toLoc);
+		vec3<int32_t> const playerChunk{ static_cast<vec3<int32_t>>((pos / Chunks::chunkDim).appliedFunc<double(*)(double)>(floor)) };
+		auto const playerPosInChunk{ 
+			pos.applied([](auto const it, auto ignore) -> auto { return misc::modd(it, 16); }) 
 		};
 		
-		Tris tris{};
-		tris.cur().reserve(12);
+		float const toLoc4[4][4] = {
+			{ toLoc[0][0], toLoc[0][1], toLoc[0][2], 0 },
+			{ toLoc[1][0], toLoc[1][1], toLoc[1][2], 0 },
+			{ toLoc[2][0], toLoc[2][1], toLoc[2][2], 0 },
+			{ 0          , 0          , 0          , 1 },
+		};
 		
-		for(int i = 0; i < 12; i ++) 
-			tris.cur().push_back(chunk_1[i].applied([&](vec3<float> const &vert, int const i) -> vec3<float> { return vert - pos; }));
-		
-		//culling
-		if(false){//near
-			vec3<float> const orig{ vecMult(toGlob, vec3<float>{ 0, 0, 0.01 }) };
-			vec3<float> const normal{ vecMult(toGlob, vec3<float>{ 0, 0, 1 }) };
-			
-			for(int i = 0; i < tris.cur().size(); i++) {
-				tris.cur()[i].intersectPlane(
-					orig,
-					normal,
-					tris.next()
-				);
-			}
-			++tris;
+		struct ChunkSort {
+			double sqDistance;
+			int chunkIndex;
+		};
+		std::vector<ChunkSort> chunksSorted{};
+		chunksSorted.reserve(chunks.used.size());
+		for(auto const chunkIndex : chunks.used) {
+			auto const chunkPos{ chunks.chunksPos[chunkIndex] };
+			vec3<float> const relativeChunkPos{ 
+				static_cast<decltype(playerPosInChunk)>(chunkPos-playerChunk)*Chunks::chunkDim
+				+(Chunks::chunkDim/2.0f)
+				-playerPosInChunk
+			};
+			chunksSorted.push_back({ relativeChunkPos.lengthSuqare(), chunkIndex });
 		}
+		std::sort(chunksSorted.begin(), chunksSorted.end(), [](ChunkSort const c1, ChunkSort const c2) -> bool {
+			return c1.sqDistance > c2.sqDistance; //chunks located nearer are rendered last
+		});
 		
-		if(false){//sides
-			float ar = (windowSize_d.x / windowSize_d.y);
-			vec3<float> planesRay[4]={
-				vec3<float>{  ar,  0, 0 },
-				vec3<float>{ -ar,  0, 0 },
-				vec3<float>{  0,  1, 0 },
-				vec3<float>{  0, -1, 0 }
+		for(auto const [_ignore_, chunkIndex] : chunksSorted) {
+			auto const chunkPos{ chunks.chunksPos[chunkIndex] };
+			auto const &chunkData{ chunks.chunksData[chunkIndex] };
+			vec3<float> const relativeChunkPos{ 
+				static_cast<decltype(playerPosInChunk)>(chunkPos-playerChunk)*Chunks::chunkDim
+				-playerPosInChunk
 			};
 			
-			auto const forward{ vecMult<float>(toGlob, currentViewport.forwardDir()) };
-			for(int i = 0; i < 4; i ++) {	
-				vec3<float> const orig{ vecMult(toGlob, planesRay[i]).normalized() };
-	
-				vec3<float> const rayAlongPlane2{ orig.cross(forward) };
-				vec3<float> normal{ rayAlongPlane2.cross(orig) };
+			glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO); 
 				
-				auto &cur = tris.cur();
-				auto &next = tris.next();
-				for(int i = 0; i < cur.size(); i++) {
-					cur[i].intersectPlane(
-						orig,
-						normal,
-						next
-					);
-				}
-				++tris;
-			}
+			static_assert(sizeof relativeChunkPos == 12, "");
+			glBufferSubData(GL_UNIFORM_BUFFER, 0, 12, &relativeChunkPos);
+			static_assert(sizeof chunkData == 8192, "");
+			glBufferSubData(GL_UNIFORM_BUFFER, 12, 8192, &chunkData);
+				
+			glBindBuffer(GL_UNIFORM_BUFFER, 0);
+			
+			float const translation4[4][4] ={
+				{ 1, 0, 0, relativeChunkPos.x },
+				{ 0, 1, 0, relativeChunkPos.y },
+				{ 0, 0, 1, relativeChunkPos.z },
+				{ 0, 0, 0, 1                  },
+			};
+	
+			float modelMatrix[4][4];
+			misc::matMult(toLoc4, translation4, &modelMatrix);
+			
+			//for(int i = 0; i < 4; (std::cout << '\n'), i++) 
+			//	for(int j = 0; j < 4; j ++) std::cout << modelMatrix[i][j] << ' ';
+			glUniform1i(chunkNew_u, chunks.chunkNew[chunkIndex]!=0);
+			glUniformMatrix4fv(model_matrix_u, 1, GL_TRUE, &modelMatrix[0][0]);
+			glDrawArrays(GL_TRIANGLES, 0, 36);
 		}
 		
-		//projection
-		vec3<float> verts[3];
-		int index = 0, chIndex = 0;
-		apply(12, tris.cur(), [&](Triangle<float>const &it, size_t const i) -> bool {
-			tris.next().push_back(
-				it.applied([&](vec3<float> vert, size_t const i_) -> vec3<float> {
-					return vecMult(toLoc, vert);
-				})
-			);
-			return false;
-		});
-		++tris;
-		
-		auto &cur = tris.cur();
-		
-		
-		glBindBuffer(GL_ARRAY_BUFFER, vbo);
-		
-		float projection[4][4];
-		currentViewport.projectionMatrix(&projection);
-		glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
-		
-		glBufferData(
-			GL_ARRAY_BUFFER, cur.size()*sizeof(float)*3*3,
-			&cur[0], GL_DYNAMIC_DRAW
-		);
-
-
-		glBindVertexArray(vao);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), nullptr);
-		glEnableVertexAttribArray(0);
-
-		glDrawArrays(GL_TRIANGLES, 0, cur.size() * 3);
-
-
-		glDisableVertexAttribArray(0);
-		glBindBuffer(GL_ARRAY_BUFFER, 0);
-		glBindVertexArray(0);
-   
 		glfwSwapBuffers(window);
 		glfwPollEvents();
+		
+		loadChunks();
 
-        //glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
-
-
-        //glfwSwapBuffers(window);
-
-        //glfwPollEvents();
 		
         while ((err = glGetError()) != GL_NO_ERROR)
-        {
-            std::cout << "glError: " << err << std::endl;
-        }
+            std::cout << "glError 2: " << err << std::endl;
 
         update();
     }

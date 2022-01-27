@@ -25,6 +25,7 @@ public:
 	void deleteShaders();
 };
 
+
 inline GLuint ShaderLoader::addScreenSizeTriangleStripVertexShader(const std::string& name) {
 	return this->addShaderFromCode(
 		"\n#version 300 es"
