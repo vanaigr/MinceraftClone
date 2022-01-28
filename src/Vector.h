@@ -95,6 +95,10 @@ public:
 			action(this->y)
 		);
 	}
+	
+	inline constexpr float cross(vec2<C> o) const {
+		return x*o.y - y*o.x;
+	}
 };
 
 template<typename C>
@@ -158,6 +162,14 @@ public:
 		y /= o.y;
 		z /= o.z;
 		return *this;
+	}
+	
+	inline constexpr bool operator==(const vec3<C> o) const {
+		return x == o.x && y == o.y && z == o.z;
+	}
+	
+	inline constexpr bool operator!=(const vec3<C> o) const {
+		return !(*this == o);
 	}
 
 	template<typename C2>

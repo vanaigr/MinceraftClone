@@ -19,6 +19,9 @@
 #include<vector>
 #include<array>
 
+
+#include<limits>
+
 # define PI 3.14159265358979323846
 
 //#define FULLSCREEN
@@ -198,29 +201,6 @@ struct viewport {
 		);
 	}
 	
-	/*
-		Mat4x4 projMat = new Mat4x4();
-		projMat.m[0][0] = aspect * fovRad;
-		projMat.m[1][1] = fovRad;
-		projMat.m[2][2] = far / (far - near);
-		projMat.m[3][2] = (-far * near) / (far - near);
-		projMat.m[2][3] = 1f;
-		//projMat.m[3][3] = 0;
-  
-		{ aspect * fovRad, 0, 0             , 0 } 
-		{ 0,          fovRad, 0             , 0 }
-		{ 0, 0         , far / (far - near), (-far * near) / (far - near) }
-		{ 0, 0,                           1, 0 }
-  
-		far * (z - near) / (far-near)
-  
-		far * (z - near) / (far-near)
-  
-  
-		map = lerp(0, far-near, unlerp(near, far, z));
-  
-		return (z - near) / (far - near) * far;
-	*/
 	template<typename O, typename = std::enable_if_t<std::is_convertible<double, O>::value>>
 	void projectionMatrix(O (*mat_out)[4][4]) const {
 		O const pm[4][4] = {
@@ -372,14 +352,13 @@ static void update() {
     pmousePos = mousePos;
 }
 
-//static GLuint position_u;
 static GLuint rightDir_u;
 static GLuint topDir_u;
 static GLuint time_u;
 static GLuint mouseX_u;
 static GLuint chunkUBO;
 static GLuint projection_u;
-static GLuint model_matrix_u, chunkNew_u;
+static GLuint chunkNew_u;
 
 static GLuint chunkIndex_b;
 
@@ -390,51 +369,17 @@ static GLuint bgTopDir_u;
 static GLuint mainProgram = 0;
 static GLuint bgProgram = 0;
 
-//uint32_t chunk[16 * 16 * 16/2];
-
 static void reloadShaders() {
 	glDeleteProgram(mainProgram);
 	mainProgram = glCreateProgram();
     ShaderLoader sl{};
-    //sl.addIdentityVertexShader("id");//.addScreenSizeTriangleStripVertexShader("vert");
-	
-	//https://gist.github.com/rikusalminen/9393151
-	//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
-	sl.addShaderFromCode(
-		R"(#version 420
 
-		uniform mat4 projection;
-		uniform mat4 model_matrix;
-		//uniform vec3 translation;
-		
-		void main()
-		{
-			int tri = gl_VertexID / 3;
-			int idx = gl_VertexID % 3;
-			int face = tri / 2;
-			int top = tri % 2;
-		
-			int dir = face % 3;
-			int pos = face / 3;
-		
-			int nz = dir >> 1;
-			int ny = dir & 1;
-			int nx = 1 ^ (ny | nz);
-		
-			vec3 d = vec3(nx, ny, nz);
-			float flip = 1 - 2 * pos;
-		
-			vec3 n = flip * d;
-			vec3 u = -d.yzx;
-			vec3 v = flip * d.zxy;
-		
-			float mirror = -1 + 2 * top;
-			vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-			xyz = (xyz + 1) / 2 * 16;
-		
-			gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
+	sl.addShaderFromCode(R"(#version 420
+		layout(location = 0) in vec2 in_position;
+		void main() {
+			gl_Position = vec4(in_position.xy, 0, 1);
 		}
-		)",
+	)",
 		GL_VERTEX_SHADER,
 		"main vertex"
 	);
@@ -459,7 +404,6 @@ static void reloadShaders() {
     rightDir_u = glGetUniformLocation(mainProgram, "rightDir");
     topDir_u = glGetUniformLocation(mainProgram, "topDir");
 	projection_u = glGetUniformLocation(mainProgram, "projection");
-	model_matrix_u = glGetUniformLocation(mainProgram, "model_matrix");
 	
 	//images
     GLuint textures[1];
@@ -623,6 +567,78 @@ void loadChunks() {
 	}
 }
 
+static std::array<vec2<float>, 6> projectChunk(float const (&projectionMatrix)[4][4], float const (&chunkToLocal)[4][4]) { //the function returns convex hull of projected chunk
+	static constexpr std::array<vec3<float>,8> const verts {
+		vec3<float>{ 0, 0, 0 }, vec3<float>{ 0, 0, Chunks::chunkDim }, vec3<float>{ 0, Chunks::chunkDim, 0 }, vec3<float>{ 0, Chunks::chunkDim, Chunks::chunkDim }, 
+		vec3<float>{ Chunks::chunkDim, 0, 0 }, vec3<float>{ Chunks::chunkDim, 0, Chunks::chunkDim }, vec3<float>{ Chunks::chunkDim, Chunks::chunkDim, 0 }, vec3<float>{ Chunks::chunkDim, Chunks::chunkDim, Chunks::chunkDim }, 
+	};
+	
+	std::array<vec2<float>,8> projectedVerts{};
+	for(int i{0}; i < verts.size(); ++i) {
+		float vert_1[4][1] { verts[i].x, verts[i].y, verts[i].z, 1 };
+		float vert_2[4][1];
+		
+		misc::matMult(chunkToLocal, vert_1, &vert_2);
+		misc::matMult(projectionMatrix, vert_2, &vert_1);
+		
+		vec2<float> newCoord{ vert_1[0][0], vert_1[1][0] };
+		if(vert_1[3][0] != 0) newCoord /= abs(vert_1[3][0]);
+		
+		projectedVerts[i] = newCoord;
+	}
+	
+	std::array<vec2<float>,6> convexHull{};
+	
+	{ //first vertex must be part of the convex hull
+		float minX{ std::numeric_limits<float>::infinity() }; 
+		int minI{ -1 };
+		
+		for(int i{0}; i < projectedVerts.size(); ++i) {
+			float const curX{ projectedVerts[i].x };
+			if(curX < minX) {
+				minX = curX;
+				minI = i;
+			}
+		}
+		
+		if(minI == -1) { //something went horribly wrong
+			for(int i{0}; i < convexHull.size(); ++i) convexHull[i] = vec2<float>{0,0};
+			return convexHull;
+		}
+		std::swap(projectedVerts[0], projectedVerts[minI]); 
+		convexHull[0] = projectedVerts[0];
+	}
+	
+	
+	
+	for(int projectionIndex{1}; projectionIndex < convexHull.size(); ++projectionIndex) { 
+		auto const first{ convexHull[projectionIndex-1] };
+		
+		for(int i = projectionIndex; i < projectedVerts.size(); ++i) {
+			auto const secondCandidate{ projectedVerts[i] };
+			auto const toCand{ secondCandidate - first };
+			
+			for(int j{projectionIndex}; j < projectedVerts.size(); j ++) {
+				if(j == i) continue;
+				auto const otherVerex{ projectedVerts[j] };
+				auto const toOther{ otherVerex - first };
+			
+				if(toCand.cross(toOther) < -0.0f) goto wrongVertex; //all (remaining) vertices must lie on the same side of the line
+			}
+			
+			std::swap(projectedVerts[projectionIndex], projectedVerts[i]); //move all vertices that define projected chunk boundary to the beginning of the array
+			convexHull[projectionIndex] = projectedVerts[projectionIndex];
+			break;
+			
+			wrongVertex:
+			continue;
+		}
+	}
+	
+	return convexHull;
+}
+
+
 int main(void) {
     GLFWwindow* window;
 
@@ -670,6 +686,24 @@ int main(void) {
 	reloadShaders();
 	
 	loadChunks();
+	
+	
+	GLuint vbo;
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(std::array<vec2<float>, 12>{}), NULL, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	
+	GLuint vao;
+	glGenVertexArrays(1, &vao);
+	
+	glBindVertexArray(vao);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0); 
 	
 	while ((err = glGetError()) != GL_NO_ERROR)
     {
@@ -742,13 +776,19 @@ int main(void) {
 			return c1.sqDistance > c2.sqDistance; //chunks located nearer are rendered last
 		});
 		
+		float projection[4][4];
+		viewport_current().projectionMatrix(&projection);
+		
 		for(auto const [_ignore_, chunkIndex] : chunksSorted) {
 			auto const chunkPos{ chunks.chunksPos[chunkIndex] };
 			auto const &chunkData{ chunks.chunksData[chunkIndex] };
+			vec3<int32_t> const relativeChunkPos_{ chunkPos-playerChunk };
 			vec3<float> const relativeChunkPos{ 
-				static_cast<decltype(playerPosInChunk)>(chunkPos-playerChunk)*Chunks::chunkDim
+				static_cast<decltype(playerPosInChunk)>(relativeChunkPos_)*Chunks::chunkDim
 				-playerPosInChunk
 			};
+			
+			glUniform1i(chunkNew_u, 0);
 			
 			glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO); 
 				
@@ -759,21 +799,58 @@ int main(void) {
 				
 			glBindBuffer(GL_UNIFORM_BUFFER, 0);
 			
-			float const translation4[4][4] ={
-				{ 1, 0, 0, relativeChunkPos.x },
-				{ 0, 1, 0, relativeChunkPos.y },
-				{ 0, 0, 1, relativeChunkPos.z },
-				{ 0, 0, 0, 1                  },
-			};
-	
-			float modelMatrix[4][4];
-			misc::matMult(toLoc4, translation4, &modelMatrix);
-			
-			//for(int i = 0; i < 4; (std::cout << '\n'), i++) 
-			//	for(int j = 0; j < 4; j ++) std::cout << modelMatrix[i][j] << ' ';
-			glUniform1i(chunkNew_u, chunks.chunkNew[chunkIndex]!=0);
-			glUniformMatrix4fv(model_matrix_u, 1, GL_TRUE, &modelMatrix[0][0]);
-			glDrawArrays(GL_TRIANGLES, 0, 36);
+			if(relativeChunkPos_ != 0) {
+				float const translation4[4][4] ={
+					{ 1, 0, 0, relativeChunkPos.x },
+					{ 0, 1, 0, relativeChunkPos.y },
+					{ 0, 0, 1, relativeChunkPos.z },
+					{ 0, 0, 0, 1                  },
+				};
+		
+				float chunkToLocal[4][4];
+				
+				misc::matMult(toLoc4, translation4, &chunkToLocal);
+				
+				std::array<vec2<float>, 6> const verts = projectChunk(projection, chunkToLocal);
+				
+				std::array<vec2<float>, 12> tris{};
+				for(int i = 0; i < 4; ++i) {
+					tris[i*3] = verts[0];
+					tris[i*3+1] = verts[i+1];
+					tris[i*3+2] = verts[i+2];
+				}
+				
+				glBindBuffer(GL_ARRAY_BUFFER, vbo);
+				glBufferSubData(
+					GL_ARRAY_BUFFER, 0, sizeof(tris),
+					&tris[0]
+				);
+				glBindBuffer(GL_ARRAY_BUFFER, 0);
+				
+				glBindVertexArray(vao);
+				glEnableVertexAttribArray(0);
+				glDrawArrays(GL_TRIANGLES, 0, 12);
+				glDisableVertexAttribArray(0);
+			}
+			else {
+				static constexpr float const floats[] = {
+					-1, -1,
+					-1, +1,
+					+1, -1,
+					+1, +1
+				};					
+				glBindBuffer(GL_ARRAY_BUFFER, vbo);
+				glBufferSubData(
+					GL_ARRAY_BUFFER, 0, sizeof(floats),
+					&floats[0]
+				);
+				glBindBuffer(GL_ARRAY_BUFFER, 0);
+				
+				glBindVertexArray(vao);
+				glEnableVertexAttribArray(0);
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+				glDisableVertexAttribArray(0);
+			}
 		}
 		
 		glfwSwapBuffers(window);
@@ -790,7 +867,6 @@ int main(void) {
 
     glfwTerminate();
 	
-	//char dummy;
 	std::cin.ignore();
     return 0;
 }

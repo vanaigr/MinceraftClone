@@ -59,12 +59,11 @@ layout(binding = 2) buffer Blocks {
     Block blocks[]; //block 0 is special
 };
 
-bool ch16(const int i) {
-	return (i >= 0 && i < 16);
-}
 
 bool checkBoundaries(const ivec3 i) {
-	return ch16(i.x) && ch16(i.y) && ch16(i.z);
+	#define ch16(i) (i >= 0 && i < 16)
+		return ch16(i.x) && ch16(i.y) && ch16(i.z);
+	#undef ch16
 }
 
 bool isIntersection(const ivec3 i_v) {
@@ -148,11 +147,23 @@ struct BlockIntersection {
 	ivec3 side;
 };
 
-//                 (const) Ray, (out) BlockIntersection, 'coord along', 'other coords'
-#define checkPlane(ray        , intersection_out       , ca           , co            ) {\
+
+struct Optional_BlockIntersection {
+	bool is;
+	BlockIntersection it;
+};
+
+Optional_BlockIntersection empty_Optional_BlockIntersection() {
+	Optional_BlockIntersection a;
+	return a;
+}
+
+
+//Optional_BlockIntersection    (const) Ray, 'coord along', 'other coords'
+#define              checkPlane(ray        , ca           , co            ) {\
 	const bool dir = ray.dir.##ca > 0;\
 	const int dir_ = int(sign(ray.dir.##ca));\
-	if(dir_ == 0) return false;\
+	if(dir_ == 0) return empty_Optional_BlockIntersection();\
 	\
 	const float unscale = 1.0 / ray.dir.##ca;\
 	const vec2 step = ray.dir.##co * unscale;\
@@ -160,36 +171,50 @@ struct BlockIntersection {
 	const int nearest = clamp(int(ceil(ray.orig.##ca * dir_) * dir_), 0, 16);\
 	\
 	const vec2 startCoords = ray.orig.##co + (nearest - ray.orig.##ca) * step;\
+	\
+	const ivec3 signOfDir = ivec3(sign(ray.dir));\
+	const ivec3 boundaries = max(signOfDir, 0) * 16;\
 	for(int i = nearest; i != (dir ? 16 : 0); i+= dir_) {\
-			ivec3 index;\
-			if(dir)index.##ca = min(i, 15);\
-			else index.##ca = max(i-1, 0);\
-			index.##co = ivec2(floor(startCoords + step * (i-nearest)));\
+		ivec3 index;\
+		if(dir)index.##ca = min(i, 15);\
+		else index.##ca = max(i-1, 0);\
+		index.##co = ivec2(floor(startCoords + step * (i-nearest)));\
+		if(\
+			   (index.x - boundaries.x) * signOfDir.x <= 0\
+			&& (index.y - boundaries.y) * signOfDir.y <= 0\
+			&& (index.z - boundaries.z) * signOfDir.z <= 0\
+		) {\
 			if(isIntersection_s(index)) {\
 				ivec3 side = ivec3(0,0,0);\
 				side.##ca = -dir_;\
-				intersection_out = BlockIntersection(\
-					unscale * ((i-nearest) + (nearest - ray.orig.##ca))/*length(step * (i-nearest));*/,\
-					index,\
-					mod(startCoords + step * (i-nearest), 1.0),\
-					side\
+				return Optional_BlockIntersection(\
+					true,\
+					BlockIntersection(\
+						unscale * ((i-nearest) + (nearest - ray.orig.##ca))/*length(step * (i-nearest));*/,\
+						index,\
+						mod(startCoords + step * (i-nearest), 1.0),\
+						side\
+					)\
 				);\
-				return true;\
 			}\
+		} else return empty_Optional_BlockIntersection();\
+	}\
+	return empty_Optional_BlockIntersection();\
+}
+
+
+Optional_BlockIntersection checkX(const Ray ray) { /*return*/ checkPlane(ray, x, zy); }
+Optional_BlockIntersection checkY(const Ray ray) { /*return*/ checkPlane(ray, y, xz); } 
+Optional_BlockIntersection checkZ(const Ray ray) { /*return*/ checkPlane(ray, z, xy); }
+
+#define check(axis, min_intersection, min_t) {\
+	const Optional_BlockIntersection tmp = check##axis##(ray);\
+	if(tmp.is) {\
+		if(min_t > tmp.it.t) {\
+			min_intersection = tmp.it;\
+			min_t = tmp.it.t;\
 		}\
-	\
-	return false;\
-}
-
-
-bool checkX(const Ray ray, out BlockIntersection intersection_out) {
-	/*return*/ checkPlane(ray, intersection_out, x, zy);
-}
-bool checkY(const Ray ray, out BlockIntersection intersection_out) {
-	/*return*/ checkPlane(ray, intersection_out, y, xz);
-}
-bool checkZ(const Ray ray, out BlockIntersection intersection_out) {
-	/*return*/ checkPlane(ray, intersection_out, z, xy);
+	}\
 }
 
 void main() {
@@ -202,26 +227,11 @@ void main() {
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
 	
 	BlockIntersection min_intersection;
-	BlockIntersection cur_intersection;
 	float min_t = 1.0 / 0.0;
-	if(checkX(ray, cur_intersection)) {
-		if(min_t > cur_intersection.t) {
-			min_intersection = cur_intersection;
-			min_t = cur_intersection.t;
-		}
-	}
-	if(checkY(ray, cur_intersection)) {
-		if(min_t > cur_intersection.t) {
-			min_intersection = cur_intersection;
-			min_t = cur_intersection.t;
-		}
-	}
-	if(checkZ(ray, cur_intersection)) {
-		if(min_t > cur_intersection.t) {
-			min_intersection = cur_intersection;
-			min_t = cur_intersection.t;
-		}
-	}
+	
+	check(X, min_intersection, min_t);
+	check(Y, min_intersection, min_t);
+	check(Z, min_intersection, min_t);
 	
 	vec4 col;
 	if(min_t < 1000) {

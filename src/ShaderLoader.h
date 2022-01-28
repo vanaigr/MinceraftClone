@@ -18,7 +18,6 @@ public:
 	GLuint addShaderFromProjectFileName(const std::string& shaderCode, const unsigned int shaderType, const std::string& name = "");
 
 	GLuint addScreenSizeTriangleStripVertexShader(const std::string& name = "");
-	GLuint addIdentityVertexShader(const std::string& name = "");
 	GLuint addScreenCoordFragmentShader(const std::string& name = "");
 
 	void attachShaders(const unsigned int programId);
@@ -37,19 +36,6 @@ inline GLuint ShaderLoader::addScreenSizeTriangleStripVertexShader(const std::st
 		"\n    0.0,"
 		"\n    1.0);"
 		"\n}"
-		,
-		GL_VERTEX_SHADER,
-		name
-	);
-}
-
-inline GLuint ShaderLoader::addIdentityVertexShader(const std::string& name) {
-	return this->addShaderFromCode(R"(
-		#version 330
-		layout(location = 0) in vec3 in_position;
-		void main() {
-			gl_Position = vec4(in_position.xyz, 0.5);
-		})"
 		,
 		GL_VERTEX_SHADER,
 		name
