@@ -12,9 +12,9 @@ struct vec2
 	C x, y;
 
 public:
-	constexpr vec2() : x(0), y(0) {};
-	constexpr vec2(C value) : x(value), y(value) {};
-	constexpr vec2(C x_, C y_) : x(x_), y(y_) {};
+	inline constexpr vec2() : x(0), y(0) {};
+	inline constexpr vec2(C value) : x(value), y(value) {};
+	inline constexpr vec2(C x_, C y_) : x(x_), y(y_) {};
 
 	inline constexpr vec2<C> operator+(const vec2<C>& o) const {
 		return vec2(x + o.x, y + o.y);
@@ -99,7 +99,13 @@ public:
 	inline constexpr float cross(vec2<C> o) const {
 		return x*o.y - y*o.x;
 	}
+
 };
+
+template<typename C>
+constexpr inline std::ostream& operator<<(std::ostream& stream, vec2<C>const& v) {
+	return stream << '(' << v.x << "; " << v.y << ')';
+}
 
 template<typename C>
 struct vec3
@@ -107,9 +113,9 @@ struct vec3
 	C x, y, z;
 
 public:
-	constexpr vec3() : x(0), y(0), z(0) {};
-	constexpr vec3(C value) : x(value), y(value), z(value) {};
-	constexpr vec3(C x_, C y_, C z_) : x(x_), y(y_), z(z_) {};
+	inline constexpr vec3() : x(0), y(0), z(0) {};
+	inline constexpr vec3(C value) : x(value), y(value), z(value) {};
+	inline constexpr vec3(C x_, C y_, C z_) : x(x_), y(y_), z(z_) {};
 	
 	template<typename C2, typename = std::enable_if_t<std::is_convertible<C, C2>::value>>
 	inline constexpr operator vec3<C2>() const {
@@ -171,6 +177,14 @@ public:
 	inline constexpr bool operator!=(const vec3<C> o) const {
 		return !(*this == o);
 	}
+	
+	inline constexpr C const &operator[](size_t const index) const {
+		return *(&x + index);
+	}
+	
+	inline constexpr C &operator[](size_t const index) {
+		return *(&x + index);
+	}
 
 	template<typename C2>
 	inline constexpr vec3<C2> convertedTo() const {
@@ -189,21 +203,21 @@ public:
 		return x * o.x + y * o.y + z * o.z;
 	}
 
-	inline constexpr C lengthSuqare() const {
+	inline constexpr C lengthSquare() const {
 		return this->dot(*this);
 	}
 
 	inline constexpr C length() const {
-		return sqrt(this->lengthSuqare());
+		return sqrt(this->lengthSquare());
 	}
 
 	inline constexpr vec3<C> normalized() const {
 		return *this / this->length();
 	}
 
-	template<typename Action>
-	inline constexpr vec3<C> applied(Action&& action) const {
-		return vec3<C>(
+	template<typename Action, typename C2 = decltype(std::declval<Action>()(std::declval<C>(), 0))>
+	inline constexpr vec3<C2> applied(Action&& action) const {
+		return vec3<C2>(
 			action(this->x, 0),
 			action(this->y, 1),
 			action(this->z, 2)
@@ -228,31 +242,37 @@ public:
 };
 
 template<typename C>
-constexpr inline std::ostream& operator<<(std::ostream& stream, vec3<C>const& v) {
+inline constexpr std::ostream& operator<<(std::ostream& stream, vec3<C>const& v) {
 	return stream << '(' << v.x << "; " << v.y << "; " << v.z << ')';
 }
 
 template<typename El>
-	inline constexpr vec3<El> vecMult(El const (&m1)[3][3], vec3<El> const &m2) {
-		static_assert(sizeof(m2) == sizeof(El[3][1]), "");
-		vec3<El> o;
-		misc::matMult<El, 3, 3>(m1, *(El(*)[3][1])(void*)&m2, (El(*)[3][1])(void*)&o);
-		return o;
-	}
+inline constexpr vec3<El> vecMult(El const (&m1)[3][3], vec3<El> const &m2) {
+	static_assert(sizeof(m2) == sizeof(El[3][1]), "");
+	vec3<El> o;
+	misc::matMult<El, 3, 3>(m1, *(El(*)[3][1])(void*)&m2, (El(*)[3][1])(void*)&o);
+	return o;
+}
 	
-	template<class C>
-    static inline constexpr vec3<C> vec3lerp(const vec3<C> a, const vec3<C> b, const C f) noexcept {
-        return vec3<C>(
-			misc::lerp(a.x, b.x, f), 
-			misc::lerp(a.y, b.y, f),
-			misc::lerp(a.z, b.z, f)
-		);
-    }
-
+template<class C>
+inline constexpr vec3<C> vec3lerp(const vec3<C> a, const vec3<C> b, const C f) noexcept {
+	return vec3<C>(
+		misc::lerp(a.x, b.x, f), 
+		misc::lerp(a.y, b.y, f),
+		misc::lerp(a.z, b.z, f)
+	);
+}
 
 template<class C>
-    static inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const C f) noexcept {
-        return vec2<C>(misc::lerp(a.x, b.x, f), misc::lerp(a.y, b.y, f));
-    }
+inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const C f) noexcept {
+	return vec2<C>(misc::lerp(a.x, b.x, f), misc::lerp(a.y, b.y, f));
+}
 	
 using vec3f = vec3<float>;
+using vec3d = vec3<double>;
+using vec3i = vec3<int32_t>;
+
+using vec2f = vec2<float>;
+using vec2d = vec2<double>;
+
+using vec2i = vec2<int32_t>;

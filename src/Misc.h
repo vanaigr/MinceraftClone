@@ -2,19 +2,8 @@
 
 #include <type_traits>
 #include <stdint.h>
-#include "Vector.h"
 #include <cassert>
-
-#define print_msg(msg) { std::cout << (msg) << std::endl; }
-
 #include<iostream>
-#include<mutex>
-static std::mutex m{};
-
-inline void print(const char* msg, uint32_t arg) {
-    std::lock_guard<std::mutex> g{ m };
-    std::cout << msg << arg << std::endl;
-}
 
 namespace misc {
     constexpr double pi = 3.141592653589793238462643383279502884;
@@ -42,7 +31,7 @@ namespace misc {
         return x - static_cast<double>(y) * floor(x / static_cast<double>(y));
     }
 
-    constexpr int32_t mod(const int32_t x, const int32_t y) noexcept {
+    inline constexpr int32_t mod(const int32_t x, const int32_t y) noexcept {
         int32_t mod = x % y;
         // if the signs are different and modulo not zero, adjust result
         if ((x ^ y) < 0 && mod != 0) {
@@ -51,7 +40,7 @@ namespace misc {
         return mod;
     }
 
-    constexpr uint32_t umod(const uint32_t x, const uint32_t y) noexcept {
+    inline constexpr uint32_t umod(const uint32_t x, const uint32_t y) noexcept {
         return x % y;
     }
 
@@ -140,5 +129,10 @@ namespace misc {
 	template<typename V>
 	inline constexpr bool in(V const v, V const b1, V const b2) {
 		return (b1 < b2) ? (b1 < v && v < b2) : (b2 < v && v < b1);
+	}
+	
+	template <typename T> 
+	inline constexpr int sign(T val) {
+		return (T(0) < val) - (val < T(0));
 	}
 }
