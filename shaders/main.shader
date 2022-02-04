@@ -59,7 +59,6 @@ vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
         coord.y + atlasTileCount.y - (offset.y + 1)
     ) / atlasTileCount;
     return texture2D(atlas, uv).rgb;
-    //return vec3(t, 0, 0 );
 }
 
 bool checkBoundaries(const ivec3 i) {
@@ -143,78 +142,81 @@ Optional_BlockIntersection empty_Optional_BlockIntersection() {
 	return a;
 }
 
+Optional_BlockIntersection isInters(const Ray ray) {
+	const vec3 dir = ray.dir;
+	const ivec3 dir_ = ivec3(sign(dir));
+	const ivec3 positive_ = max(+dir_, ivec3(0,0,0));
+	const ivec3 negative_ = max(-dir_, ivec3(0,0,0));
+	
+	const vec3 stepLength = 1 / abs(dir);
+	
+	const  vec3 firstCellRow_f = floor(ray.orig + dir_);
+	const ivec3 firstCellRow   = ivec3(firstCellRow_f); 
+	const  vec3 firstCellDiff  = abs(ray.orig-firstCellRow_f - negative_); //distance to the frist border
+	
+	const vec3 border0Dist = -min(ray.orig, vec3(0,0,0)) * dir_; //steps to get to coord 0 if firstCell < 0
+	const vec3 border16Dist = -max(ray.orig-16, vec3(0,0,0)) * dir_; //steps to get to coord 15 if firstCell > 15
+	
+	const vec3 maxBorderDiff = max(border0Dist, border16Dist);
+	const ivec3 minSteps_vec = ivec3(floor(maxBorderDiff));
+	const vec3 minLen_vec = maxBorderDiff*stepLength;
+	
+	float minLen = max(max(minLen_vec.x, minLen_vec.y), minLen_vec.z);
+	
+	bvec3 outlide = lessThan(minLen_vec, vec3(minLen,minLen,minLen));
+	
+	ivec3 curSteps = 
+		 ivec3(not(outlide)) * ivec3(minSteps_vec) +
+		 ivec3(   (outlide)) * ivec3(max(ceil(minLen * abs(dir) - firstCellDiff),0)); //genIType mix(genIType x, genIType y, genBType a); - since version 4.50
+	
+	vec3 curLen = stepLength * firstCellDiff + stepLength * curSteps;
+	
+	const ivec3 farBoundaries = positive_ * 17 - 1;
+	
+	int i = 0;
+	for(; i < 100; i++) {
+		const float minCurLen = min(min(curLen.x, curLen.y), curLen.z);
+		const bvec3 minAxis_b = equal(curLen, vec3(1,1,1) * minCurLen);
+		const  vec3 minAxis_f = vec3(minAxis_b);
+		const ivec3 minAxis_i = ivec3(minAxis_b);
+		
+		const  ivec3 otherAxis_i = ivec3(not(minAxis_b));
+		const vec3 curCoordF = at(ray, minCurLen);
+		const vec3 curCoord = floor(at(ray, minCurLen));
+		
+		const ivec3 cellAt =  
+				+   minAxis_i * (firstCellRow + curSteps*dir_)
+				+ otherAxis_i * ivec3(floor(curCoord));
+				
+		
+		if(all(lessThan((cellAt - farBoundaries) * dir_, ivec3(0,0,0)))) {
+			const uint blockId = blockAt(cellAt);	
+			if(blockId != 0) { 
+				const vec3 blockCoord = curCoordF - curCoord;
+				vec2 uv = vec2(
+					dot(minAxis_f, blockCoord.zxx),
+					dot(minAxis_f, blockCoord.yzy)
+				);
+				ivec3 side = -minAxis_i*dir_;
+				return Optional_BlockIntersection(
+					true,    
+					BlockIntersection(
+						minCurLen,
+						cellAt,
+						blockId,
+						uv,
+						side
+					)
+				);
+			}
+		} else return empty_Optional_BlockIntersection();
+		
+		curSteps += minAxis_i;
+		curLen += minAxis_f * stepLength;
+	}
+	if(i == 100);//error
 
-//Optional_BlockIntersection    (const) Ray, 'coord along', 'other coords'
-#define              checkPlane(ray        , ca           , co            ) {                                                   \
-	const bool dir = ray.dir.##ca > 0;                                                                                          \
-	const int dir_ = int(sign(ray.dir.##ca));                                                                                   \
-	const int positive = max(dir_, 0);                                                                                   		\
-	const int negative = max(-dir_, 0);                                                                                   		\
-	if(dir_ == 0) return empty_Optional_BlockIntersection();                                                                    \
-	                                                                                                                            \
-	const float unscale = 1.0 / ray.dir.##ca;                                                                                   \
-	const vec2 step = ray.dir.##co * unscale;                                                                                   \
-	                                                                                                                            \
-	const int nearest = clamp(int(ceil(ray.orig.##ca * dir_) * dir_), 0, 16);                                                   \
-	                                                                                                                            \
-	const vec2 startCoords = ray.orig.##co + (nearest - ray.orig.##ca) * step;                                                  \
-	                                                                                                                            \
-	/*try to move ray inside the chunk bounds if in lies ooutide of them*/                                                      \
-	const vec2 toB1 = -max(startCoords - 16, 0)/step*dir_;                                                                      \
-	const vec2 toB2 = max(-startCoords, 0)     /step*dir_;                                                                      \
-																																\
-	/*minimum number of steps required for the ray to be in bounds*/                                                            \
-	const ivec2 minimumSteps = ivec2(ceil(max(toB1, toB2)));                                                              		\
-	const int minumumStep = max(minimumSteps.x, minimumSteps.y);                                                                \
-																																\
-	/*check if any of the axis requires negative number of steps to be in bounds*/                                              \
-	/*const vec2 negativeSteps = floor(min(toB1, toB2));                                                                   		\
-	if(any(lessThan(negativeSteps, vec2(0,0)))) return empty_Optional_BlockIntersection();*/									\
-																																\
-	const int startStep = nearest + minumumStep * dir_;																			\
-																																\
-	if(startStep-negative < 0 || startStep+positive > 16) return empty_Optional_BlockIntersection();							\
-	const ivec3 signOfDir = ivec3(sign(ray.dir));                                                                               \
-	const ivec3 farBoundaries = max(signOfDir, 0) * 17 - 1;                                                                     \
-	for(int i = startStep; i != 16*positive; i+= dir_) {                                                                    	\
-		ivec3 index;                                                                                                            \
-		index.##ca = i - negative;                                                                            					\
-		const vec2 other = startCoords + step * (i-nearest);																	\
-		index.##co = ivec2(floor(other));                                                    									\
-		if(all(lessThan((index - farBoundaries) * signOfDir, ivec3(0,0,0)))) {                                             		\
-			const uint block = blockAt(index);																					\
-			if(block!=0) {																										\
-				ivec3 side = ivec3(0,0,0);                          								                            \
-				side.##ca = -dir_;                                                                                              \
-				return Optional_BlockIntersection(                                                                              \
-					true,                                                                                                       \
-					BlockIntersection(                                                                                          \
-						unscale * (i - ray.orig.##ca),                     														\
-						index,                                                                                                  \
-						block,																									\
-						mod(startCoords + step * (i-nearest), 1.0),                                                             \
-						side                                                                                                    \
-					)                                                                                                           \
-				);                                                                                                              \
-			}                                                                                                                   \
-		} else break;                                                                       									\
-	}                                                                                                                           \
-	return empty_Optional_BlockIntersection();                                                                                  \
-}
-
-
-Optional_BlockIntersection checkX(const Ray ray) { /*return*/ checkPlane(ray, x, zy); }
-Optional_BlockIntersection checkY(const Ray ray) { /*return*/ checkPlane(ray, y, xz); } 
-Optional_BlockIntersection checkZ(const Ray ray) { /*return*/ checkPlane(ray, z, xy); }
-
-#define check(axis, min_intersection, min_t) {\
-	const Optional_BlockIntersection tmp = check##axis##(ray);\
-	if(tmp.is) {\
-		if(min_t > tmp.it.t) {\
-			min_intersection = tmp.it;\
-			min_t = tmp.it.t;\
-		}\
-	}\
+	return empty_Optional_BlockIntersection();
 }
 
 void main() {
@@ -226,19 +228,14 @@ void main() {
 	
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
 	
-	BlockIntersection min_intersection;
-	float min_t = 1.0 / 0.0;
-	
-	check(X, min_intersection, min_t);
-	check(Y, min_intersection, min_t);
-	check(Z, min_intersection, min_t);
+	const Optional_BlockIntersection intersection = isInters(ray);
 	
 	vec4 col;
-	if(min_t < 1000) {
-		const BlockIntersection i = min_intersection;
+	if(intersection.is) {
+		const BlockIntersection i = intersection.it;
 		const vec2 uv = i.uv;
-		bool isTop = i.side.y ==  1;
-		bool isBot = i.side.y == -1;
+		const bool isTop = i.side.y ==  1;
+		const bool isBot = i.side.y == -1;
 		col = vec4(
 				mix(
 				mix(
@@ -257,9 +254,7 @@ void main() {
 	}
 	else col = vec4(0,0,0,0);
 	
-	//col = vec4(min_intersection.test, 1);
-	
 	//if(chunkNew) col = mix(col, vec4(1,0,0,1),0.3);
 	
 	color = col;
-}
+}	
