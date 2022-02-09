@@ -18,7 +18,7 @@ inline int ImageLoad(char const* filename, Image* image) {
         char temp; // temporary color storage for bgr-rgb conversion.
         // make sure the file is there.
 		errno_t err;
-        if (err = fopen_s(&file, filename, "rb")) {
+        if ( (err = fopen_s(&file, filename, "rb")) ) {
             printf("File Not Found %s:%s\n", filename, strerror(err));
             return 0;
         }

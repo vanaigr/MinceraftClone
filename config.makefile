@@ -3,8 +3,8 @@ SOURCE_DIR=src
 OBJECT_DIR=obj
 CPP_EXCLUDES=  
 
-CFLAGS=-m64 -O3 -std=c++17 -pedantic -c -Wall -Wextra -Wno-dangling-else -Wno-unused-parameter -Wno-unused-variable -Xlinker /NODEFAULTLIB
-PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU
+CFLAGS=-m64 -O3 -std=c++17 -pedantic -c -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unneeded-internal-declaration -Wno-unused-function -Wno-unused-label -fuse-ld=lld-link
+PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU -D _CRT_SECURE_NO_WARNINGS
 
 LIBS_PATH=-L .\dependencies
 LIBS=-l GLEW\glew32s.lib -l GLFW\glfw3.lib -l msvcrt.lib
@@ -35,7 +35,7 @@ build: $(EXECUTABLE)
 $(EXECUTABLE): $(SOURCES) $(OBJECT_FILES)
 	@echo -------------------------------------------------
 	@echo building $@:
-	$(CC) $(LIBS_PATH) $(WIN_API_LIBS_PATH) $(LIBS) $(WIN_API_LIBS) $(OBJECT_FILES) -o "$@"
+	$(CC) $(LIBS_PATH) $(LIBS) $(WIN_API_LIBS) $(OBJECT_FILES) -o "$@"
 
 $(OBJECT_DIR)/%.o: $(SOURCE_DIR)/%.cpp
 	@echo -------------------------------------------------
@@ -48,5 +48,6 @@ clear-obj:
 	
 clear: clear-obj
 	@if exist "$(OBJECT_DIR)" rmdir $(EXECUTABLE)
+	
 
 #run: build

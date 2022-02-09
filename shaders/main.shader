@@ -29,8 +29,6 @@ uniform mat4 projection; //from local space to screen
 
 in vec3 vertColor;
 
-uniform bool chunkNew;
-
 uniform vec3 relativeChunkPos;
 
 
@@ -161,13 +159,13 @@ Optional_BlockIntersection isInters(const Ray ray) {
 	const ivec3 minSteps_vec = ivec3(floor(maxBorderDiff));
 	const vec3 minLen_vec = maxBorderDiff*stepLength;
 	
-	float minLen = max(max(minLen_vec.x, minLen_vec.y), minLen_vec.z);
+	const float minLen = max(max(minLen_vec.x, minLen_vec.y), minLen_vec.z);
 	
-	bvec3 outlide = lessThan(minLen_vec, vec3(minLen,minLen,minLen));
+	const bvec3 outside = lessThan(minLen_vec, vec3(minLen,minLen,minLen));
 	
 	ivec3 curSteps = 
-		 ivec3(not(outlide)) * ivec3(minSteps_vec) +
-		 ivec3(   (outlide)) * ivec3(max(ceil(minLen * abs(dir) - firstCellDiff),0)); //genIType mix(genIType x, genIType y, genBType a); - since version 4.50
+		 ivec3(not(outside)) * ivec3(minSteps_vec) +
+		 ivec3(   (outside)) * ivec3(max(ceil(minLen * abs(dir) - firstCellDiff),0)); //genIType mix(genIType x, genIType y, genBType a); - since version 4.50
 	
 	vec3 curLen = stepLength * firstCellDiff + stepLength * curSteps;
 	
@@ -182,11 +180,11 @@ Optional_BlockIntersection isInters(const Ray ray) {
 		
 		const  ivec3 otherAxis_i = ivec3(not(minAxis_b));
 		const vec3 curCoordF = at(ray, minCurLen);
-		const vec3 curCoord = floor(at(ray, minCurLen));
+		const ivec3 curCoord = ivec3(floor(at(ray, minCurLen)));
 		
 		const ivec3 cellAt =  
 				+   minAxis_i * (firstCellRow + curSteps*dir_)
-				+ otherAxis_i * ivec3(floor(curCoord));
+				+ otherAxis_i * curCoord;
 				
 		
 		if(all(lessThan((cellAt - farBoundaries) * dir_, ivec3(0,0,0)))) {
@@ -209,12 +207,11 @@ Optional_BlockIntersection isInters(const Ray ray) {
 					)
 				);
 			}
-		} else return empty_Optional_BlockIntersection();
+		} else break;
 		
 		curSteps += minAxis_i;
 		curLen += minAxis_f * stepLength;
 	}
-	if(i == 100);//error
 
 	return empty_Optional_BlockIntersection();
 }
@@ -233,28 +230,26 @@ void main() {
 	vec4 col;
 	if(intersection.is) {
 		const BlockIntersection i = intersection.it;
-		const vec2 uv = i.uv;
+		const vec2 uv = ((i.uv-0.5f) * 0.9999f)+0.5f;
 		const bool isTop = i.side.y ==  1;
 		const bool isBot = i.side.y == -1;
 		col = vec4(
 				mix(
 				mix(
-					sampleAtlas(vec2(0, 0), uv.xy),
-					sampleAtlas(vec2(1, 0), uv.xy),
+					sampleAtlas(vec2(0, 0), uv),
+					sampleAtlas(vec2(1, 0), uv),
 					float(isTop)
 				),
-				sampleAtlas(vec2(2, 0), uv.xy),
+				sampleAtlas(vec2(2, 0), uv),
 				float(isBot)
 				), 1);
-		if(i.id == 2) {
-			col = mix(col, vec4(1, 0, 0, 1), 0.1);
+		if(i.id != 1) {
+			col = mix(col, vec4(1, 0, 0, 1), 0.5);
 		}
 		
 		//color = vec4(uv, 0, 1);
 	}
 	else col = vec4(0,0,0,0);
-	
-	//if(chunkNew) col = mix(col, vec4(1,0,0,1),0.3);
 	
 	color = col;
 }	
