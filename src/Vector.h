@@ -5,6 +5,7 @@
 #include<stdint.h>
 #include<type_traits>
 #include"Misc.h"
+#include <algorithm>
 
 template<typename C>
 struct vec2
@@ -64,12 +65,12 @@ public:
 		return x * o.x + y * o.y;
 	}
 
-	inline constexpr C lengthSuqare() const {
+	inline constexpr C lengthSquare() const {
 		return this->dot(*this);
 	}
 
 	inline constexpr C length() const {
-		return sqrt(this->lengthSuqare());
+		return sqrt(this->lengthSquare());
 	}
 
 	inline constexpr C const &operator[](size_t const index) const {
@@ -100,6 +101,9 @@ public:
 		return x*o.y - y*o.x;
 	}
 
+	inline constexpr vec2<C> normalized() const {
+		return *this / this->length();
+	}
 };
 
 template<typename C>
@@ -116,6 +120,10 @@ public:
 	inline constexpr vec3() : x(0), y(0), z(0) {};
 	inline constexpr vec3(C value) : x(value), y(value), z(value) {};
 	inline constexpr vec3(C x_, C y_, C z_) : x(x_), y(y_), z(z_) {};
+	inline constexpr vec3(vec3<C> const &) = default;
+	inline constexpr vec3(vec3<C> &&) = default;
+	inline constexpr vec3<C> &operator=(vec3<C> const &) = default;
+	inline constexpr vec3<C> &operator=(vec3<C> &&) = default;
 	
 	template<typename C2, typename = std::enable_if_t<std::is_convertible<C, C2>::value>>
 	inline constexpr operator vec3<C2>() const {
@@ -146,6 +154,10 @@ public:
 		return *this;
 	}
 
+	inline constexpr vec3<C> operator+() const {
+		return vec3(+x, +y, +z);
+	}
+	
 	inline constexpr vec3<C> operator-() const {
 		return vec3(-x, -y, -z);
 	}
@@ -225,8 +237,9 @@ public:
 	}
 	
 	template<typename Action>
-	inline constexpr vec3<C> appliedFunc(Action&& action) const {
-		return vec3<C>(
+	inline constexpr vec3<decltype(std::declval<Action>()(std::declval<const C &>()))> 
+	appliedFunc(Action&& action) const {
+		return vec3<decltype(std::declval<Action>()(std::declval<C>()))>(
 			action(this->x),
 			action(this->y),
 			action(this->z)
@@ -238,6 +251,34 @@ public:
 			return (b1 < b2) ? (b1 <= v && v <= b2) : (b2 <= v && v <= b1);
 		};
 		return in(x, b1.x, b2.x) && in(y, b1.y, b2.y) && in(z, b1.z, b2.z);
+	}
+	
+	inline constexpr vec3<int> sign() const {
+		return this->appliedFunc<int(*)(C)>(misc::sign);
+	}
+	
+	inline constexpr vec3<C> max(vec3<C> const o) const {
+		return this->applied([&](C const &it, size_t const index) -> C { return std::max({it, o[index]}); });
+	}
+	
+	inline constexpr vec3<bool> equal(vec3<C> const o) const {
+		return this->applied([&](C const &it, size_t const index) -> bool { return it == o[index]; });
+	}
+	
+	inline constexpr vec3<C> abs() const {
+		return this->applied([](C const &it, size_t const index) -> C { return std::max({it, -it, C(0)}); });
+	}
+	
+	inline constexpr vec3<bool> lnot() const {
+		return this->applied([](C const &it, size_t const index) -> bool { return !static_cast<bool>(it); });
+	}
+	
+	inline constexpr vec3<C> floor() const {
+		return this->applied([](C const &it, size_t const index) -> C { return std::floor(it); });
+	}
+	
+	inline constexpr vec3<C> clamp(C const b1, C const b2) const {
+		return this->applied([&](C const &it, size_t const index) -> C { return misc::clamp<C>(it, b1, b2); });
 	}
 };
 
@@ -271,6 +312,7 @@ inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const C f) n
 using vec3f = vec3<float>;
 using vec3d = vec3<double>;
 using vec3i = vec3<int32_t>;
+using vec3b = vec3<bool>;
 
 using vec2f = vec2<float>;
 using vec2d = vec2<double>;

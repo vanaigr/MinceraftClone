@@ -11,31 +11,30 @@ struct Chunks {
 public:
 	static constexpr int const chunkDim = 16;
 	static constexpr int const chunkSize = chunkDim*chunkDim*chunkDim;
+	//static constexpr int const tmpChunkSize = chunkDim*chunkDim*chunkDim/(sizeof(uint16_t) * 8);
 	using ChunkData = std::array<uint16_t, chunkSize>;
-	struct ChunkDataRepresentation {
-		ChunkData cd;
-	};
+	//using tmpChunkData = std::array<uint8_t, tmpChunkSize>;
 private:
 	std::vector<int> vacant{};
 	std::vector<int> used_{};
 	
 	std::vector<int> used{};
 	std::vector<vec3<int32_t>> chunksPos{};
-	std::vector<ChunkDataRepresentation> chunksDataRepr{};
-	std::vector<uint8_t> chunkNew{};
+	std::vector<ChunkData> chunksDataRepr{};
+	//std::vector<tmpChunkData> tmpChunksData{};
 public:
 	
 	inline std::vector<int> const &usedChunks() const { return used; }
 	
 	inline std::vector<vec3i> &chunksPosition() { return chunksPos; }
-	inline std::vector<ChunkDataRepresentation> &chunksData() { return chunksDataRepr; }
-	inline std::vector<uint8_t> &isChunkNew() { return chunkNew; }
+	inline std::vector<ChunkData> &chunksData() { return chunksDataRepr; }
+	//inline std::vector<ChunkDataRepresentation> &temporalChunksData() { return tmpChunksData; }
 	
-	inline std::vector<vec3i> const &chunksPosition() const { return chunksPos; }
-	inline std::vector<ChunkDataRepresentation> const &chunksData() const { return chunksDataRepr; }
-	inline std::vector<uint8_t> const &isChunkNew() const { return chunkNew; }
+	inline std::vector<vec3i>const &chunksPosition() const { return chunksPos; }
+	inline std::vector<ChunkData>const &chunksData() const { return chunksDataRepr; }
+	//inline std::vector<ChunkDataRepresentation>const &temporalChunksData() const { return tmpChunksData; }
 	
-		//returns used[] position
+	//returns used[] position
 	inline int reserve() {
 		int index;
 		int usedSize = used.size();
@@ -44,11 +43,10 @@ public:
 			index = vacant[vacant.size()-1];
 			vacant.pop_back();
 		}
-		else {
+		else { //TODO: avoid zero-init
 			index = usedSize;
 			chunksPos.resize(index+1);
 			chunksDataRepr.resize(index+1);
-			chunkNew.resize(index+1);
 		}
 		used.push_back(index);
 		
@@ -81,50 +79,6 @@ public:
 		
 		used.resize(0);
 		used.swap(used_);
-			
-		/*for(size_t i = 0; i < sz; ++i) {
-			auto const &chunkIndex = used[i];
-			if(!keep(chunkIndex)) used[i]=-1;
-		}
-		
-		int endIndex = sz-1;
-		for(int i = 0; i <= endIndex; ++i) {
-			if(used[i] == -1) {
-                for(;endIndex > -1; --endIndex) {
-                    if(used[endIndex]!=-1) {
-                        if(endIndex > i)  {
-							used[i] = used[endIndex];
-							used[endIndex] = -1;//
-							endIndex--;//for checking.   used[i] = used[endIndex--];
-							
-						}
-                        break;
-                    }	
-				}					
-			}
-		}//produces chunk re-generation in the middle of already generated area
-		
-		
-		
-		if(true)
-			for(int i = 0; i < sz; i ++) {
-				if(i <= endIndex && used[i] == -1) {
-					std::cout << "Bug in algorithm ==-1: i=" << i << ",endIndex=" << endIndex << ",vector:\n";
-					for(int j = 0; j < sz; j ++) {
-						std::cout << used[j] << ' ';
-					}
-					exit(-1);
-				}
-				else if(i > endIndex && used[i] != -1) {
-					std::cout << "Bug in algorithm !=-1: i=" << i << ",endIndex=" << endIndex << ",vector:" << std::endl;
-					for(int j = 0; j < sz; j ++) {
-						std::cout << used[j] << ' ';
-					}
-					exit(-1);
-				}
-			}
-		
-		used.resize(endIndex+1);*/
 	}
 	
 	inline static constexpr int32_t blockIndex(vec3<int32_t> position) {
