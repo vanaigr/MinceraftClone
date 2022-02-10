@@ -18,6 +18,12 @@ public:
 		inChunkPosition_ = newInChunkCoord;
 		chunk_ = newChunk;
 	}
+	
+	ChunkCoord(ChunkCoord const &) = default;
+	ChunkCoord(ChunkCoord &&) = default;
+	
+	ChunkCoord & operator=(ChunkCoord const &) = default;
+	ChunkCoord & operator=(ChunkCoord &&) = default;
 private:
 	ChunkCoord(vec3i chunk__, vec3d inChunkPosition__, bool unused) : chunk_{chunk__}, inChunkPosition_{inChunkPosition__} {}
 public:

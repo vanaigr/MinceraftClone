@@ -149,20 +149,33 @@ static bool jump{ false };
 
 static bool isOnGround{false};
 static vec3d playerForce{};
-static ChunkCoord player{ vec3i{0,0,0}, vec3d{0,15,0}};
-static Viewport viewport{ 
+static ChunkCoord playerCoord_{ vec3i{0,0,0}, vec3d{0,15,0} };
+static ChunkCoord spectatorCoord{ playerCoord_ };
+static Viewport playerViewport{ 
 		vec2d{ misc::pi / 2.0, 0 },
 		windowSize_d.y / windowSize_d.x,
 		90.0 / 180.0 * misc::pi,
 		0.001,
 		1000
 };
-static vec3d const viewportOffset{0,2,0};
+
+static double const height{ 2 };
+static double const radius{ 0.5 };
+static  vec3d const viewportOffset_{0,height,0};
 static bool isFreeCam{ false };
 
-static Viewport& viewport_current() {
-    return viewport;
+static Viewport &viewport_current() {
+    return playerViewport;
 }
+static ChunkCoord &playerCoord() {
+	if(isFreeCam) return spectatorCoord;
+	else return playerCoord_;
+}
+
+static vec3d viewportOffset() {
+	return viewportOffset_ * (!isFreeCam);
+}
+
 
 static void reloadShaders();
 
@@ -194,8 +207,12 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 		reloadShaders();
 	else if(key == GLFW_KEY_F4 && action == GLFW_PRESS)
 		debugChunkBorder = !debugChunkBorder;
-	else if(key == GLFW_KEY_F3 && action == GLFW_PRESS)
+	else if(key == GLFW_KEY_F3 && action == GLFW_PRESS) { 
 		isFreeCam = !isFreeCam;
+		if(isFreeCam) {
+			spectatorCoord = playerCoord_ + viewportOffset_;
+		}
+	}
 	else if(key == GLFW_KEY_TAB && action == GLFW_PRESS) testInfo = true;
 
     shift = (mods & GLFW_MOD_SHIFT) != 0;
@@ -257,6 +274,10 @@ static GLuint bgTopDir_u;
 static GLuint mainProgram = 0;
 static GLuint debugProgram = 0;
 static GLuint bgProgram = 0;
+static GLuint playerProgram = 0;
+
+static GLuint pl_projection_u = 0;
+static GLuint pl_modelMatrix_u = 0;
 
 static void reloadShaders() {
 	glDeleteProgram(mainProgram);
@@ -475,6 +496,67 @@ static void reloadShaders() {
 	db_projection_u = glGetUniformLocation(debugProgram, "projection");
 	}
 	
+	{
+		glDeleteProgram(playerProgram);
+		playerProgram = glCreateProgram();
+		ShaderLoader plsl{};
+
+		plsl.addShaderFromCode(
+			R"(#version 420
+			uniform mat4 projection;
+			uniform mat4 modelMatrix;
+			
+			layout(location = 0) in vec3 pos_;
+			layout(location = 1) in vec3 norm_;
+			
+			out vec3 norm;
+			
+			void main() {
+				gl_Position = projection * (modelMatrix * vec4(pos_, 1));
+				norm = norm_;
+			})", GL_VERTEX_SHADER, "Player vertex"
+		);
+		
+		plsl.addShaderFromCode(
+			R"(#version 420
+			in vec4 gl_FragCoord;
+			out vec4 color;
+			
+			in vec3 norm;
+			
+			float map(const float value, const float min1, const float max1, const float min2, const float max2) {
+				return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
+			}
+
+			void main() {
+				const vec3 n = normalize(norm);
+				const vec3 sun = normalize(vec3(1, 1, 1));
+				color = vec4(
+					vec3(1, 1, 1) * map(dot(n, sun), -1, 1, 0.6, 0.9),
+					1
+				);
+			}
+			)", 
+			GL_FRAGMENT_SHADER, 
+			"Player shader"
+		);
+	
+		plsl.attachShaders(playerProgram);
+	
+		glLinkProgram(playerProgram);
+		glValidateProgram(playerProgram);
+	
+		plsl.deleteShaders();
+	
+		glUseProgram(playerProgram);
+		
+		pl_projection_u = glGetUniformLocation(playerProgram, "projection");
+		pl_modelMatrix_u = glGetUniformLocation(playerProgram, "modelMatrix");
+	}
+	
+	glUseProgram(playerProgram);
+	glUniformMatrix4fv(pl_projection_u, 1, GL_TRUE, &projection[0][0]);
+	
 	glUseProgram(bgProgram);
 	glUniformMatrix4fv(bgProjection_u, 1, GL_TRUE, &projection[0][0]);
 	
@@ -528,7 +610,7 @@ static void loadChunks() {
 		chunksPresent[i] = -1;
 	
 	auto const currentViewport{ viewport_current() };
-	vec3<int32_t> playerChunk{ player.chunk() };
+	vec3<int32_t> playerChunk{ playerCoord().chunk() };
 	
 	vec3<int32_t> b{viewDistance, viewDistance, viewDistance};
 	
@@ -583,10 +665,9 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	if(remaining == 0) { std::cout << "error\n"; std::cout.precision(17); std::cout << player.inChunkPosition() << ' ' << playerForce << '\n'; std::cout.precision(2); return; }
 	static std::vector<vec3i> checkCollision{}; //inChunk positions of blocks (relative to playerChunk) that need to be checked
 	checkCollision.clear();
+	
 	auto const botChunk{ player.chunk() };
 	auto const botInChunk{ player.inChunkPosition() };
-	auto const height{ 2 };
-	auto const rad{ 0.5 };
 	
 	vec3d const line{ playerForce };
 	float const lineLen = line.length();
@@ -622,8 +703,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		vec3i const otherAxis_i{ static_cast<vec3i>(minAxis_b.lnot()) };
 		vec3d const curCoordF = botInChunk + dir * minCurLen;
 		vec2<double> const botXZ{ curCoordF.x, curCoordF.z };
-		auto const minXZ{ botXZ - rad };
-		auto const maxXZ{ botXZ + rad };
+		auto const minXZ{ botXZ - radius };
+		auto const maxXZ{ botXZ + radius };
 			
 		for(int y = floor(curCoordF.y); y <= floor(curCoordF.y+height); y++)
 			for(int x = floor(minXZ.x); x <= floor(maxXZ.x); x++)
@@ -681,7 +762,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					misc::clamp<double>(coordAtTop.x, coord.x, coord.x+1),
 					misc::clamp<double>(coordAtTop.z, coord.z, coord.z+1)
 				};
-				bool isIntersection{ (vec2d{coordAtTop.x, coordAtTop.z}-closestPointTop).lengthSquare() < rad*rad };
+				bool isIntersection{ (vec2d{coordAtTop.x, coordAtTop.z}-closestPointTop).lengthSquare() < radius*radius };
 				if(isIntersection) {
 					isCollision = true;
 					newPlayerDist = distToTop;
@@ -697,7 +778,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			}
 			
 			{ //x
-				auto  newT = (abs(localFacesCoord.x) - rad) * stepLength.x;
+				auto  newT = (abs(localFacesCoord.x) - radius) * stepLength.x;
 				vec3d normal{ normals.x+0.0, 0, 0 };
 				vec3d v{botInChunk + dir * newT};
 				
@@ -725,9 +806,9 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					if(minDist1 < minDist2) { minT = minT1; minEdge = edge1; toMinEdge = toEdge1; minDist = minDist1; }
 					else					{ minT = minT2; minEdge = edge2; toMinEdge = toEdge2; minDist = minDist2; }
 					
-					if(minDist >= rad) goto next; //no collision
+					if(minDist >= radius) goto next; //no collision
 					
-					double const dt{sqrt(rad*rad - minDist*minDist)};
+					double const dt{sqrt(radius*radius - minDist*minDist)};
 					
 					newT = minT - dt;
 					v = botInChunk + dir * newT;
@@ -756,7 +837,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			next:
 			
 			{ //z
-				auto  newT = (abs(localFacesCoord.z) - rad) * stepLength.z;
+				auto  newT = (abs(localFacesCoord.z) - radius) * stepLength.z;
 				vec3d normal{ 0, 0, normals.z+0.0 };
 				vec3d v{botInChunk + dir * newT};
 
@@ -782,9 +863,9 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					if(minDist1 < minDist2) { minT = minT1; minEdge = edge1; toMinEdge = toEdge1; minDist = minDist1; }
 					else					{ minT = minT2; minEdge = edge2; toMinEdge = toEdge2; minDist = minDist2; }
 					
-					if(minDist >= rad) goto next2; //no collision
+					if(minDist >= radius) goto next2; //no collision
 					
-					double const dt{sqrt(rad*rad - minDist*minDist)};
+					double const dt{sqrt(radius*radius - minDist*minDist)};
 					
 					newT = minT - dt;
 					v = botInChunk + dir * newT;
@@ -823,6 +904,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 
 static void update() {
     auto& currentViewport = viewport_current();
+	auto &player{ playerCoord() };
 
     vec2<double> diff = (mousePos - pmousePos) / windowSize_d;
 	if(isFreeCam) playerForce = 0;
@@ -874,87 +956,6 @@ static void update() {
 
     pmousePos = mousePos;
 }
-
-/*static std::array<std::array<double, 4>, 8> projectChunk(double const (&projectionMatrix)[4][4], double const (&chunkToLocal)[4][4], int &projectionVertsCount) { //the function returns convex hull of projected chunk
-	static constexpr std::array<vec3<double>,8> const verts {
-		vec3<double>{ 0, 0, 0 }, vec3<double>{ 0, 0, Chunks::chunkDim }, vec3<double>{ 0, Chunks::chunkDim, 0 }, vec3<double>{ 0, Chunks::chunkDim, Chunks::chunkDim }, 
-		vec3<double>{ Chunks::chunkDim, 0, 0 }, vec3<double>{ Chunks::chunkDim, 0, Chunks::chunkDim }, vec3<double>{ Chunks::chunkDim, Chunks::chunkDim, 0 }, vec3<double>{ Chunks::chunkDim, Chunks::chunkDim, Chunks::chunkDim }, 
-	};
-	
-	std::array<vec2<double>,8> projectedVerts{};
-	std::array<std::array<double, 4>, 8> projectedVertsOrigs{};
-	for(int i{0}; i < verts.size(); ++i) {
-		double vert_1[4][1] { verts[i].x, verts[i].y, verts[i].z, 1 };
-		double vert_2[4][1];
-		
-		misc::matMult(chunkToLocal, vert_1, &vert_2);
-		misc::matMult(projectionMatrix, vert_2, &vert_1);
-
-		projectedVerts[i] = vec2<double>{ vert_1[0][0], vert_1[1][0] } / vert_1[3][0];
-		projectedVertsOrigs[i] = { vert_1[0][0], vert_1[1][0], vert_1[2][0], vert_1[3][0] };
-	}
-	
-	std::array<std::array<double, 4>, 8> convexHull{};
-	
-	{ //first vertex must be part of the convex hull
-		auto minX{ std::numeric_limits<double>::infinity() }; 
-		int minI{ -1 };
-		
-		for(int i{0}; i < projectedVerts.size(); ++i) {
-			auto const curX{ projectedVerts[i].x };
-			if(curX < minX) {
-				minX = curX;
-				minI = i;
-			}
-		}
-		
-		if(minI == -1) { //something went horribly wrong
-			projectionVertsCount = 0;
-			return convexHull;
-		}
-		std::swap(projectedVerts[0], projectedVerts[minI]); 
-		std::swap(projectedVertsOrigs[0], projectedVertsOrigs[minI]); 
-		convexHull[0] = projectedVertsOrigs[0];
-	}
-	
-	
-	
-	for(int projectionIndex{1}; projectionIndex < convexHull.size(); ++projectionIndex) { 
-		vec2<double> const prev{ projectedVerts[projectionIndex-1] };
-		
-		vec2<double> secondCandidate;
-		vec2<double> toCand;
-		for(int i = projectionIndex; i < projectedVerts.size(); ++i) {
-			secondCandidate = { projectedVerts[i] };
-			toCand = { secondCandidate - prev };
-			
-			for(int j{projectionIndex}; j < projectedVerts.size(); j ++) {
-				if(j == i) continue;
-				auto const otherVerex{ projectedVerts[j] };
-				auto const toOther{ otherVerex - prev };
-			
-				if(toCand.cross(toOther) < -0.0) goto wrongVertex; //all (remaining) vertices must lie on the same side of the line
-			}
-			
-			vec2<double> const first{ projectedVerts[0] };
-			auto const toFirst{ first - prev };
-			if(toCand.cross(toFirst) < -0.0) { projectionVertsCount = projectionIndex; return convexHull; };
-			
-			std::swap(projectedVerts[projectionIndex], projectedVerts[i]); //move all vertices that define projected chunk boundary to the beginning of the array
-			std::swap(projectedVertsOrigs[projectionIndex], projectedVertsOrigs[i]); //move all vertices that define projected chunk boundary to the beginning of the array
-			convexHull[projectionIndex] = projectedVertsOrigs[projectionIndex];
-			
-			//break;
-			
-			
-			wrongVertex: continue;
-		}
-	}
-	
-	projectionVertsCount = 8;
-	return convexHull;
-}
-*/
 
 int main(void) {
     GLFWwindow* window;
@@ -1008,10 +1009,30 @@ int main(void) {
 	glUseProgram(mainProgram);
 	
 	
+	const int radialCount = 32;
+	vec3f verts [(radialCount+1)*2*2]; //radialCount+1 - closed loop, *2 - top & bottom, *2 - pos & normal
+	vec3f topCap[(radialCount+1)  *2];
+	vec3f botCap[(radialCount+1)  *2];
+	
+	for(int i = 0; i < radialCount+1; i ++) {
+		double const angle{ -i / (double)radialCount * 2.0 * misc::pi };
+		
+		auto const x{ (float) (cos(angle) * radius) };
+		auto const y{ (float) (sin(angle) * radius) };
+		
+		verts[i*2*2  ] = botCap[i*2] = vec3f{ x, 0, y };
+		verts[i*2*2+1] = vec3f{ x, 0, y }; //normals are not normalized 
+		botCap[i*2+1] = vec3f{0,-1,0};
+		
+		verts[(i*2+1)*2  ] = topCap[(radialCount-i)*2] = vec3f{ x, (float) height, y };
+		verts[(i*2+1)*2+1] = vec3f{ x, 0, y };
+		topCap[(radialCount-i)*2+1] = vec3f{0,1,0};
+	}
+
 	GLuint vbo;
 	glGenBuffers(1, &vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(std::array<std::array<float, 7>, 16>{}), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(verts), NULL, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	
 	GLuint vao;
@@ -1020,8 +1041,9 @@ int main(void) {
 	glBindVertexArray(vao);
 	glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
-	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 7, nullptr);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 7, (void*) (sizeof(GLfloat) * 4));
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 6, NULL); //pos
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 6, (void*)(sizeof(GLfloat)*3)); //norm
+	//glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 7, (void*) (sizeof(GLfloat) * 4));
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0); 
@@ -1040,7 +1062,9 @@ int main(void) {
     {
 		auto startFrame = std::chrono::steady_clock::now();
 		
-		auto &currentViewport = viewport_current();
+		auto &player{ playerCoord() };
+		auto &currentViewport{ viewport_current() };
+		auto const position{ player.position()+viewportOffset() };
         auto const rightDir{ currentViewport.rightDir() };
         auto const topDir{ currentViewport.topDir() };
 		
@@ -1072,7 +1096,7 @@ int main(void) {
 		currentViewport.localToGlobalSpace(&toGlob);
 		currentViewport.globalToLocalSpace(&toLoc);
 		vec3<int32_t> const playerChunk{ player.chunk() };
-		auto const cameraPosInChunk{ player.inChunkPosition()+viewportOffset };
+		auto const cameraPosInChunk{ player.inChunkPosition()+viewportOffset() };
 		
 		if(testInfo) {
 					std::cout << (mousePos.x / windowSize_d.x) << ' '
@@ -1125,8 +1149,7 @@ int main(void) {
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 8192, &chunkData);
 				
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-			//if(chunkPos == vec3<int32_t>{ 1, 0, 1 })
-			//if(relativeChunkPos_ != 0) 
+
 			{
 				float const translation4[4][4] ={
 					{ 1, 0, 0, relativeChunkPos.x },
@@ -1139,65 +1162,6 @@ int main(void) {
 				
 				misc::matMult(toLoc4, translation4, &chunkToLocal);
 				
-				int projectionVertsCount;
-				//std::array<vec2<double>,8> origs;
-				/*std::array<std::array<double, 4>, 8> const verts = projectChunk(projection, chunkToLocal, projectionVertsCount, origs);
-				if(projectionVertsCount <= 2) (std::cout << "err:"<<projectionVertsCount <<'\n'), exit(-1);
-				
-				std::array<std::array<GLfloat, 3>, 4> colors;
-				if(chunkPos == vec3<int32_t>{ 1, 0, 1 }) {
-					colors = {
-					std::array<GLfloat, 3>{ 1, 0, 0 },
-					std::array<GLfloat, 3>{ 0, 1, 0 },
-					std::array<GLfloat, 3>{ 0, 0, 1 },
-					std::array<GLfloat, 3>{ 1, 0, 1 }
-					
-					
-				};
-				if(testInfo) {
-					testInfo = false;
-					std::cout << "origs:\n";
-					for(int i = 0; i < 8; i ++) {
-						std::cout << (origs[i].x) << ' ' << origs[i].y; 
-						std::cout << '\n';
-					}
-					std::cout << "vertices (" << projectionVertsCount << "):\n";
-					for(int i = 0; i < projectionVertsCount; i ++) {
-						auto const a = [&](int j) -> void {std::cout << (verts[i][j]) << ' '; };
-						a(0), a(1), a(2), a(3);
-						std::cout << '\n';
-					}
-					std::cout << "viewport:\npos: ";
-					std::cout << currentViewport.position << "\nrot:" << currentViewport.rotation << "\n\n";
-				}
-				}
-				else colors = {
-					std::array<GLfloat, 3>{ 1, 1, 1 },
-					std::array<GLfloat, 3>{ 1, 1, 1 },
-					std::array<GLfloat, 3>{ 1, 1, 1 },
-					std::array<GLfloat, 3>{ 1, 1, 1 }
-				};
-				
-				std::array<std::array<GLfloat, 7>, 16> tris{};
-				for(int i = 0; i < projectionVertsCount-2; ++i) {
-					tris[i*3+0] = std::array<GLfloat, 7>{(float)verts[  0][0], (float)verts[  0][1], (float)verts[  0][2], (float)verts[  0][3], colors[i][0], colors[i][1], colors[i][2] };
-					tris[i*3+1] = std::array<GLfloat, 7>{(float)verts[i+1][0], (float)verts[i+1][1], (float)verts[i+1][2], (float)verts[i+1][3], colors[i][0], colors[i][1], colors[i][2] };
-					tris[i*3+2] = std::array<GLfloat, 7>{(float)verts[i+2][0], (float)verts[i+2][1], (float)verts[i+2][2], (float)verts[i+2][3], colors[i][0], colors[i][1], colors[i][2] };
-				}*/
-				
-				//glBindBuffer(GL_ARRAY_BUFFER, vbo);
-				/*glBufferSubData(
-					GL_ARRAY_BUFFER, 0, sizeof(tris),
-					&tris[0]
-				);
-				glBindBuffer(GL_ARRAY_BUFFER, 0);
-				glBindBuffer(GL_ARRAY_BUFFER, 1);*/
-				
-				//glBindVertexArray(vao);
-				//glEnableVertexAttribArray(0);
-				//glEnableVertexAttribArray(1);
-				//glDrawArrays(GL_TRIANGLES, 0, (projectionVertsCount-2)*3);
-				
 				if(debugChunkBorder) {
 					glUseProgram(debugProgram);
 					glUniformMatrix4fv(db_model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
@@ -1209,38 +1173,43 @@ int main(void) {
 				
 				glUniformMatrix4fv(model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
 				glDrawArrays(GL_TRIANGLES, 0, 36);
-				
-				
-				//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-				//glDrawArrays(GL_TRIANGLES, 0, (projectionVertsCount-2)*3);
-				//glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-				//glDisableVertexAttribArray(0);
-				//glDisableVertexAttribArray(1);
-				//glBindVertexArray(0);
 			}
-			/*else {
-				float const tim = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count() / 1000000.0;
-				GLfloat const floats[] = {
-					-1, -1, 0, 1, sinf(tim), cosf(tim), 1,
-					-1, +1, 0, 1, sinf(tim), cosf(tim), 1,
-					+1, -1, 0, 1, sinf(tim), cosf(tim), 1,
-					+1, +1, 0, 1, sinf(tim), cosf(tim), 1
-				};					
-				glBindBuffer(GL_ARRAY_BUFFER, vbo);
-				glBufferSubData(
-					GL_ARRAY_BUFFER, 0, sizeof(floats),
-					&floats[0]
-				);
-				glBindBuffer(GL_ARRAY_BUFFER, 0);
-				
-				glBindVertexArray(vao);
-				glEnableVertexAttribArray(0);
-				glEnableVertexAttribArray(1);
-				glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-				glDisableVertexAttribArray(1);
-				glDisableVertexAttribArray(0);
-				glBindVertexArray(0);
-			}*/
+		}
+		
+		if(isFreeCam){
+			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
+			float playerToLocal[4][4];
+			float const translation4[4][4] ={
+					{ 1, 0, 0, playerRelativePos.x },
+					{ 0, 1, 0, playerRelativePos.y },
+					{ 0, 0, 1, playerRelativePos.z },
+					{ 0, 0, 0, 1                   },
+			};
+						
+			misc::matMult(toLoc4, translation4, &playerToLocal);
+			
+			glUseProgram(playerProgram);
+			
+			glUniformMatrix4fv(pl_modelMatrix_u, 1, GL_TRUE, &playerToLocal[0][0]);
+
+			glBindVertexArray(vao);
+			glBindBuffer(GL_ARRAY_BUFFER, vbo);
+			glEnableVertexAttribArray(0);
+			glEnableVertexAttribArray(1);
+						
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), &verts[0]);
+			glDrawArrays(GL_TRIANGLE_STRIP, 0, (radialCount+1)*2);
+			
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(topCap), &topCap[0]);
+			glDrawArrays(GL_TRIANGLE_FAN, 0, radialCount+1);
+			
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(botCap), &botCap[0]);
+			glDrawArrays(GL_TRIANGLE_FAN, 0, radialCount+1);
+			
+			glDisableVertexAttribArray(0);
+			glDisableVertexAttribArray(1);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			glBindVertexArray(0); 
 		}
 		
 		glfwSwapBuffers(window);
