@@ -37,7 +37,7 @@
 #ifdef FULLSCREEN
 static const vec2<uint32_t> windowSize{ 1920, 1080 };
 #else
-static const vec2<uint32_t> windowSize{ 1000, 600 };
+static const vec2<uint32_t> windowSize{ 1280, 720 };
 #endif // FULLSCREEN
 
 static const vec2<double> windowSize_d{ windowSize.convertedTo<double>() };
@@ -116,13 +116,15 @@ struct Viewport {
 	}
 	
 	template<typename O, typename = std::enable_if_t<std::is_convertible<double, O>::value>>
-	void projectionMatrix(O (*mat_out)[4][4]) const {
+	void projectionMatrix(O (*mat_out)[4][4]) const {		
+		auto const htF{ tan(fov / 2.0) };
 		O const pm[4][4] = {
-			{ static_cast<O>(aspectRatio*fov), static_cast<O>(0.0), static_cast<O>(0), static_cast<O>(0.0) },
-			{ static_cast<O>(0.0), static_cast<O>(fov), static_cast<O>(0.0), static_cast<O>(0.0) },
-			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>(far/(far-near)), static_cast<O>(-(far*near)/(far-near)) },
-			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>(1.0), static_cast<O>(0.0) }
+			{ static_cast<O>(1/htF*aspectRatio), static_cast<O>(0.0), static_cast<O>(0), static_cast<O>(0.0) },
+			{ static_cast<O>(0.0), static_cast<O>(1/htF), static_cast<O>(0.0), static_cast<O>(0.0) },
+			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>( far / (far - near)), static_cast<O>(-(far * near) / (far - near)) },
+			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>( 1), static_cast<O>(0.0) }
 		};
+	
 		copy2DArray<O, 4, 4>(
 			pm,
 			*mat_out
@@ -140,11 +142,12 @@ static bool shift{ false }, ctrl{ false };
 static vec3<double> movementDir{};
 static double speedModifier = 2.5;
 
-static bool debugChunkBorder{ false };
+static bool debug{ false };
 
 static double deltaTime{ 16.0/1000.0 };
+static double const fixedDeltaTime{ 16.0/1000.0 };
 
-static double movementSpeed{ 8 };
+static double movementSpeed{ 6 };
 static bool jump{ false };
 
 static bool isOnGround{false};
@@ -156,7 +159,7 @@ static Viewport playerViewport{
 		windowSize_d.y / windowSize_d.x,
 		90.0 / 180.0 * misc::pi,
 		0.001,
-		1000
+		100
 };
 
 static double const height{ 2 };
@@ -180,6 +183,7 @@ static vec3d viewportOffset() {
 static void reloadShaders();
 
 static bool testInfo = false;
+static bool debugBtn0 = false, debugBtn1 = false;
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     bool isPress = !(action == GLFW_RELEASE);
@@ -194,9 +198,13 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 		else if(key == GLFW_KEY_E)
 			movementDir.y = -1 * isPress;
 	}
-	else
-		if (key == GLFW_KEY_SPACE) 
-			jump |= isOnGround && isPress;
+	else if (key == GLFW_KEY_SPACE) 
+		jump |= isOnGround && isPress;
+		
+	if (key == GLFW_KEY_KP_0 && isPress) 
+			debugBtn0 = !debugBtn0;
+	if (key == GLFW_KEY_KP_1 && isPress) 
+		debugBtn1 = !debugBtn0;	
 
 	if(key == GLFW_KEY_D)
 		movementDir.x = 1 * isPress;
@@ -206,7 +214,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 	if(key == GLFW_KEY_F5 && action == GLFW_PRESS)
 		reloadShaders();
 	else if(key == GLFW_KEY_F4 && action == GLFW_PRESS)
-		debugChunkBorder = !debugChunkBorder;
+		debug = !debug;
 	else if(key == GLFW_KEY_F3 && action == GLFW_PRESS) { 
 		isFreeCam = !isFreeCam;
 		if(isFreeCam) {
@@ -260,10 +268,13 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) 
 
 static GLuint rightDir_u;
 static GLuint topDir_u;
+static GLuint near_u, far_u;
 static GLuint time_u;
 static GLuint mouseX_u, mouseY_u;
 static GLuint relativeChunkPos_u;
 static GLuint projection_u, db_projection_u, model_matrix_u, db_model_matrix_u;
+
+static GLuint debugProgram2, db2_projection_u, db2_model_matrix_u;
 
 static GLuint chunkIndex_u;
 
@@ -280,221 +291,260 @@ static GLuint pl_projection_u = 0;
 static GLuint pl_modelMatrix_u = 0;
 
 static void reloadShaders() {
-	glDeleteProgram(mainProgram);
-	mainProgram = glCreateProgram();
-    ShaderLoader sl{};
-
-	//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
-	//https://gist.github.com/rikusalminen/9393151
-	//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
-	sl.addShaderFromCode(
-		R"(#version 420
-		uniform mat4 projection;
-		uniform mat4 model_matrix;
-		//uniform vec3 translation;
+	{
+		glDeleteProgram(mainProgram);
+		mainProgram = glCreateProgram();
+		ShaderLoader sl{};
+	
+		//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
+		//https://gist.github.com/rikusalminen/9393151
+		//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
+		sl.addShaderFromCode(
+			R"(#version 420
+			uniform mat4 projection;
+			uniform mat4 model_matrix;
+			
+			void main()
+			{
+				int tri = gl_VertexID / 3;
+				int idx = gl_VertexID % 3;
+				int face = tri / 2;
+				int top = tri % 2;
+			
+				int dir = face % 3;
+				int pos = face / 3;
+			
+				int nz = dir >> 1;
+				int ny = dir & 1;
+				int nx = 1 ^ (ny | nz);
+			
+				vec3 d = vec3(nx, ny, nz);
+				float flip = 1 - 2 * pos;
+			
+				vec3 n = flip * d;
+				vec3 u = -d.yzx;
+				vec3 v = flip * d.zxy;
+			
+				float mirror = -1 + 2 * top;
+				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
+				xyz = (xyz + 1) / 2 * 16;
+			
+				gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
+			}
+			)",
+			GL_VERTEX_SHADER,
+			"main vertex"
+		);
+		sl.addShaderFromProjectFileName("shaders/main.shader", GL_FRAGMENT_SHADER, "Main shader");
+	
+		sl.attachShaders(mainProgram);
+	
+		glLinkProgram(mainProgram);
+		glValidateProgram(mainProgram);
+	
+		sl.deleteShaders();
+	
+		glUseProgram(mainProgram);
 		
-		void main()
+		glUniform2ui(glGetUniformLocation(mainProgram, "windowSize"), windowSize.x, windowSize.y);
+		glUniform2f(glGetUniformLocation(mainProgram, "atlasTileCount"), 512 / 16, 512 / 16);
+	
+		time_u   = glGetUniformLocation(mainProgram, "time");
+		mouseX_u = glGetUniformLocation(mainProgram, "mouseX");
+		mouseY_u = glGetUniformLocation(mainProgram, "mouseY");
+	
+	
+		rightDir_u = glGetUniformLocation(mainProgram, "rightDir");
+		topDir_u = glGetUniformLocation(mainProgram, "topDir");
+		glUniform1f(glGetUniformLocation(mainProgram, "near"), playerViewport.near);
+		glUniform1f(glGetUniformLocation(mainProgram, "far"), playerViewport.far);
+		projection_u = glGetUniformLocation(mainProgram, "projection");
+		model_matrix_u = glGetUniformLocation(mainProgram, "model_matrix");
+		
+		//images
+		GLuint textures[1];
+		char const* (paths)[1]{ "assets/atlas.bmp"
+		};
+		loadGLImages<1>(textures, paths);
+	
+		GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
+	
+		glUniform1i(atlasTex_u, 0);
+	
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, textures[0]);
+	
+		/*GLuint ssbo;
+		glGenBuffers(1, &ssbo);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(field), field, GL_STATIC_DRAW);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);*/
+		
+		/*GLuint chunkIndex_b = glGetUniformBlockIndex(mainProgram, "Chunk");
+		glGenBuffers(1, &chunkUBO);
+		glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO);
+		glUniformBlockBinding(mainProgram, chunkIndex_b, 1);
+		glBindBufferBase(GL_UNIFORM_BUFFER, 1, chunkUBO);
+		glBufferData(GL_UNIFORM_BUFFER, 12, NULL, GL_DYNAMIC_DRAW);
+		glBindBuffer(GL_UNIFORM_BUFFER, 0);*/
+		
+		relativeChunkPos_u = glGetUniformLocation(mainProgram, "relativeChunkPos");
+		
+		glGenBuffers(1, &chunkIndex_u);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, 8192, NULL, GL_DYNAMIC_DRAW);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkIndex_u);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+		}
+		
 		{
-			int tri = gl_VertexID / 3;
-			int idx = gl_VertexID % 3;
-			int face = tri / 2;
-			int top = tri % 2;
+		glDeleteProgram(bgProgram);
+		bgProgram = glCreateProgram();
+		ShaderLoader bgsl{};
+		bgsl.addScreenSizeTriangleStripVertexShader("bg vertex");
+		bgsl.addShaderFromCode(R"(#version 430
+			in vec4 gl_FragCoord;
+			out vec4 color;
+			
+			uniform mat4 projection; //from local space to screen
+			uniform uvec2 windowSize;
+			
+			uniform vec3 rightDir, topDir;
+			
+			vec3 background(const vec3 dir) {
+				const float t = 0.5 * (dir.y + 1.0);
+				return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
+			}
+			void main() {
+				const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
 		
-			int dir = face % 3;
-			int pos = face / 3;
+				const vec3 forwardDir = cross(topDir, rightDir);
+				const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;
+				const vec3 rayDir = normalize(rayDir_);
+	
+				color = vec4(background(rayDir), 1.0);
+			}
 		
-			int nz = dir >> 1;
-			int ny = dir & 1;
-			int nx = 1 ^ (ny | nz);
+			)",
+			GL_FRAGMENT_SHADER,
+			"bg fragment"
+		);
 		
-			vec3 d = vec3(nx, ny, nz);
-			float flip = 1 - 2 * pos;
+		bgsl.attachShaders(bgProgram);
+	
+		glLinkProgram(bgProgram);
+		glValidateProgram(bgProgram);
+		glUseProgram(bgProgram);
 		
-			vec3 n = flip * d;
-			vec3 u = -d.yzx;
-			vec3 v = flip * d.zxy;
+	
+		bgsl.deleteShaders();
 		
-			float mirror = -1 + 2 * top;
-			vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-			xyz = (xyz + 1) / 2 * 16;
-		
-			gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
-		}
-		)",
-		GL_VERTEX_SHADER,
-		"main vertex"
-	);
-    sl.addShaderFromProjectFileName("shaders/main.shader", GL_FRAGMENT_SHADER, "Main shader");
-
-    sl.attachShaders(mainProgram);
-
-    glLinkProgram(mainProgram);
-    glValidateProgram(mainProgram);
-
-    sl.deleteShaders();
-
-    glUseProgram(mainProgram);
-	
-	glUniform2ui(glGetUniformLocation(mainProgram, "windowSize"), windowSize.x, windowSize.y);
-    glUniform2f(glGetUniformLocation(mainProgram, "atlasTileCount"), 512 / 16, 512 / 16);
-
-    time_u   = glGetUniformLocation(mainProgram, "time");
-    mouseX_u = glGetUniformLocation(mainProgram, "mouseX");
-    mouseY_u = glGetUniformLocation(mainProgram, "mouseY");
-
-
-    rightDir_u = glGetUniformLocation(mainProgram, "rightDir");
-    topDir_u = glGetUniformLocation(mainProgram, "topDir");
-	projection_u = glGetUniformLocation(mainProgram, "projection");
-	model_matrix_u = glGetUniformLocation(mainProgram, "model_matrix");
-	
-	//images
-    GLuint textures[1];
-    char const* (paths)[1]{ "assets/atlas.bmp"
-    };
-    loadGLImages<1>(textures, paths);
-
-    GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
-
-    glUniform1i(atlasTex_u, 0);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, textures[0]);
-
-    /*GLuint ssbo;
-    glGenBuffers(1, &ssbo);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(field), field, GL_STATIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);*/
-	
-	/*GLuint chunkIndex_b = glGetUniformBlockIndex(mainProgram, "Chunk");
-	glGenBuffers(1, &chunkUBO);
-	glBindBuffer(GL_UNIFORM_BUFFER, chunkUBO);
-	glUniformBlockBinding(mainProgram, chunkIndex_b, 1);
-	glBindBufferBase(GL_UNIFORM_BUFFER, 1, chunkUBO);
-	glBufferData(GL_UNIFORM_BUFFER, 12, NULL, GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);*/
-	
-	relativeChunkPos_u = glGetUniformLocation(mainProgram, "relativeChunkPos");
-	
-    glGenBuffers(1, &chunkIndex_u);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, 8192, NULL, GL_DYNAMIC_DRAW);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkIndex_u);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-	
-	glDeleteProgram(bgProgram);
-	bgProgram = glCreateProgram();
-	ShaderLoader bgsl{};
-	bgsl.addScreenSizeTriangleStripVertexShader("bg vertex");
-	bgsl.addShaderFromCode(R"(#version 430
-		in vec4 gl_FragCoord;
-		out vec4 color;
-		
-		uniform mat4 projection; //from local space to screen
-		uniform uvec2 windowSize;
-		
-		uniform vec3 rightDir, topDir;
-		
-		vec3 background(const vec3 dir) {
-			const float t = 0.5 * (dir.y + 1.0);
-			return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
-		}
-		void main() {
-			const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
-	
-			const vec3 forwardDir = cross(topDir, rightDir);
-			const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;
-			const vec3 rayDir = normalize(rayDir_);
-
-			color = vec4(background(rayDir), 1.0);
-		}
-	
-		)",
-		GL_FRAGMENT_SHADER,
-		"bg fragment"
-	);
-	
-	bgsl.attachShaders(bgProgram);
-
-    glLinkProgram(bgProgram);
-    glValidateProgram(bgProgram);
-	glUseProgram(bgProgram);
-	
-
-    bgsl.deleteShaders();
-	
-	glUniform2ui(glGetUniformLocation(bgProgram, "windowSize"), windowSize.x, windowSize.y);
-	bgProjection_u = glGetUniformLocation(bgProgram, "projection");
-	bgRightDir_u = glGetUniformLocation(bgProgram, "rightDir");
-	bgTopDir_u = glGetUniformLocation(bgProgram, "topDir");
-	
-	
-	float projection[4][4];
-	viewport_current().projectionMatrix(&projection);
+		glUniform2ui(glGetUniformLocation(bgProgram, "windowSize"), windowSize.x, windowSize.y);
+		bgProjection_u = glGetUniformLocation(bgProgram, "projection");
+		bgRightDir_u = glGetUniformLocation(bgProgram, "rightDir");
+		bgTopDir_u = glGetUniformLocation(bgProgram, "topDir");
+	}
 	
 	{
-	glDeleteProgram(debugProgram);
-	debugProgram = glCreateProgram();
-	ShaderLoader dbsl{};
-
-	//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
-	//https://gist.github.com/rikusalminen/9393151
-	//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
-    dbsl.addShaderFromCode(R"(#version 420
-		uniform mat4 projection;
-		uniform mat4 model_matrix;
-		
-		void main()
-		{
-			int tri = gl_VertexID / 3;
-			int idx = gl_VertexID % 3;
-			int face = tri / 2;
-			int top = tri % 2;
-		
-			int dir = face % 3;
-			int pos = face / 3;
-		
-			int nz = dir >> 1;
-			int ny = dir & 1;
-			int nx = 1 ^ (ny | nz);
-		
-			vec3 d = vec3(nx, ny, nz);
-			float flip = 1 - 2 * pos;
-		
-			vec3 n = flip * d;
-			vec3 u = -d.yzx;
-			vec3 v = flip * d.zxy;
-		
-			float mirror = -1 + 2 * top;
-			vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-			xyz = (xyz + 1) / 2 * 16;
-		
-			gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
-		}
-	)", GL_VERTEX_SHADER, "debug vertex");
-	dbsl.addShaderFromCode(
-		R"(#version 420
-		out vec4 color;
-		void main() {
-			color = vec4(1, 0, 0, 1);
-		})",
-		GL_FRAGMENT_SHADER, "debug shader"
-	);
-
-    dbsl.attachShaders(debugProgram);
-
-    glLinkProgram(debugProgram);
-    glValidateProgram(debugProgram);
-
-    dbsl.deleteShaders();
-
-    glUseProgram(debugProgram);
+		glDeleteProgram(debugProgram);
+		debugProgram = glCreateProgram();
+		ShaderLoader dbsl{};
 	
-	db_model_matrix_u = glGetUniformLocation(debugProgram, "model_matrix");
-	db_projection_u = glGetUniformLocation(debugProgram, "projection");
+		//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
+		//https://gist.github.com/rikusalminen/9393151
+		//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
+		dbsl.addShaderFromCode(R"(#version 420
+			uniform mat4 projection;
+			uniform mat4 model_matrix;
+			
+			void main()
+			{
+				int tri = gl_VertexID / 3;
+				int idx = gl_VertexID % 3;
+				int face = tri / 2;
+				int top = tri % 2;
+			
+				int dir = face % 3;
+				int pos = face / 3;
+			
+				int nz = dir >> 1;
+				int ny = dir & 1;
+				int nx = 1 ^ (ny | nz);
+			
+				vec3 d = vec3(nx, ny, nz);
+				float flip = 1 - 2 * pos;
+			
+				vec3 n = flip * d;
+				vec3 u = -d.yzx;
+				vec3 v = flip * d.zxy;
+			
+				float mirror = -1 + 2 * top;
+				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
+				xyz = (xyz + 1) / 2 * 16;
+			
+				gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
+			}
+		)", GL_VERTEX_SHADER, "debug vertex");
+		dbsl.addShaderFromCode(
+			R"(#version 420
+			out vec4 color;
+			void main() {
+				color = vec4(1, 0, 0, 1);
+			})",
+			GL_FRAGMENT_SHADER, "debug shader"
+		);
+	
+		dbsl.attachShaders(debugProgram);
+	
+		glLinkProgram(debugProgram);
+		glValidateProgram(debugProgram);
+	
+		dbsl.deleteShaders();
+	
+		glUseProgram(debugProgram);
+		
+		db_model_matrix_u = glGetUniformLocation(debugProgram, "model_matrix");
+		db_projection_u = glGetUniformLocation(debugProgram, "projection");
 	}
+	
+	{
+		glDeleteProgram(debugProgram2);
+		debugProgram2 = glCreateProgram();
+		ShaderLoader dbsl{};
+
+		dbsl.addShaderFromCode(R"(#version 420
+			layout(location = 0) in vec3 pos;
+			
+			uniform mat4 projection;
+			uniform mat4 model_matrix;
+			
+			void main() {			
+				gl_Position = projection * (model_matrix * vec4(pos, 1.0));
+			}
+		)", GL_VERTEX_SHADER, "debug2 vertex");
+		dbsl.addShaderFromCode(
+			R"(#version 420
+			out vec4 color;
+			void main() {
+				color = vec4(1, 0, 0, 1);
+			})",
+			GL_FRAGMENT_SHADER, "debug2 shader"
+		);
+	
+		dbsl.attachShaders(debugProgram2);
+	
+		glLinkProgram(debugProgram2);
+		glValidateProgram(debugProgram2);
+	
+		dbsl.deleteShaders();
+	
+		glUseProgram(debugProgram2);
+		
+		db2_model_matrix_u = glGetUniformLocation(debugProgram2, "model_matrix");
+		db2_projection_u = glGetUniformLocation(debugProgram2, "projection");
+	}
+	
 	
 	{
 		glDeleteProgram(playerProgram);
@@ -521,7 +571,7 @@ static void reloadShaders() {
 			R"(#version 420
 			in vec4 gl_FragCoord;
 			out vec4 color;
-			
+
 			in vec3 norm;
 			
 			float map(const float value, const float min1, const float max1, const float min2, const float max2) {
@@ -554,6 +604,9 @@ static void reloadShaders() {
 		pl_modelMatrix_u = glGetUniformLocation(playerProgram, "modelMatrix");
 	}
 	
+	float projection[4][4];
+	viewport_current().projectionMatrix(&projection);
+	
 	glUseProgram(playerProgram);
 	glUniformMatrix4fv(pl_projection_u, 1, GL_TRUE, &projection[0][0]);
 	
@@ -561,7 +614,10 @@ static void reloadShaders() {
 	glUniformMatrix4fv(bgProjection_u, 1, GL_TRUE, &projection[0][0]);
 	
 	glUseProgram(debugProgram);
-	glUniformMatrix4fv(db_projection_u, 1, GL_TRUE, &projection[0][0]);
+	glUniformMatrix4fv(db_projection_u, 1, GL_TRUE, &projection[0][0]);	
+	
+	glUseProgram(debugProgram2);
+	glUniformMatrix4fv(db2_projection_u, 1, GL_TRUE, &projection[0][0]);
 	
 	glUseProgram(mainProgram);
 	glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
@@ -643,26 +699,7 @@ static void loadChunks() {
 	}
 }
 
-/*static float intersectPlane(const Ray r, const vec3 center, const vec3 n) {
-    return dot(n, center - r.orig) / dot(n, r.dir);
-}
-
-static float intersectSquare(const Ray r, const vec3 center, const vec3 n, const vec3 up, const vec3 left, const float radius, inout vec2 uv) {
-    const vec3 c = center + n * radius; //plane center
-    const float t = intersectPlane(r, c, n);
-    const vec3 p = at(r, t); //point
-    vec3 l = p - c; //point local to plane
-    float u_ = dot(l, up);
-    float v_ = dot(l, left);
-    if (abs(u_) <= radius && abs(v_) <= radius) {
-        uv = (vec2(u_, v_) / 2 / radius + 0.5) * eps1m;
-        return t;
-    }
-    return 1.0 / 0.0;
-}*/
-
-static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround, int const remaining = 256) {
-	if(remaining == 0) { std::cout << "error\n"; std::cout.precision(17); std::cout << player.inChunkPosition() << ' ' << playerForce << '\n'; std::cout.precision(2); return; }
+static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround) {
 	static std::vector<vec3i> checkCollision{}; //inChunk positions of blocks (relative to playerChunk) that need to be checked
 	checkCollision.clear();
 	
@@ -740,7 +777,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		for(auto const chunkIndex : chunks.usedChunks())
 			if(chunks.chunksPosition()[chunkIndex] == coord_.chunk()) { pos = chunkIndex; break; }
 		
-		if(pos == -1) { std::cout << "add chunk gen!\n"; continue; }
+		//if(pos == -1) { std::cout << "add chunk gen!\n"; continue; }
 		auto const chunkData{ chunks.chunksData()[pos] };
 		auto const index{ Chunks::blockIndex(coord_.inChunkPosition()) };
 		uint16_t const &block{ chunkData[index] };
@@ -770,7 +807,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					newPlayer = ChunkCoord(player.chunk(), v);
 					
 	
-					newForce = (playerForce + normalY * strengthY) * vec3d{0.6, 1, 0.6};
+					newForce = (playerForce + normalY * strengthY) * vec3d{0.8, 1, 0.8};
 					
 					isOnGround = true;
 
@@ -898,21 +935,26 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	player = newPlayer;
 	playerForce = newForce;
 	
-	if(!isCollision || newForce.lengthSquare() == 0);
-	else updateCollision(player, playerForce, isOnGround, remaining-1);
+	return !isCollision || newForce.lengthSquare() == 0;
 }
 
+
+static std::vector<vec3f> positions{};
+
 static void update() {
+	static std::chrono::time_point<std::chrono::steady_clock> lastUpdate{std::chrono::steady_clock::now()};
+	
     auto& currentViewport = viewport_current();
 	auto &player{ playerCoord() };
 
     vec2<double> diff = (mousePos - pmousePos) / windowSize_d;
-	if(isFreeCam) playerForce = 0;
+	
+	vec3d input{};
     if (isZoomMovement && isFreeCam) {
         zoomMovement += diff.x;
 
         const auto forwardDir = currentViewport.forwardDir();
-		playerForce += forwardDir * zoomMovement * deltaTime * size;
+		input += forwardDir * zoomMovement * size;
     }
     if (isPan) {
         currentViewport.rotation += diff * (2 * misc::pi);
@@ -930,26 +972,43 @@ static void update() {
 			movement = currentViewport.flatForwardDir()*movementDir.z + currentViewport.flatTopDir()*movementDir.y + currentViewport.flatRightDir()*movementDir.x;
 		}
 		
-		vec3d const movementForce{ movement.normalized() * movementSpeed * deltaTime
+		input += movement.normalized() * movementSpeed 
 				* (shift ? 1.0*speedModifier : 1)
-				* (ctrl  ? 1.0/speedModifier : 1) };
-		playerForce = playerForce.applied([&](double const coord, auto const index) -> double { 
-			return misc::clamp(coord + movementForce[index], fmin(coord, movementForce[index]), fmax(coord, movementForce[index]));
-		});
+				* (ctrl  ? 1.0/speedModifier : 1);
     }
-	
-	if(!isFreeCam) { playerForce+=vec3d{0,-1,0}*deltaTime; }
-	if(!isFreeCam && jump) { playerForce+=vec3d{0,1,0}*16*deltaTime; }
+	if(jump) input+=vec3d{0,1,0}*16;
 	jump = false;
 	
+	input *= deltaTime;
+	
+	if(isFreeCam) spectatorCoord += input;
+	else {
+		playerForce = playerForce.applied([&](double const coord, auto const index) -> double { 
+			return misc::clamp(coord + input[index], fmin(coord, input[index]), fmax(coord, input[index]));
+		});
+	}
+
 	isOnGround = false;
 	
-	if(!isFreeCam) {
-		updateCollision(player, playerForce, isOnGround);
-	}
-	else {
-		player += playerForce;
-		playerForce = 0;
+	
+	auto const now{std::chrono::steady_clock::now()};
+	if(std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count()*1000.0 > fixedDeltaTime) {
+		lastUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
+		
+		if(!debugBtn0) {
+			playerForce+=vec3d{0,-1,0} * fixedDeltaTime;
+			positions.clear();
+			for(int i = 0; i < 1000; i++) {
+				bool const br = updateCollision(playerCoord_, playerForce, isOnGround);
+				positions.push_back(vec3f(playerCoord_.position()));
+				if(br) break;
+			}
+			
+				int r;
+			if((r = (int(positions.size()) - 1000)) > 0) {
+				positions.erase(positions.begin(), positions.begin() + r);
+			}
+		}
 	}
 	
 	loadChunks();
@@ -987,6 +1046,9 @@ int main(void) {
         glfwTerminate();
         return -1;
     }
+	
+	glEnable(GL_DEPTH_TEST);  
+	glDepthFunc(GL_LESS); 
 	
 	glEnable(GL_CULL_FACE); 
 	glEnable(GL_BLEND);
@@ -1048,6 +1110,24 @@ int main(void) {
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0); 
 	
+	
+	GLuint vb;
+	glGenBuffers(1, &vb);
+	glBindBuffer(GL_ARRAY_BUFFER, vb);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	
+	GLuint va;
+	glGenVertexArrays(1, &va);
+	
+	glBindVertexArray(va);
+	glBindBuffer(GL_ARRAY_BUFFER, vb);
+
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0); 
+	
+	
 	while ((err = glGetError()) != GL_NO_ERROR)
     {
         std::cout << err << std::endl;
@@ -1069,13 +1149,16 @@ int main(void) {
         auto const topDir{ currentViewport.topDir() };
 		
 		//glClear(GL_COLOR_BUFFER_BIT);
+		glClear(GL_DEPTH_BUFFER_BIT);
 		
 		glUseProgram(bgProgram);
 		glUniform3f(bgRightDir_u, rightDir.x, rightDir.y, rightDir.z);
         glUniform3f(bgTopDir_u, topDir.x, topDir.y, topDir.z);
 		glCullFace(GL_FRONT); 
-		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
 		
+		glDepthMask(GL_FALSE);
+		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
+		glDepthMask(GL_TRUE);
 		
 		glUseProgram(mainProgram);
         glUniform3f(rightDir_u, rightDir.x, rightDir.y, rightDir.z);
@@ -1162,7 +1245,7 @@ int main(void) {
 				
 				misc::matMult(toLoc4, translation4, &chunkToLocal);
 				
-				if(debugChunkBorder) {
+				if(debug) {
 					glUseProgram(debugProgram);
 					glUniformMatrix4fv(db_model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
 					glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
@@ -1191,7 +1274,6 @@ int main(void) {
 			glUseProgram(playerProgram);
 			
 			glUniformMatrix4fv(pl_modelMatrix_u, 1, GL_TRUE, &playerToLocal[0][0]);
-
 			glBindVertexArray(vao);
 			glBindBuffer(GL_ARRAY_BUFFER, vbo);
 			glEnableVertexAttribArray(0);
@@ -1208,6 +1290,38 @@ int main(void) {
 			
 			glDisableVertexAttribArray(0);
 			glDisableVertexAttribArray(1);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			glBindVertexArray(0); 
+		}
+		
+		
+		if(positions.size() > 1 && debug){
+			float const translation4[4][4] ={
+				{ 1, 0, 0, (float)-position.x },
+				{ 0, 1, 0, (float)-position.y },
+				{ 0, 0, 1, (float)-position.z },
+				{ 0, 0, 0, 1                  },
+			};
+	
+			float possToLocal[4][4];
+				
+			misc::matMult(toLoc4, translation4, &possToLocal);
+			glUseProgram(debugProgram2);
+			glUniformMatrix4fv(db2_model_matrix_u, 1, GL_TRUE, &possToLocal[0][0]);
+			
+			glBindVertexArray(va);
+			glBindBuffer(GL_ARRAY_BUFFER, vb);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(positions[0]) * positions.size(), &positions[0], GL_DYNAMIC_DRAW);
+			glEnableVertexAttribArray(0);
+
+			glClear(GL_DEPTH_BUFFER_BIT);
+			glDepthMask(GL_FALSE);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			glDrawArrays(GL_LINE_STRIP, 0, positions.size());
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDepthMask(GL_TRUE);
+			
+			glDisableVertexAttribArray(0);
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
 			glBindVertexArray(0); 
 		}

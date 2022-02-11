@@ -15,6 +15,7 @@ uniform vec3 rightDir, topDir;
 
 in vec4 gl_FragCoord;
 out vec4 color;
+layout (depth_any) out float gl_FragDepth;
 
 uint fragCount = 4;
 
@@ -31,8 +32,8 @@ in vec3 vertColor;
 
 uniform vec3 relativeChunkPos;
 
-
-in vec3 color_;
+uniform float near;
+uniform float far;
 
 layout(binding = 1) restrict readonly buffer ChunkIndices {
      uint data[16*16*16/2]; //indeces are shorts 	//8192
@@ -226,10 +227,11 @@ void main() {
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
 	
 	const Optional_BlockIntersection intersection = isInters(ray);
-	
+	double t = 1.0/0.0;
 	vec4 col;
 	if(intersection.is) {
 		const BlockIntersection i = intersection.it;
+		t = i.t;
 		const vec2 uv = ((i.uv-0.5f) * 0.9999f)+0.5f;
 		const bool isTop = i.side.y ==  1;
 		const bool isBot = i.side.y == -1;
@@ -246,10 +248,11 @@ void main() {
 		if(i.id != 1) {
 			col = mix(col, vec4(1, 0, 0, 1), 0.5);
 		}
-		
-		//color = vec4(uv, 0, 1);
 	}
 	else col = vec4(0,0,0,0);
 	
+	const float depth = float( ((far - (near * far) / (dot(forwardDir, rayDir) * t)) / (far - near) + 1) / 2 );
+	
 	color = col;
-}	
+	gl_FragDepth = depth;
+}		
