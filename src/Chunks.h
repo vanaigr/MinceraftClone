@@ -9,7 +9,8 @@
 
 struct Chunks {
 public:
-	static constexpr int const chunkDim = 16;
+	static constexpr int const chunkDimAsPow2 = 4;
+	static constexpr int const chunkDim = 1 << chunkDimAsPow2;
 	static constexpr int const chunkSize = chunkDim*chunkDim*chunkDim;
 	//static constexpr int const tmpChunkSize = chunkDim*chunkDim*chunkDim/(sizeof(uint16_t) * 8);
 	using ChunkData = std::array<uint16_t, chunkSize>;
@@ -77,29 +78,11 @@ public:
 			else vacant.push_back(chunkIndex);
 		}
 		
-		used.resize(0);
+		used.clear();
 		used.swap(used_);
 	}
 	
 	inline static constexpr int32_t blockIndex(vec3<int32_t> position) {
 		return position.x + position.y*Chunks::chunkDim + position.z*Chunks::chunkDim*Chunks::chunkDim;
-	}
-	
-	inline static constexpr vec3<int32_t> asChunkCoord(vec3<double> position) {
-		return static_cast<vec3<int32_t>>( (position / Chunks::chunkDim).appliedFunc<double(*)(double)>(floor) );
-	}
-	
-	inline static constexpr vec3<double> inChunkCoord(vec3<double> position) {
-		return position.applied([](auto const coord, auto ignore) -> auto { return misc::modd(coord, 16.0); });
-	}
-	
-	inline static constexpr vec3<int32_t> inChunkCoord(vec3<int32_t> position) {
-		return position.applied([](auto const coord, auto ignore) -> auto { return misc::mod(coord, 16); });
-	}
-	
-	inline static constexpr std::tuple<vec3i, vec3d> normalizePos(vec3i const chunkPos, vec3d const inChunkPos) {
-			auto const chunkOffset{ Chunks::asChunkCoord(inChunkPos) };
-			auto const inChunkPosition{ Chunks::inChunkCoord(inChunkPos) };
-			return std::make_tuple(chunkPos+chunkOffset, inChunkPosition);
 	}
 };

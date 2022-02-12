@@ -28,13 +28,22 @@ namespace misc {
     }
 	
 	inline double modd(const double x, const double y) noexcept {
-        return x - static_cast<double>(y) * floor(x / static_cast<double>(y));
+        return x - y * floor(x / y);
     }
 
     inline constexpr int32_t mod(const int32_t x, const int32_t y) noexcept {
         int32_t mod = x % y;
         // if the signs are different and modulo not zero, adjust result
         if ((x ^ y) < 0 && mod != 0) {
+            mod += y;
+        }
+        return mod;
+    }
+	
+	inline constexpr int64_t mod(const int64_t x, const int64_t y) noexcept {
+        auto mod = x % y;
+        // if the signs are different and modulo not zero, adjust result
+        if ((x ^ y) < 0ll && mod != 0ll) {
             mod += y;
         }
         return mod;

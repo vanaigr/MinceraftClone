@@ -149,7 +149,7 @@ Optional_BlockIntersection isInters(const Ray ray) {
 	
 	const vec3 stepLength = 1 / abs(dir);
 	
-	const  vec3 firstCellRow_f = floor(ray.orig + dir_);
+	const  vec3 firstCellRow_f = vec3(positive_) * ceil(ray.orig) + vec3(negative_) * floor(ray.orig - 1);//floor(ray.orig + dir_);
 	const ivec3 firstCellRow   = ivec3(firstCellRow_f); 
 	const  vec3 firstCellDiff  = abs(ray.orig-firstCellRow_f - negative_); //distance to the frist border
 	
@@ -181,7 +181,7 @@ Optional_BlockIntersection isInters(const Ray ray) {
 		
 		const  ivec3 otherAxis_i = ivec3(not(minAxis_b));
 		const vec3 curCoordF = at(ray, minCurLen);
-		const ivec3 curCoord = ivec3(floor(at(ray, minCurLen)));
+		const ivec3 curCoord = ivec3(floor(curCoordF));
 		
 		const ivec3 cellAt =  
 				+   minAxis_i * (firstCellRow + curSteps*dir_)

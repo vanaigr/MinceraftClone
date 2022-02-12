@@ -122,7 +122,7 @@ struct Viewport {
 			{ static_cast<O>(1/htF*aspectRatio), static_cast<O>(0.0), static_cast<O>(0), static_cast<O>(0.0) },
 			{ static_cast<O>(0.0), static_cast<O>(1/htF), static_cast<O>(0.0), static_cast<O>(0.0) },
 			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>( far / (far - near)), static_cast<O>(-(far * near) / (far - near)) },
-			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>( 1), static_cast<O>(0.0) }
+			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>( 1.0), static_cast<O>(0.0) }
 		};
 	
 		copy2DArray<O, 4, 4>(
@@ -152,7 +152,7 @@ static bool jump{ false };
 
 static bool isOnGround{false};
 static vec3d playerForce{};
-static ChunkCoord playerCoord_{ vec3i{0,0,0}, vec3d{0,15,0} };
+static ChunkCoord playerCoord_{ vec3i{0,0,0}, vec3d{0.01,16.01,0.01} };
 static ChunkCoord spectatorCoord{ playerCoord_ };
 static Viewport playerViewport{ 
 		vec2d{ misc::pi / 2.0, 0 },
@@ -163,8 +163,8 @@ static Viewport playerViewport{
 };
 
 static double const height{ 2 };
-static double const radius{ 0.5 };
-static  vec3d const viewportOffset_{0,height,0};
+static double const radius{ 0.45 };
+static  vec3d const viewportOffset_{0,height*0.9,0};
 static bool isFreeCam{ false };
 
 static Viewport &viewport_current() {
@@ -649,6 +649,7 @@ void generateChunk(vec3<int> const pos, Chunks::ChunkData &data) {
 				);
 				auto const height = misc::map<double>(value, -1, 1, 5, 15);
 				auto const index{ Chunks::blockIndex(vec3<int32_t>{x, y, z}) };
+				//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
 				if(height > (pos.y * Chunks::chunkDim + y)) {
 					data[index] = 1;
 				}
@@ -680,7 +681,7 @@ static void loadChunks() {
 		} 
 		return false;
 	});
-	
+
 	for(int i = 0; i < viewWidth; i ++) {
 		for(int j = 0; j < viewWidth; j ++) {
 			for(int k = 0; k < viewWidth; k ++) {
@@ -704,7 +705,7 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	checkCollision.clear();
 	
 	auto const botChunk{ player.chunk() };
-	auto const botInChunk{ player.inChunkPosition() };
+	auto const botInChunk{ player.positionInChunk() };  //TODO: rewrite using integer coords?
 	
 	vec3d const line{ playerForce };
 	float const lineLen = line.length();
@@ -768,32 +769,31 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	vec3d newForce{ playerForce };
 	double newPlayerDist = lineLen;
 	bool isCollision{ false };
-	char const *side = "";
-	
 	
 	for(auto const &coord : checkCollision) {
-		ChunkCoord const coord_{ botChunk, coord };
+		ChunkCoord const coord_{ botChunk, vec3d(coord) };
 		int pos = -1;
 		for(auto const chunkIndex : chunks.usedChunks())
 			if(chunks.chunksPosition()[chunkIndex] == coord_.chunk()) { pos = chunkIndex; break; }
 		
-		//if(pos == -1) { std::cout << "add chunk gen!\n"; continue; }
+		if(pos == -1) { std::cout << "add chunk gen!\n"; /*player = player;*/ playerForce = 0; return true; }
 		auto const chunkData{ chunks.chunksData()[pos] };
-		auto const index{ Chunks::blockIndex(coord_.inChunkPosition()) };
+		auto const index{ Chunks::blockIndex(coord_.blockInChunk()) };
 		uint16_t const &block{ chunkData[index] };
 		if(block != 0) {
 			auto const center{ static_cast<vec3d>(coord) + 0.5 };
 			vec3i const normals{ (botInChunk - center).sign() };
 			auto const facesCoord{ center + vec3d(normals)*0.5 };
 			auto const localFacesCoord{ facesCoord - botInChunk };
-			double distToTop{ abs(localFacesCoord.y) * stepLength.y }; //distance along the force
+			double distToTop{ -(localFacesCoord.y)         * stepLength.y }; //distance along the force
+			double distToBot{ (localFacesCoord.y - height) * stepLength.y }; //distance along the force
 			
 			vec2d const flatBotInChunk{ botInChunk.x, botInChunk.z };
 			vec2d const flatDir{ vec2d{dir.x,dir.z}.normalized() };
 			
 			vec3d const normalY = vec3d{0,double(normals.y),0};
 			double const strengthY{  normalY.dot(-playerForce) };
-			if(distToTop >= -0.0 && distToTop <= newPlayerDist && strengthY > 0) { //y
+			if(distToTop >= -0.0 && distToTop <= newPlayerDist && strengthY > 0) { //y-
 				auto const coordAtTop{ botInChunk + dir*distToTop };
 				vec2d closestPointTop{
 					misc::clamp<double>(coordAtTop.x, coord.x, coord.x+1),
@@ -806,11 +806,29 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					vec3d v{botInChunk + dir * distToTop};
 					newPlayer = ChunkCoord(player.chunk(), v);
 					
-	
 					newForce = (playerForce + normalY * strengthY) * vec3d{0.8, 1, 0.8};
+					//newForce = (playerForce + normalY * 2 * strengthY);  //bounce off
 					
 					isOnGround = true;
 
+				}
+			}
+			if(distToBot >= -0.0 && distToBot <= newPlayerDist && strengthY > 0) { //y+
+				auto const coordAtBot{ botInChunk + vec3d{0,height,0} + dir*distToBot };
+				vec2d closestPointTop{
+					misc::clamp<double>(coordAtBot.x, coord.x, coord.x+1),
+					misc::clamp<double>(coordAtBot.z, coord.z, coord.z+1)
+				};
+				bool isIntersection{ (vec2d{coordAtBot.x, coordAtBot.z}-closestPointTop).lengthSquare() < radius*radius };
+				if(isIntersection) {
+					isCollision = true;
+					newPlayerDist = distToTop;
+					vec3d v{botInChunk + dir * distToBot};
+					newPlayer = ChunkCoord(player.chunk(), v);
+					
+	
+					newForce = (playerForce + normalY * strengthY) * vec3d{0.8, 1, 0.8};
+					//newForce = (playerForce + normalY * 2 * strengthY);  //bounce off
 				}
 			}
 			
@@ -863,10 +881,8 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					newPlayerDist = newT;
 					newPlayer = ChunkCoord(player.chunk(), v);
 	
-					newForce = playerForce + normal * strengthX;
-					//newForce = playerForce + normal * 2 * strengthX; //bounce off
-					
-					side = "x";
+					newForce = playerForce + normal * strengthX;  //bounce off
+					//newForce = playerForce + normal * 2 * strengthX;
 				}
 				
 			}
@@ -922,8 +938,6 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	
 					newForce = playerForce + normal * strengthZ;
 					//newForce = playerForce + normal * 2 * strengthZ; //bounce off
-				
-					side = "z";
 				}
 				
 			}
@@ -1169,7 +1183,7 @@ int main(void) {
 
         glUniform1f(time_u,
             sin(
-                std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count()
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0
             )
         );
 		
@@ -1179,12 +1193,13 @@ int main(void) {
 		currentViewport.localToGlobalSpace(&toGlob);
 		currentViewport.globalToLocalSpace(&toLoc);
 		vec3<int32_t> const playerChunk{ player.chunk() };
-		auto const cameraPosInChunk{ player.inChunkPosition()+viewportOffset() };
+		auto const cameraPosInChunk{ player.positionInChunk()+viewportOffset() };
 		
 		if(testInfo) {
-					std::cout << (mousePos.x / windowSize_d.x) << ' '
-		                      << (mousePos.y / windowSize_d.y) << '\n'
-							  << cameraPosInChunk << '\n';
+			std::cout << position << '\n';
+			std::cout << playerCoord().positionInChunk() << '\n';
+			std::cout << playerCoord().blockInChunk() << '\n';
+			std::cout << playerCoord().chunk() << '\n';
 		}
 		
 		float const toLoc4[4][4] = {
@@ -1326,6 +1341,7 @@ int main(void) {
 			glBindVertexArray(0); 
 		}
 		
+		testInfo = false; 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 		
@@ -1347,7 +1363,6 @@ int main(void) {
 		}
 
         update();
-		testInfo = false; 
     }
 
     glfwTerminate();

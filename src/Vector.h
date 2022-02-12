@@ -312,6 +312,7 @@ inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const C f) n
 using vec3f = vec3<float>;
 using vec3d = vec3<double>;
 using vec3i = vec3<int32_t>;
+using vec3l = vec3<int64_t>;
 using vec3b = vec3<bool>;
 
 using vec2f = vec2<float>;
