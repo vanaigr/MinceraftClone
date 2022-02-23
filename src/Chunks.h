@@ -21,6 +21,7 @@ private:
 	
 	std::vector<int> used{};
 	std::vector<vec3<int32_t>> chunksPos{};
+	std::vector<bool> gpuPresent_{};
 	std::vector<ChunkData> chunksDataRepr{};
 	//std::vector<tmpChunkData> tmpChunksData{};
 public:
@@ -28,10 +29,12 @@ public:
 	inline std::vector<int> const &usedChunks() const { return used; }
 	
 	inline std::vector<vec3i> &chunksPosition() { return chunksPos; }
+	inline std::vector<bool> &gpuPresent() { return gpuPresent_; }
 	inline std::vector<ChunkData> &chunksData() { return chunksDataRepr; }
 	//inline std::vector<ChunkDataRepresentation> &temporalChunksData() { return tmpChunksData; }
 	
 	inline std::vector<vec3i>const &chunksPosition() const { return chunksPos; }
+	inline std::vector<bool>const &gpuPresent() const { return gpuPresent_; }
 	inline std::vector<ChunkData>const &chunksData() const { return chunksDataRepr; }
 	//inline std::vector<ChunkDataRepresentation>const &temporalChunksData() const { return tmpChunksData; }
 	
@@ -47,6 +50,7 @@ public:
 		else { //TODO: avoid zero-init
 			index = usedSize;
 			chunksPos.resize(index+1);
+			gpuPresent_.resize(index+1);
 			chunksDataRepr.resize(index+1);
 		}
 		used.push_back(index);

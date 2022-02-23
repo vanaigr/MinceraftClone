@@ -16,6 +16,15 @@ public:
 	inline constexpr vec2() : x(0), y(0) {};
 	inline constexpr vec2(C value) : x(value), y(value) {};
 	inline constexpr vec2(C x_, C y_) : x(x_), y(y_) {};
+	
+	template<typename C2, typename = std::enable_if_t<std::is_convertible<C, C2>::value>>
+	inline constexpr explicit operator vec2<C2>() const {
+		return vec2<C2>{
+			static_cast<C2>(x),
+			static_cast<C2>(y)
+		};
+	}
+
 
 	inline constexpr vec2<C> operator+(const vec2<C>& o) const {
 		return vec2(x + o.x, y + o.y);
@@ -126,7 +135,7 @@ public:
 	inline constexpr vec3<C> &operator=(vec3<C> &&) = default;
 	
 	template<typename C2, typename = std::enable_if_t<std::is_convertible<C, C2>::value>>
-	inline constexpr operator vec3<C2>() const {
+	inline constexpr explicit operator vec3<C2>() const {
 		return vec3<C2>{
 			static_cast<C2>(x),
 			static_cast<C2>(y),
@@ -214,6 +223,11 @@ public:
 	inline constexpr C dot(vec3<C> o) const {
 		return x * o.x + y * o.y + z * o.z;
 	}
+	
+	
+	inline constexpr C dotNonan(vec3<C> o) const {
+		return misc::nonan(x * o.x) + misc::nonan(y * o.y) + misc::nonan(z * o.z);
+	}
 
 	inline constexpr C lengthSquare() const {
 		return this->dot(*this);
@@ -246,11 +260,14 @@ public:
 		);
 	}
 	
-	inline constexpr bool in(vec3<C> const b1, vec3<C> const b2) const {
-		auto const in = [](C const v, C const b1, C const b2) {
-			return (b1 < b2) ? (b1 <= v && v <= b2) : (b2 <= v && v <= b1);
-		};
-		return in(x, b1.x, b2.x) && in(y, b1.y, b2.y) && in(z, b1.z, b2.z);
+	inline constexpr vec3<bool> in(vec3<C> const b1, vec3<C> const b2) const {
+		return vec3<bool>{misc::in(x, b1.x, b2.x), misc::in(y, b1.y, b2.y), misc::in(z, b1.z, b2.z)};
+	}
+	
+	inline constexpr vec3<bool> inMMX(vec3<C> const min, vec3<C> const maxExcluded) const {
+		return applied([&](C const v, auto i) -> bool {
+			return min[i] <= v && v < maxExcluded[i];
+		});
 	}
 	
 	inline constexpr vec3<int> sign() const {
@@ -277,8 +294,31 @@ public:
 		return this->applied([](C const &it, size_t const index) -> C { return std::floor(it); });
 	}
 	
+	inline constexpr vec3<C> ceil() const {
+		return this->applied([](C const &it, size_t const index) -> C { return std::ceil(it); });
+	}
+	
+	inline constexpr vec3<C> trunc() const {
+		return this->applied([](C const &it, size_t const index) -> C { return std::trunc(it); });
+	}
+	
+	
 	inline constexpr vec3<C> clamp(C const b1, C const b2) const {
 		return this->applied([&](C const &it, size_t const index) -> C { return misc::clamp<C>(it, b1, b2); });
+	}
+	
+	inline constexpr vec3<C> clamp(vec3<C> const b1, vec3<C>  const b2) const {
+		return this->applied([&](C const &it, size_t const index) -> C { return misc::clamp<C>(it, b1[index], b2[index]); });
+	}
+	
+	inline constexpr C all() const {
+		return x && y && z;
+	}
+	
+	inline constexpr vec3<C> nonan() const {
+		return applied([](auto const coord, auto i) -> C {
+			return misc::nonan(coord);
+		});
 	}
 };
 
@@ -296,17 +336,17 @@ inline constexpr vec3<El> vecMult(El const (&m1)[3][3], vec3<El> const &m2) {
 }
 	
 template<class C>
-inline constexpr vec3<C> vec3lerp(const vec3<C> a, const vec3<C> b, const C f) noexcept {
+inline constexpr vec3<C> vec3lerp(const vec3<C> a, const vec3<C> b, const vec3<C> f) noexcept {
 	return vec3<C>(
-		misc::lerp(a.x, b.x, f), 
-		misc::lerp(a.y, b.y, f),
-		misc::lerp(a.z, b.z, f)
+		misc::lerp(a.x, b.x, f.x), 
+		misc::lerp(a.y, b.y, f.y),
+		misc::lerp(a.z, b.z, f.z)
 	);
 }
 
 template<class C>
-inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const C f) noexcept {
-	return vec2<C>(misc::lerp(a.x, b.x, f), misc::lerp(a.y, b.y, f));
+inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const vec2<C> f) noexcept {
+	return vec2<C>(misc::lerp(a.x, b.x, f.x), misc::lerp(a.y, b.y, f.y));
 }
 	
 using vec3f = vec3<float>;
@@ -317,5 +357,6 @@ using vec3b = vec3<bool>;
 
 using vec2f = vec2<float>;
 using vec2d = vec2<double>;
-
 using vec2i = vec2<int32_t>;
+using vec2l = vec2<int64_t>;
+using vec2b = vec2<bool>;

@@ -22,16 +22,23 @@ namespace misc {
     constexpr inline typename std::underlying_type<E>::type to_underlying(const E e) noexcept {
         return static_cast<typename std::underlying_type<E>::type>(e);
     }
-
+	
+	template<typename T>
+	T mod(T x, T y); 
+	
+	
     inline float modf(const float x, const float y) noexcept {
         return x - static_cast<double>(y) * floor(x / static_cast<double>(y));
     }
+	template<> float mod<float>(float x, float y) {return modf(x,y);}
 	
 	inline double modd(const double x, const double y) noexcept {
         return x - y * floor(x / y);
     }
+	template<> double mod<double>(double x, double y) {return modf(x,y);}
 
-    inline constexpr int32_t mod(const int32_t x, const int32_t y) noexcept {
+	template<>
+    int32_t mod<int32_t>(int32_t x, int32_t y) {
         int32_t mod = x % y;
         // if the signs are different and modulo not zero, adjust result
         if ((x ^ y) < 0 && mod != 0) {
@@ -40,17 +47,14 @@ namespace misc {
         return mod;
     }
 	
-	inline constexpr int64_t mod(const int64_t x, const int64_t y) noexcept {
+	template<>
+	int64_t mod<int64_t>(int64_t x, int64_t y) {
         auto mod = x % y;
         // if the signs are different and modulo not zero, adjust result
         if ((x ^ y) < 0ll && mod != 0ll) {
             mod += y;
         }
         return mod;
-    }
-
-    inline constexpr uint32_t umod(const uint32_t x, const uint32_t y) noexcept {
-        return x % y;
     }
 
     template<class Type>
@@ -68,27 +72,47 @@ namespace misc {
         }
         return t2;
     }
-
-    inline constexpr uint32_t roundUpIntTo(uint32_t number, uint32_t round) {
+	
+	template<typename T>
+	inline constexpr T roundUpTo(T number, T round) {
         const auto remainder = (number - 1) % round;
         const auto result = number + (round - remainder - 1);
-        assert(result % round == 0);
+		if((result % round != 0) || (result < number)) { std::cerr << number << ' ' << round << ' ' << result << '\n'; assert(false); }
         return result;
+    }
+
+	template<typename T>
+    inline constexpr T roundDownTo(T number, T round) {
+        const auto remainder = misc::mod(number, round);
+        const auto result = number - remainder;
+		if((result % round != 0) || (result > number)) { std::cerr << number << ' ' << round << ' ' << result << '\n'; assert(false); }
+        return result;
+    }
+
+	inline constexpr uint32_t roundUpIntTo(uint32_t number, uint32_t round) {
+        return roundUpTo<int32_t>(number, round);
     }
 
     inline constexpr int32_t roundDownIntTo(int32_t number, int32_t round) {
-        const auto remainder = misc::mod(number, round);
-        const auto result = number - remainder;
-        assert((result % round == 0) || (result <= number));
-        return result;
+        return roundDownTo<int32_t>(number, round);
     }
 
-    inline constexpr uint32_t intDivCeil(uint32_t number, uint32_t round) {
-        return roundUpIntTo(number, round) / round;
+    //inline constexpr uint32_t intDivCeil(uint32_t number, uint32_t round) {
+    //    return roundUpIntTo(number, round) / round;
+    //}
+	//
+    //inline constexpr int32_t intDivFloor(int32_t number, int32_t round) {
+    //    return roundDownIntTo(number, round) / round;
+    //}
+	
+	template<typename T>
+	inline constexpr T divCeil(T number, T round) {
+        return roundUpTo(number, round) / round;
     }
 
-    inline constexpr int32_t intDivFloor(int32_t number, int32_t round) {
-        return roundDownIntTo(number, round) / round;
+	template<typename T>
+    inline constexpr T divFloor(T number, T round) {
+        return roundDownTo(number, round) / round;
     }
 
     template<class T>
@@ -102,6 +126,20 @@ namespace misc {
         return lerp(a, b, unlerp(va, vb, value));
     }
 	
+	template<typename T, size_t size, typename Action, typename = std::enable_if_t<(size>=1)>>
+	inline constexpr T fold(T &&start, T (&arr)[size], Action &&a) {
+		decltype(a(start, start)) accum{ start };
+		for(size_t i{}; i < size; ++i) {
+			accum = a(accum, arr[i]);
+		}
+		return accum;
+	}
+		
+	template<typename T>
+	constexpr inline T nonan(T val) {
+		return (val == val) ? val : T(0);
+	}
+
 	/*void invertMatrix3To(double const (&m)[3][3], double (*minv)[3][3]) {//https://stackoverflow.com/a/18504573/15291447
 	double const det = 
 				m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) -
@@ -137,11 +175,38 @@ namespace misc {
 	
 	template<typename V>
 	inline constexpr bool in(V const v, V const b1, V const b2) {
-		return (b1 < b2) ? (b1 < v && v < b2) : (b2 < v && v < b1);
+		return (b1 < b2) ? (b1 <= v && v <= b2) : (b2 <= v && v <= b1);
 	}
 	
 	template <typename T> 
 	inline constexpr int sign(T val) {
 		return (T(0) < val) - (val < T(0));
+	}
+	
+	//https://en.wikipedia.org/wiki/Integer_square_root
+	int32_t integerSqrtF(int32_t const n){
+		if(n < 2) {
+			assert(n >= 0);
+			return n;
+		}
+		
+		int32_t shift = 2;
+		while((n >> shift) != 0) shift += 2;
+
+		int32_t result = 0;
+		while(shift >= 0) {
+			result = result << 1;
+			int32_t large_cand = result + 1;
+			if(large_cand * large_cand <= (n >> shift))
+				result = large_cand;
+			shift -= 2;
+		}
+	
+		return result;
+	}
+		
+	int32_t integerSqrtC(int32_t const n) {
+		int32_t r = integerSqrtF(n);
+		return r + (r*r!=n);
 	}
 }

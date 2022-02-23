@@ -35,9 +35,11 @@ uniform vec3 relativeChunkPos;
 uniform float near;
 uniform float far;
 
-layout(binding = 1) restrict readonly buffer ChunkIndices {
-     uint data[16*16*16/2]; //indeces are shorts 	//8192
+layout(binding = 1) restrict readonly buffer ChunksIndices {
+     uint data[][16*16*16/2]; //indeces are shorts 	//8192
 };
+
+uniform uint chunk;
 
 struct Block {
 	uint id;
@@ -66,20 +68,16 @@ bool checkBoundaries(const ivec3 i) {
 	#undef ch16
 }
 
-bool isIntersection(const ivec3 i_v) {
-	const int index = i_v.x + i_v.y * 16 + i_v.z * 16 * 16;
-	const int packedIndex = index / 2;
-	const int offset = (index % 2) * 16;
-	const uint id = (data[packedIndex] >> offset) & 65535;
-	return id != 0;
-}
-
 uint blockAt(const ivec3 i_v) {
 	const int index = i_v.x + i_v.y * 16 + i_v.z * 16 * 16;
 	const int packedIndex = index / 2;
 	const int offset = (index % 2) * 16;
-	const uint id = (data[packedIndex] >> offset) & 65535;
+	const uint id = (data[chunk][packedIndex] >> offset) & 65535;
 	return id;
+}
+
+bool isIntersection(const ivec3 i_v) {
+	return blockAt(i_v) != 0;
 }
 
 bool isIntersection_s(const ivec3 i_v) {
@@ -235,7 +233,9 @@ void main() {
 		const vec2 uv = ((i.uv-0.5f) * 0.9999f)+0.5f;
 		const bool isTop = i.side.y ==  1;
 		const bool isBot = i.side.y == -1;
-		col = vec4(
+		const uint blockId = i.id;
+		//if(blockId == 1) {
+			col = vec4(
 				mix(
 				mix(
 					sampleAtlas(vec2(0, 0), uv),
@@ -245,9 +245,13 @@ void main() {
 				sampleAtlas(vec2(2, 0), uv),
 				float(isBot)
 				), 1);
-		if(i.id != 1) {
-			col = mix(col, vec4(1, 0, 0, 1), 0.5);
-		}
+		//}
+		//else 
+		if(blockId == 2) col = mix(col, vec4(0,0,1,1), 0.5);
+		if(blockId == 3) col = mix(col, vec4(1,0,0,1), 0.5);
+		//if(i.id != 1) {
+		//	col = mix(col, vec4(1, 0, 0, 1), 0.5);
+		//}
 	}
 	else col = vec4(0,0,0,0);
 	

@@ -34,15 +34,13 @@ build-run: $(EXECUTABLE)
 build: $(EXECUTABLE)
 
 $(EXECUTABLE): $(SOURCES) $(OBJECT_FILES)
-	@echo -------------------------------------------------
-	@echo building $@:
-	$(CC) $(LIBS_PATH) $(LIBS) $(WIN_API_LIBS) $(OBJECT_FILES) -o "$@"
+	@echo building $@
+	@ $(CC) $(LIBS_PATH) $(LIBS) $(WIN_API_LIBS) $(OBJECT_FILES) -o "$@"
 
 $(OBJECT_DIR)/%.o: $(SOURCE_DIR)/%.cpp
-	@echo -------------------------------------------------
-	@echo compiling $<:
+	@echo compiling $<
 	@if not exist "$(dir $@)" mkdir "$(dir $@)"
-	$(CC) $(PPFLAGS) $(INCLUDES) $(CFLAGS) "$<" -o "$@"
+	@ $(CC) $(PPFLAGS) $(INCLUDES) $(CFLAGS) "$<" -o "$@"
 	
 clear-obj: 
 	@if exist "$(OBJECT_DIR)" rmdir $(OBJECT_DIR) /s
