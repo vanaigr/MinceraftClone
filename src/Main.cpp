@@ -10,26 +10,21 @@
 #include"ChunkCoord.h"
 #include"Viewport.h"
 
-
-#include <iostream>
-#include<chrono>
+#include"ShaderLoader.h"
+#include"Read.h"
+#include"Misc.h"
+#include"PerlinNoise.h"
+#include"MeanCounter.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
-
-#include"ShaderLoader.h"
-#include"Read.h"
-#include"Misc.h"
-#include"PerlinNoise.h"
-
+#include<iostream>
+#include<chrono>
+#include<optional>
 #include<vector>
 #include<array>
-
-#include"MeanCounter.h"
-
-
 #include<limits>
 
 //#define FULLSCREEN
@@ -64,7 +59,7 @@ static bool jump{ false };
 
 static bool isOnGround{false};
 static vec3d playerForce{};
-static ChunkCoord playerCoord_{ vec3i{0,0,0}, vec3d{0.01,16.01,0.01} };
+static ChunkCoord playerCoord_{ vec3i{0,0,0}, vec3d{0.01,12.001,0.01} };
 static ChunkCoord spectatorCoord{ playerCoord_ };
 static Viewport playerViewport{ 
 	vec2d{ misc::pi / 2.0, 0 },
@@ -628,15 +623,44 @@ static void loadChunks() {
 	}
 }
 
+struct PosDir {
+	vec3d posInChunk;
+	vec3l chunkPart;
+	vec3i chunk;
+	
+	vec3d line;
+	vec3d dir;
+	vec3d stepLength;
+	double lineLen;
+	
+	PosDir(ChunkCoord const coord, vec3d line_): 
+		posInChunk{ coord.positionInChunk() },
+		chunkPart{ coord.chunkPart__long() },
+		chunk{ coord.chunk() },
+		
+		line{ line_ },
+		dir{ line_.normalized() },
+		stepLength{ vec3d{1.0} / dir.abs() },
+		lineLen{ line_.length() }
+	{}	  
+	
+	vec3l part_end() const { return chunkPart + ChunkCoord::posToFracTrunk(line); }
+	ChunkCoord end() const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_end()} }; }
+	
+	vec3l part_at(double const t) const { return chunkPart + ChunkCoord::posToFracTrunk(dir * t); }
+	ChunkCoord at(double const t) const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_at(t)} }; }
+};
+
 struct CollisionInfo {
 	vec3i blockCoord;
 	vec3i normals;
 	
-	vec3l chunkPart;
-	vec3d pos;
-	vec3d dir;
-	vec3d force;
-	vec3d stepLength;
+	PosDir const *posDir;
+	//vec3l chunkPart;
+	//vec3d pos;
+	//vec3d dir;
+	//vec3d force;
+	//vec3d stepLength;
 	
 	double radius;
 	double height;
@@ -667,20 +691,22 @@ static CollisionResult checkSide(CollisionInfo const ci, vec3b const forwardAxis
 	vec3d const rd{ rightAxis };
 	vec3d const ud{ upAxis };
 	vec3l const ul{ upAxis };
+	auto const &pd{ *ci.posDir };
+	
 	vec3i const facesCoord_i{ ci.blockCoord + ci.normals.max(0) };
-	vec3d const localFacesCoord{ vec3d(facesCoord_i) - ci.pos };
-	auto  newT = (localFacesCoord.dot(fd)*ci.dir.sign().dot(fi) - radius) * ci.stepLength.dotNonan(fd);
+	vec3d const localFacesCoord{ vec3d(facesCoord_i) - pd.posInChunk };
+	auto  newT = (localFacesCoord.dot(fd)*pd.dir.sign().dot(fi) - radius) * pd.stepLength.dotNonan(fd);
 	vec3d normal{ ci.normals * fi };
 	if(normal == 0) return CollisionResult::noCollision();
-	vec3l v{ ci.chunkPart + ChunkCoord::posToFracTrunk(ci.dir * newT) };
+	vec3l v{ pd.chunkPart + ChunkCoord::posToFracTrunk(pd.dir * newT) };
 	
 	bool const checkRight = v.in(ChunkCoord::blockToFrac(ci.blockCoord), ChunkCoord::blockToFrac(ci.blockCoord+1)).dot(rightAxis);
 	if(!checkRight) {
 		vec2i minEdge;
 		double minDist, minT;
 		
-		vec2d flatBotInChunk{ ci.pos.dot(fd), ci.pos.dot(rd) };
-		vec2d flatDir{ vec2d{ci.dir.dot(fd), ci.dir.dot(rd)}.normalized() };
+		vec2d flatBotInChunk{ pd.posInChunk.dot(fd), pd.posInChunk.dot(rd) };
+		vec2d flatDir{ vec2d{pd.dir.dot(fd), pd.dir.dot(rd)}.normalized() };
 		
 		vec2i const edge1{ facesCoord_i.dot(fi), ci.blockCoord.dot(ri)+0 };
 		vec2i const edge2{ facesCoord_i.dot(fi), ci.blockCoord.dot(ri)+1 };
@@ -707,7 +733,14 @@ static CollisionResult checkSide(CollisionInfo const ci, vec3b const forwardAxis
 		}
 		
 		newT = minT - dt;
-		vec3d end = ci.pos + ci.dir * newT;
+		
+		v = pd.part_at(newT);
+		vec2l const newToMinEdge{ ChunkCoord::blockToFrac(minEdge) - vec2l{v.dot(fl), v.dot(rl)} };
+		
+		vec3l const newToMinEdgeAbs{ fi * newToMinEdge.x + ri * newToMinEdge.y };
+		normal = -ChunkCoord::fracToPos(newToMinEdgeAbs).normalized();
+		
+		/*vec3d end = pd.posInChunk + pd.dir * newT;
 		
 		vec2d const newToMinEdge{ vec2d(minEdge) - vec2d{end.dot(fd), end.dot(rd)} };
 		
@@ -716,18 +749,18 @@ static CollisionResult checkSide(CollisionInfo const ci, vec3b const forwardAxis
 		
 		auto const offsetAbs{ ChunkCoord::posToFracRAway(normal * radius)  };
 		auto const minEdgeAbs{ fi * minEdge.x + ri * minEdge.y };
-		v = ChunkCoord::posToFrac(end * ud) + ChunkCoord::blockToFrac(minEdgeAbs) + offsetAbs;
+		v = ChunkCoord::posToFrac(end * ud) + ChunkCoord::blockToFrac(minEdgeAbs) + offsetAbs;*/
 	}
 	bool const checkU = 
 		ChunkCoord::blockToFrac(ci.blockCoord).dot(ul) < (v+ChunkCoord::posToFrac(vec3d(ci.height))).dot(ul)
 		&& 
 		(ChunkCoord::blockToFrac(ci.blockCoord+1).dot(ul) > v.dot(ul));
 	
-	double const strengthF{ static_cast<vec3d>(normal).dot(-ci.force) };
+	double const strengthF{ static_cast<vec3d>(normal).dot(-pd.line) };
 	if(checkU && strengthF >= 0) {
 		return CollisionResult {
 			v,
-			ci.force + normal * strengthF,
+			pd.line + normal * strengthF,
 			newT,
 			true
 		};
@@ -740,18 +773,20 @@ static CollisionResult checkTB(CollisionInfo const ci, bool top, vec3b const for
 	vec3d  const fd{ forwardAxis };
 	vec3d  const rd{ rightAxis };
 	vec3d  const ud{ upAxis };
+	auto const &pd{ *ci.posDir };
 	
-	vec3d const checkPos{ top ? (ci.pos + fd * ci.height) : ci.pos };
+	vec3d const checkPos{ top ? (pd.posInChunk + fd * ci.height) : pd.posInChunk };
 	
 	vec3i const facesCoord_i{ ci.blockCoord + ci.normals.max(0) };
 	vec3d const localFacesCoord{ vec3d(facesCoord_i) - checkPos };
-	double const distToSide{ (localFacesCoord * ci.stepLength * vec3d(ci.dir.sign())).nonan().dot(fd) };
+	double const distToSide{( localFacesCoord * pd.stepLength * vec3d(pd.dir.sign()) ).dotNonan(fd)};
+
 	vec3d const normal{ vec3d(ci.normals) * fd };
 	if(normal == 0) return CollisionResult::noCollision();
-	double const strength{ normal.dot(-ci.force) };
+	double const strength{ normal.dot(-pd.line) };
 	
 	if(strength > 0) { 
-		vec3d const coordAtSide{ checkPos + ci.dir*distToSide };
+		vec3d const coordAtSide{ checkPos + pd.dir*distToSide };
 		vec3d const clp{ coordAtSide.clamp(vec3d(ci.blockCoord), vec3d(ci.blockCoord)+1.0) };
 		vec2d const closestPoint{
 			coordAtSide.dot(rd),
@@ -761,8 +796,8 @@ static CollisionResult checkTB(CollisionInfo const ci, bool top, vec3b const for
 		bool isIntersection{ (vec2d{coordAtSide.x, coordAtSide.z}-closestPoint).lengthSquare() <= radius*radius };
 		
 		return CollisionResult{
-			ci.chunkPart + ChunkCoord::posToFracTrunk(ci.dir * distToSide),
-			(ci.force + normal * strength) * vec3lerp(vec3d{0.8}, vec3d{1}, fd),
+			pd.part_at(distToSide),
+			(pd.line + normal * strength) * vec3lerp(vec3d{0.8}, vec3d{1}, fd),
 			distToSide,
 			isIntersection
 		};
@@ -770,27 +805,200 @@ static CollisionResult checkTB(CollisionInfo const ci, bool top, vec3b const for
 	return CollisionResult::noCollision();
 }
 
+struct DDA {
+private:
+	//const
+	PosDir posDir;
+	vec3d firstCellDiff;
+	double maxLen;
+	
+	//mutable
+	vec3i curSteps;
+	bool end;
+public:
+	DDA(PosDir const pd_) : 
+	    posDir{ pd_ },
+		firstCellDiff{ ( pd_.posInChunk - ( pd_.posInChunk + vec3d(pd_.dir.sign().max(vec3i{0})) ).floor() ).abs() }, //distance to the frist border 
+		maxLen{ pd_.line.length() },
+		curSteps{ 0 },
+		end{ false }
+	{}
+	
+	double next() {
+		vec3d const curLen{ (firstCellDiff + vec3d{curSteps}) * posDir.stepLength };
+		double minCurLen{ fmin(fmin(curLen.x, curLen.y), curLen.z) };
+		
+		if(minCurLen >= maxLen) { 
+			end = true;
+			minCurLen = maxLen; 
+		}
+		vec3b const minAxis{ curLen.equal(minCurLen) };
+		
+		curSteps += vec3i(minAxis);
+		
+		return minCurLen;
+	}
+	
+	#define G(name) auto get_##name() const { return name ; }
+	G(posDir)
+	G(firstCellDiff)
+	G(maxLen)
+	G(curSteps)
+	G(end)
+	#undef G
+};
+
 static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround, std::vector<vec3i> &candidates, vec3i *(&collided)) {	
 	static int prev = 0;
+	auto const rad_i{ ChunkCoord::posToFracRAway(radius).x }; 
+	auto const height_i{ ChunkCoord::posToFracRAway(height).x };
+		
+	PosDir const posDir{ player, playerForce };
+	DDA dda{ posDir };
 	
-	auto const botChunk{ player.chunk() };
+	vec3i lastChunkCoord;
+	int32_t lastChunkIndex = -1;
+	
+	vec3l newOffset{ posDir.part_end() };
+	vec3d newForce{ posDir.line };
+	double newPlayerDist = dda.get_maxLen();
+	bool isCollision{ false };	
+	bool newIsOnGround{ isOnGround };
+	
+	vec3i collided_;
+	
+	bool side = false;
+	bool skipS = false;
+	bool x__ = false;
+	
+	vec3i lastBBMin{0};
+	vec3i lastBBMax{0};
+	
+	for(int i = 0;; i ++) {
+		double const minLen{ dda.next() };
+		vec3l const curCoord = posDir.part_at(minLen);
+
+		vec2l const botXZ_i{ curCoord.x, curCoord.z };
+		
+		auto const curBBMin{ ChunkCoord::fracToBlock(vec3l{botXZ_i.x - rad_i, curCoord.y         , botXZ_i.y - rad_i}) };
+		auto const curBBMax{ ChunkCoord::fracToBlock(vec3l{botXZ_i.x + rad_i, curCoord.y+height_i, botXZ_i.y + rad_i}) };
+		
+		for(int32_t x = curBBMin.x; x <= curBBMax.x; x++)	
+		for(int32_t y = curBBMin.y; y <= curBBMax.y; y++)
+		for(int32_t z = curBBMin.z; z <= curBBMax.z; z++) {
+			vec3i const coord{x,y,z};
+			
+			if(coord.in(lastBBMin, lastBBMax).all()) continue;
+			
+			ChunkCoord const coord_{ posDir.chunk, ChunkCoord::Block{coord} };
+			vec3i chunkCoord{ coord_.chunk() };
+			int chunkIndex = -1;
+			
+			if(lastChunkCoord == chunkCoord && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
+			else for(auto const elChunkIndex : chunks.usedChunks())
+				if(chunks.chunksPosition()[elChunkIndex] == chunkCoord) { chunkIndex = elChunkIndex; break; }
+			
+			lastChunkIndex = chunkIndex;
+			lastChunkCoord = chunkCoord; 
+			
+			if(chunkIndex == -1) { 
+				//auto const usedIndex{ genChunkAt(chunkCoord) }; //generates every frame
+				//chunkIndex = chunks.usedChunks()[usedIndex];
+				std::cout << "add chunk gen!\n"; playerForce = 0; return true; 
+			}
+			auto const chunkData{ chunks.chunksData()[chunkIndex] };
+			auto const index{ Chunks::blockIndex(coord_.blockInChunk()) };
+			uint16_t const &block{ chunkData[index] };
+			if(block != 0) {				
+				CollisionInfo const ci{
+					coord,
+					vec3i{1},
+					
+					&posDir,
+					
+					radius,
+					height,
+					newPlayerDist
+				};
+				
+
+				
+				CollisionInfo ci2{ ci };
+				ci2.normals = -ci2.normals;
+
+				
+				CollisionResult collisions[] = {
+					checkTB(ci, false, vec3b{0,1,0}, vec3b{1,0,0}, vec3b{0,0,1}), //y-
+					checkTB(ci2, true, vec3b{0,1,0}, vec3b{1,0,0}, vec3b{0,0,1}), //y+
+					checkSide(ci,      vec3b{1,0,0}, vec3b{0,0,1}, vec3b{0,1,0}), //x
+					checkSide(ci2,     vec3b{1,0,0}, vec3b{0,0,1}, vec3b{0,1,0}), //x-
+					checkSide(ci,      vec3b{0,0,1}, vec3b{1,0,0}, vec3b{0,1,0}), //z
+					checkSide(ci2,     vec3b{0,0,1}, vec3b{1,0,0}, vec3b{0,1,0}), //z-
+				};
+				
+				int minI = -1;
+				double minDist = newPlayerDist;
+				
+
+				for(size_t i = 0; i < sizeof(collisions)/sizeof(collisions[0]); i++) {
+					auto const &c{ collisions[i] };
+					if(c.isCollision) {
+						candidates.push_back(posDir.chunk * Chunks::chunkDim + coord);
+					}
+					if(c.isCollision && c.distance <= minDist && c.distance >= 0) {
+						minI = i;
+						minDist = c.distance;
+					}
+				}
+				
+				if(minI != -1) {
+					auto &c{ collisions[minI] };
+					isCollision = true;
+					newIsOnGround = (minI == 0) || isOnGround;
+					newPlayerDist = minDist;
+					newOffset = c.pos;
+
+					newForce = c.force;
+					
+					if(minI >= 2) { side = true; prev = 5; x__ = minI < 4; skipS = false; }
+					else side = false;
+					collided_ = posDir.chunk * Chunks::chunkDim + coord;
+				}
+				else {
+					skipS = true;
+				}
+			}
+		}
+		
+		if( i >= 100 || dda.get_end() || newPlayerDist <= minLen ) break;
+
+		lastBBMin = curBBMin;
+		lastBBMax = curBBMax;
+	}
+	
+	player = ChunkCoord{ posDir.chunk, ChunkCoord::Fractional{newOffset} };
+	playerForce = newForce;
+	isOnGround = newIsOnGround;
+	
+	if(isCollision) *collided = collided_;
+	else collided = NULL;
+	return !isCollision || newForce.lengthSquare() == 0;
+	
+	/*auto const botChunk{ player.chunk() };
 	auto const botInChunk{ player.positionInChunk() };
 	auto const botChunkPart{ player.chunkPart__long() };  
 	
 	vec3d const line{ playerForce };
-	float const lineLen = line.length();
+	double const lineLen = line.length();
 	vec3d const dir = line.normalized();
 	vec3i const dir_{ static_cast<vec3i>(dir.sign()) };
 	vec3i const positive_ = (+dir_).max(vec3i{0});
-	vec3i const negative_ = (-dir_).max(vec3i{0});
 	
 	vec3d const lineEnd{botInChunk + dir * lineLen};
 		  
 	vec3d const stepLength = vec3d{1.0} / dir.abs();
 		  
-	vec3d const firstCellRow_f = (botInChunk + vec3d(dir_)).floor();
-	vec3i const firstCellRow{static_cast<vec3i>(firstCellRow_f)}; 
-	vec3d const firstCellDiff  = (botInChunk - firstCellRow_f - vec3d(negative_)).abs(); //distance to the frist border
+	vec3d const firstCellDiff  = (botInChunk - (botInChunk + vec3d(positive_)).floor()).abs(); //distance to the frist border
 
 	vec3i curSteps{0};
 	vec3d curLen = stepLength * firstCellDiff;
@@ -858,7 +1066,7 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			if(chunkIndex == -1) { 
 				//auto const usedIndex{ genChunkAt(chunkCoord) }; //generates every frame
 				//chunkIndex = chunks.usedChunks()[usedIndex];
-				std::cout << "add chunk gen!\n"; /*player = player;*/ playerForce = 0; return true; 
+				std::cout << "add chunk gen!\n"; playerForce = 0; return true; 
 			}
 			auto const chunkData{ chunks.chunksData()[chunkIndex] };
 			auto const index{ Chunks::blockIndex(coord_.blockInChunk()) };
@@ -927,7 +1135,7 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			}
 		}	
 		
-		if(end) break;
+		if(newPlayerDist <= nextMinLength || end) break;
 		
 		lastBBMin = curBBMin;
 		lastBBMax = curBBMax;
@@ -959,7 +1167,7 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	
 	if(isCollision) *collided = collided_;
 	else collided = NULL;
-	return !isCollision || newForce.lengthSquare() == 0;
+	return !isCollision || newForce.lengthSquare() == 0;*/
 }
 
 static std::vector<vec3f> positions{};
@@ -1043,6 +1251,27 @@ static void update() {
 	loadChunks();
 
     pmousePos = mousePos;
+}
+
+int main2() {
+	ChunkCoord player{ vec3i{}, vec3d{0.01,12.001,0.01} };
+	vec3d playerForce{ 0, -1, 0 };
+	bool isOnGround = false;
+	vec3i ci{};
+	vec3i *cl2;
+	
+	for(int x = -1; x <= 1; x++)
+	for(int y = -1; y <= 1; y++)
+	for(int l = -1; l <= 1; l++) {
+		genChunkAt(vec3i{x, y, l});
+	}
+	
+	std::cout.precision(17);
+	updateCollision(player, playerForce = {0, -0.95, 0}, isOnGround, candidates, cl2 = &ci);
+	//updateCollision(player, playerForce = {0, -0.95, 0}, isOnGround, candidates, cl2 = &ci);
+
+	std::cout << "\n#" << player << ' ' << playerForce << '\n';
+	return 0;
 }
 
 int main(void) {

@@ -18,7 +18,8 @@ struct ChunkCoord {
 			return std::copysign(coord, val[i]);
 		}) }; 
 	}
-	static constexpr inline vec3l blockToFrac(vec3i value) { return vec3l{value}*fracBlockDim; }
+	template<template<typename> typename Cont>
+	static constexpr inline Cont<int64_t> blockToFrac(Cont<int32_t> value) { return Cont<int64_t>(value)*fracBlockDim; }
 	static constexpr inline vec3l chunk_ToFrac(vec3i value) { return vec3l{value}*fracChunkDim; }
 	
 	static constexpr inline vec3d fracToPos(vec3l value) { return static_cast<vec3d>(value) / fracBlockDim; }
