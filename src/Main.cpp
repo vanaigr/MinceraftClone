@@ -26,6 +26,7 @@
 #include<vector>
 #include<array>
 #include<limits>
+#include<tuple>
 
 //#define FULLSCREEN
 
@@ -91,8 +92,27 @@ static void reloadShaders();
 static bool testInfo = false;
 static bool debugBtn0 = false, debugBtn1 = false;
 
+
+bool mouseCentered = true;
+
+enum class BlockAction {
+	NONE = 0,
+	PLACE,
+	BREAK
+} static blockAction{ BlockAction::NONE };
+
+static double const blockActionCD{ 100.0 / 1000.0 };
+
+
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     bool isPress = !(action == GLFW_RELEASE);
+	if(key == GLFW_KEY_ESCAPE && !isPress) {
+		mouseCentered = !mouseCentered;
+		if(mouseCentered) {
+			glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		}
+		else glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+	}
 	if(key == GLFW_KEY_W)
 		movementDir.z = 1 * isPress;
 	else if(key == GLFW_KEY_S)
@@ -135,27 +155,31 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 }
 
 static void cursor_position_callback(GLFWwindow* window, double mousex, double mousey) {
+	static vec2d pMouse{0};
     static vec2<double> relativeTo{ 0, 0 };
     vec2<double> mousePos_{ mousex,  mousey };
     
-    relativeTo += mousePos_;
-    mousePos_.x = misc::modf(mousePos_.x, windowSize_d.x);
-    mousePos_.y = misc::modf(mousePos_.y, windowSize_d.y);
-    relativeTo -= mousePos_;
-
-    glfwSetCursorPos(window, mousePos_.x, mousePos_.y);
-
+	if(mouseCentered) {
+		relativeTo += mousePos_ - pMouse;
+	} else {
+		relativeTo += mousePos_;
+		mousePos_.x = misc::modf(mousePos_.x, windowSize_d.x);
+		mousePos_.y = misc::modf(mousePos_.y, windowSize_d.y);
+		relativeTo -= mousePos_;
+		glfwSetCursorPos(window, mousePos_.x, mousePos_.y);
+	}
+	
+	pMouse = mousePos_;
     mousePos = vec2<double>(relativeTo.x + mousePos_.x, -relativeTo.y + windowSize_d.y - mousePos_.y);
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
     if(button == GLFW_MOUSE_BUTTON_LEFT) {
-        if (action == GLFW_PRESS) {
-            isPan = true;
-        }
-        else if (action == GLFW_RELEASE) {
-            isPan = false;
-        }
+		if(mouseCentered) blockAction = action == GLFW_PRESS ? BlockAction::BREAK : BlockAction::NONE;
+		else isPan = action != GLFW_RELEASE;
+	}
+	else if(button == GLFW_MOUSE_BUTTON_RIGHT) {
+		if(mouseCentered) blockAction = action == GLFW_PRESS ? BlockAction::PLACE : BlockAction::NONE;
 	}
     else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
         if (action == GLFW_PRESS) {
@@ -580,7 +604,7 @@ static int32_t genChunkAt(vec3i const position) {
 	auto const chunkIndex{ chunks.usedChunks()[usedIndex] };
 					
 	chunks.chunksPosition()[chunkIndex] = position;
-	chunks.gpuPresent()[chunkIndex] = 0;
+	chunks.gpuPresent()[chunkIndex] = false;
 	generateChunk(position, chunks.chunksData()[chunkIndex]);
 	
 	return usedIndex;
@@ -789,11 +813,11 @@ static CollisionResult checkTB(CollisionInfo const ci, bool top, vec3b const for
 		vec3d const coordAtSide{ checkPos + pd.dir*distToSide };
 		vec3d const clp{ coordAtSide.clamp(vec3d(ci.blockCoord), vec3d(ci.blockCoord)+1.0) };
 		vec2d const closestPoint{
-			coordAtSide.dot(rd),
-			coordAtSide.dot(ud)
+			clp.dot(rd),
+			clp.dot(ud)
 		};
 
-		bool isIntersection{ (vec2d{coordAtSide.x, coordAtSide.z}-closestPoint).lengthSquare() <= radius*radius };
+		bool isIntersection{ (vec2d{coordAtSide.x, coordAtSide.z}-closestPoint).lengthSquare() < radius*radius };
 		
 		return CollisionResult{
 			pd.part_at(distToSide),
@@ -824,7 +848,7 @@ public:
 		end{ false }
 	{}
 	
-	double next() {
+	std::tuple<double, vec3b> next() {
 		vec3d const curLen{ (firstCellDiff + vec3d{curSteps}) * posDir.stepLength };
 		double minCurLen{ fmin(fmin(curLen.x, curLen.y), curLen.z) };
 		
@@ -836,7 +860,7 @@ public:
 		
 		curSteps += vec3i(minAxis);
 		
-		return minCurLen;
+		return std::make_tuple( minCurLen, minAxis );
 	}
 	
 	#define G(name) auto get_##name() const { return name ; }
@@ -875,7 +899,7 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	vec3i lastBBMax{0};
 	
 	for(int i = 0;; i ++) {
-		double const minLen{ dda.next() };
+		double const minLen{ std::get<0>(dda.next()) };
 		vec3l const curCoord = posDir.part_at(minLen);
 
 		vec2l const botXZ_i{ curCoord.x, curCoord.z };
@@ -983,204 +1007,133 @@ static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	if(isCollision) *collided = collided_;
 	else collided = NULL;
 	return !isCollision || newForce.lengthSquare() == 0;
-	
-	/*auto const botChunk{ player.chunk() };
-	auto const botInChunk{ player.positionInChunk() };
-	auto const botChunkPart{ player.chunkPart__long() };  
-	
-	vec3d const line{ playerForce };
-	double const lineLen = line.length();
-	vec3d const dir = line.normalized();
-	vec3i const dir_{ static_cast<vec3i>(dir.sign()) };
-	vec3i const positive_ = (+dir_).max(vec3i{0});
-	
-	vec3d const lineEnd{botInChunk + dir * lineLen};
-		  
-	vec3d const stepLength = vec3d{1.0} / dir.abs();
-		  
-	vec3d const firstCellDiff  = (botInChunk - (botInChunk + vec3d(positive_)).floor()).abs(); //distance to the frist border
-
-	vec3i curSteps{0};
-	vec3d curLen = stepLength * firstCellDiff;
-	
-	int i = 0;
-	
-	double nextMinLength = 0;
-	
-	
-	vec3i lastChunkCoord;
-	int32_t lastChunkIndex = -1;
-	
-	ChunkCoord newPlayer{ player + line };
-	vec3d newForce{ playerForce };
-	double newPlayerDist = lineLen;
-	bool isCollision{ false };	
-	bool newIsOnGround{ isOnGround };
-	
-	vec3i collided_;
-	
-	bool side = false;
-	bool skipS = false;
-	bool x__ = false;
-	
-	vec3i lastBBMin{0};
-	vec3i lastBBMax{0};
-	
-	for(; i < 100; i ++) {
-		double minCurLen = nextMinLength;
-		
-		bool const end = minCurLen >= lineLen;
-		if(end) { minCurLen = lineLen; curLen = lineLen; }
-		
-		vec3b const minAxis_b = curLen.equal(vec3d(minCurLen));
-		vec3d const minAxis_f{ static_cast<vec3d>(minAxis_b) };
-		vec3i const minAxis_i{ static_cast<vec3i>(minAxis_b) };
-		
-		vec3i const otherAxis_i{ static_cast<vec3i>(minAxis_b.lnot()) };
-		auto const curCoord = botChunkPart + ChunkCoord::posToFrac(dir * minCurLen); //just posToFrac
-		vec2l const botXZ_i{ curCoord.x, curCoord.z };
-		auto const rad_i{ ChunkCoord::posToFracRAway(radius).x }; 
-		auto const height_i{ ChunkCoord::posToFracRAway(height).x };
-		
-		auto const curBBMin{ ChunkCoord::fracToBlock(vec3l{botXZ_i.x - rad_i, curCoord.y         , botXZ_i.y - rad_i}) };
-		auto const curBBMax{ ChunkCoord::fracToBlock(vec3l{botXZ_i.x + rad_i, curCoord.y+height_i, botXZ_i.y + rad_i}) };
-	
-		for(int32_t x = curBBMin.x; x <= curBBMax.x; x++)	
-		for(int32_t y = curBBMin.y; y <= curBBMax.y; y++)
-		for(int32_t z = curBBMin.z; z <= curBBMax.z; z++) {
-			vec3i const coord{x,y,z};
-			
-			if(coord.in(lastBBMin, lastBBMax).all()) continue;
-			
-			ChunkCoord const coord_{ botChunk, ChunkCoord::Block{coord} };
-			vec3i chunkCoord{ coord_.chunk() };
-			int chunkIndex = -1;
-			
-			if(lastChunkCoord == chunkCoord && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-			else for(auto const elChunkIndex : chunks.usedChunks())
-				if(chunks.chunksPosition()[elChunkIndex] == chunkCoord) { chunkIndex = elChunkIndex; break; }
-			
-			lastChunkIndex = chunkIndex;
-			lastChunkCoord = chunkCoord; 
-			
-			if(chunkIndex == -1) { 
-				//auto const usedIndex{ genChunkAt(chunkCoord) }; //generates every frame
-				//chunkIndex = chunks.usedChunks()[usedIndex];
-				std::cout << "add chunk gen!\n"; playerForce = 0; return true; 
-			}
-			auto const chunkData{ chunks.chunksData()[chunkIndex] };
-			auto const index{ Chunks::blockIndex(coord_.blockInChunk()) };
-			uint16_t const &block{ chunkData[index] };
-			if(block != 0) {				
-				CollisionInfo const ci{
-					coord,
-					vec3i{1},
-					
-					botChunkPart,
-					botInChunk,
-					dir,
-					playerForce,
-					stepLength,
-					
-					radius,
-					height,
-					newPlayerDist
-				};
-				
-
-				
-				CollisionInfo ci2{ ci };
-				ci2.normals = -ci2.normals;
-
-				
-				CollisionResult collisions[] = {
-					checkTB(ci, false, vec3b{0,1,0}, vec3b{1,0,0}, vec3b{0,0,1}), //y-
-					checkTB(ci2, true, vec3b{0,1,0}, vec3b{1,0,0}, vec3b{0,0,1}), //y+
-					checkSide(ci,      vec3b{1,0,0}, vec3b{0,0,1}, vec3b{0,1,0}), //x
-					checkSide(ci2,     vec3b{1,0,0}, vec3b{0,0,1}, vec3b{0,1,0}), //x-
-					checkSide(ci,      vec3b{0,0,1}, vec3b{1,0,0}, vec3b{0,1,0}), //z
-					checkSide(ci2,     vec3b{0,0,1}, vec3b{1,0,0}, vec3b{0,1,0}), //z-
-				};
-				
-				int minI = -1;
-				double minDist = newPlayerDist;
-				
-				for(size_t i = 0; i < sizeof(collisions)/sizeof(collisions[0]); i++) {
-					auto const &c{ collisions[i] };
-					if(c.isCollision) {
-						candidates.push_back(botChunk * Chunks::chunkDim + coord);
-					}
-					if(c.isCollision && c.distance <= minDist && c.distance >= 0) {
-						minI = i;
-						minDist = c.distance;
-					}
-				}
-				
-				if(minI != -1) {
-					auto &c{ collisions[minI] };
-					isCollision = true;
-					newIsOnGround = (minI == 0) || isOnGround;
-					newPlayerDist = minDist;
-					newPlayer = ChunkCoord(botChunk, ChunkCoord::Fractional{c.pos});
-
-					newForce = c.force;
-					
-					if(minI >= 2) { side = true; prev = 5; x__ = minI < 4; skipS = false; }
-					else side = false;
-					collided_ = botChunk * Chunks::chunkDim + coord;
-				}
-				else {
-					skipS = true;
-				}
-			}
-		}	
-		
-		if(newPlayerDist <= nextMinLength || end) break;
-		
-		lastBBMin = curBBMin;
-		lastBBMax = curBBMax;
-
-		curSteps += minAxis_i;
-		curLen += minAxis_f * stepLength;
-
-		nextMinLength = fmin(fmin(curLen.x, curLen.y), curLen.z);
-	}
-	if(i == 100) { 
-		std::cout << "i is huge!\n";
-	}
-	
-	if(false) if((isCollision && side) || (!isCollision && prev > 0)) { 
-		std::cout << player.chunk() << '+' << player.chunkPart() << ' ' 
-		<< player.positionInChunk() << ' ' << playerForce << ' ' << (collided_ - botChunk * Chunks::chunkDim ) << ' ' << skipS << x__ << '\n';
-		if(!isCollision) {
-			prev = misc::max(prev-1, 0);
-					if(prev == 0) {
-				std::cout << "\n\n\n";
-			}
-		}
-	}
-		
-	player = newPlayer;
-	playerForce = newForce;
-	isOnGround = newIsOnGround;
-	std::cout.precision(17);
-	
-	if(isCollision) *collided = collided_;
-	else collided = NULL;
-	return !isCollision || newForce.lengthSquare() == 0;*/
 }
 
 static std::vector<vec3f> positions{};
 static std::vector<vec3i> candidates{}; //collision candidates
 static std::vector<vec3i> collided{};
 
-static void update() {
-	static std::chrono::time_point<std::chrono::steady_clock> lastUpdate{std::chrono::steady_clock::now()};
+static void update() {	
+	static std::chrono::time_point<std::chrono::steady_clock> lastPhysicsUpdate{std::chrono::steady_clock::now()};
+	static std::chrono::time_point<std::chrono::steady_clock> lastBlockUpdate{std::chrono::steady_clock::now()};
+	auto const now{std::chrono::steady_clock::now()};
+
+	auto const diffBlockMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBlockUpdate).count() };
+	auto const diffPhysicsMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPhysicsUpdate).count() };
 	
     auto& currentViewport = viewport_current();
 	auto &player{ playerCoord() };
 
     vec2<double> diff = (mousePos - pmousePos) / windowSize_d;
+	
+	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE && !isFreeCam) {
+		lastBlockUpdate = now;
+
+		ChunkCoord const viewport{ playerCoord_ + ChunkCoord::Fractional{ChunkCoord::posToFracTrunk(viewportOffset_)} };
+		PosDir const pd{ PosDir(viewport, viewport_current().forwardDir() * 7) };
+		DDA checkBlock{ pd };
+		
+		vec3i lastChunkCoord{};
+		int lastChunkIndex{-1};
+	
+		if(blockAction == BlockAction::BREAK) {
+			for(int i = 0;; i++) {
+				double at;
+				vec3b minAxis;
+				std::tie(at, minAxis) = checkBlock.next();
+				
+				ChunkCoord const coord{ pd.at(at) + ChunkCoord::Block{ pd.dir.sign().min(0) * vec3i{minAxis} } };
+				
+				vec3i const blockCoord = coord.blockInChunk();
+				vec3i const blockChunk = coord.chunk();
+				
+				int chunkIndex = -1;
+				
+				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
+				else for(auto const elChunkIndex : chunks.usedChunks())
+					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				
+				lastChunkIndex = chunkIndex;
+				lastChunkCoord = blockChunk; 
+				
+				if(chunkIndex == -1) { 
+					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
+					//chunkIndex = chunks.usedChunks()[usedIndex];
+					std::cout << "block: add chunk gen!\n"; 
+					break;
+				}
+				
+				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+				uint16_t const &block{ chunkData[index] };
+				
+				if(block != 0) {
+					auto const index{ Chunks::blockIndex(blockCoord) };
+					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
+					block = 0;
+					chunks.gpuPresent()[chunkIndex] = false;
+
+					break;
+				}
+				else if(checkBlock.get_end() || i >= 100) break;
+			}
+		}
+		else {
+			for(int i = 0;; i++) {
+				double at;
+				vec3b curMinAxis;
+				std::tie(at, curMinAxis) = checkBlock.next();
+				
+				ChunkCoord const coord{ pd.at(at) };
+				ChunkCoord const nextCoord{ pd.at(at) + ChunkCoord::Block{ pd.dir.sign().min(0) * vec3i{curMinAxis} } };
+				
+				vec3i const blockCoord = nextCoord.blockInChunk();
+				vec3i const blockChunk = nextCoord.chunk();
+				
+				int chunkIndex = -1;
+				
+				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
+				else for(auto const elChunkIndex : chunks.usedChunks())
+					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				
+				lastChunkIndex = chunkIndex;
+				lastChunkCoord = blockChunk; 
+				
+				if(chunkIndex == -1) { 
+					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
+					//chunkIndex = chunks.usedChunks()[usedIndex];
+					std::cout << "block: add chunk gen!\n"; 
+					break;
+				}
+				
+				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const index{ Chunks::blockIndex(nextCoord.blockInChunk()) };
+				uint16_t const &block{ chunkData[index] };
+				
+				if(block != 0) {
+					std::cout << blockCoord << '\n';
+					
+					ChunkCoord const bc{ coord - ChunkCoord::Block{ pd.dir.sign().max(0) * vec3i{curMinAxis} } };
+					vec3i const blockCoord = bc.blockInChunk();
+					vec3i const blockChunk = bc.chunk();
+			
+					int chunkIndex = -1;
+			
+					if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
+					else for(auto const elChunkIndex : chunks.usedChunks())
+						if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+					
+					auto const index{ Chunks::blockIndex(blockCoord) };
+					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
+					block = 1;
+					chunks.gpuPresent()[chunkIndex] = false;
+
+					break;
+				}
+				else if(checkBlock.get_end() || i >= 100) break;
+			}
+		}
+	}
 	
 	vec3d input{};
     if (isZoomMovement && isFreeCam) {
@@ -1189,8 +1142,8 @@ static void update() {
         const auto forwardDir = currentViewport.forwardDir();
 		input += forwardDir * zoomMovement * size;
     }
-    if (isPan) {
-        currentViewport.rotation += diff * (2 * misc::pi);
+    if (isPan || mouseCentered) {
+        currentViewport.rotation += diff * (2 * misc::pi) * vec2d{ 0.8, 0.8 };
         currentViewport.rotation.y = misc::clamp(currentViewport.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
     }
     if (movementDir.lengthSquare() != 0) {
@@ -1221,10 +1174,8 @@ static void update() {
 		});
 	}
 	
-	auto const now{std::chrono::steady_clock::now()};
-	auto const diffMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count() };
-	if(diffMs > fixedDeltaTime * 1000) {
-		lastUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
+	if(diffPhysicsMs > fixedDeltaTime * 1000) {
+		lastPhysicsUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
 		
 		if(!debugBtn0) {
 			candidates.clear();
@@ -1253,28 +1204,13 @@ static void update() {
     pmousePos = mousePos;
 }
 
-int main2() {
-	ChunkCoord player{ vec3i{}, vec3d{0.01,12.001,0.01} };
-	vec3d playerForce{ 0, -1, 0 };
-	bool isOnGround = false;
-	vec3i ci{};
-	vec3i *cl2;
-	
-	for(int x = -1; x <= 1; x++)
-	for(int y = -1; y <= 1; y++)
-	for(int l = -1; l <= 1; l++) {
-		genChunkAt(vec3i{x, y, l});
-	}
-	
-	std::cout.precision(17);
-	updateCollision(player, playerForce = {0, -0.95, 0}, isOnGround, candidates, cl2 = &ci);
-	//updateCollision(player, playerForce = {0, -0.95, 0}, isOnGround, candidates, cl2 = &ci);
-
-	std::cout << "\n#" << player << ' ' << playerForce << '\n';
-	return 0;
-}
-
 int main(void) {
+	//vec3d a{15.55, 0, -0.45};
+	//double x, y, z;
+	//std::cin >> x >> y >> z;
+	//std::cout << a.clamp(vec3d{x, y, z}, vec3d{x, y, z}+1);
+	//exit(0);
+	
     GLFWwindow* window;
 
     if (!glfwInit())
@@ -1296,7 +1232,8 @@ int main(void) {
     }
 
     glfwMakeContextCurrent(window);
-
+	if(mouseCentered) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	
     GLenum err = glewInit();
     if (err != GLEW_OK)
     {
@@ -1319,7 +1256,9 @@ int main(void) {
     glfwSetCursorPosCallback(window, cursor_position_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetScrollCallback(window, scroll_callback);
-
+	glfwSetCursorPos(window, 0, 0);
+	cursor_position_callback(window, 0, 0);
+	pmousePos = mousePos;
 
 	//load shaders
 	reloadShaders();
@@ -1441,7 +1380,9 @@ int main(void) {
 		
 		if(testInfo) {
 			std::cout << position << '\n';
+			std::cout.precision(17);
 			std::cout << playerCoord().positionInChunk() << '\n';
+			std::cout.precision(2);
 			std::cout << playerCoord().blockInChunk() << '\n';
 			std::cout << playerCoord().chunk() << '\n';
 		}

@@ -257,6 +257,12 @@ void main() {
 	
 	const float depth = float( ((far - (near * far) / (dot(forwardDir, rayDir) * t)) / (far - near) + 1) / 2 );
 	
-	color = col;
-	gl_FragDepth = depth;
+	if(length(gl_FragCoord.xy - windowSize / 2) < 3) {
+		color = vec4(vec3(0.98), 1);
+		gl_FragDepth = 0;
+	}
+	else {
+		color = col;
+		gl_FragDepth = depth;
+	}
 }		
