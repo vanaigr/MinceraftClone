@@ -47,6 +47,10 @@ public:
 	inline constexpr vec2<C> operator-() const {
 		return vec2(-x, -y);
 	}
+	
+	inline constexpr vec2<C> operator!() const {
+		return vec2(!x, !y);
+	}
 
 	inline constexpr vec2<C>& operator-=(const vec2<C>& o) {
 		x -= o.x;
@@ -170,6 +174,9 @@ public:
 	inline constexpr vec3<C> operator-() const {
 		return vec3(-x, -y, -z);
 	}
+	inline constexpr vec3<C> operator!() const {
+		return vec3(!x, !y, !z);
+	}
 
 	inline constexpr vec3<C>& operator-=(const vec3<C> o) {
 		x -= o.x;
@@ -262,6 +269,10 @@ public:
 	
 	inline constexpr vec3<bool> in(vec3<C> const b1, vec3<C> const b2) const {
 		return vec3<bool>{misc::in(x, b1.x, b2.x), misc::in(y, b1.y, b2.y), misc::in(z, b1.z, b2.z)};
+	}
+	
+	inline constexpr vec3<bool> inX(vec3<C> const b1, vec3<C> const b2) const {
+		return vec3<bool>{misc::inX(x, b1.x, b2.x), misc::inX(y, b1.y, b2.y), misc::inX(z, b1.z, b2.z)};
 	}
 	
 	inline constexpr vec3<bool> inMMX(vec3<C> const min, vec3<C> const maxExcluded) const {

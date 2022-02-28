@@ -178,6 +178,31 @@ namespace misc {
 		return (b1 < b2) ? (b1 <= v && v <= b2) : (b2 <= v && v <= b1);
 	}
 	
+	template<typename V>
+	inline constexpr bool inX(V const v, V const b1, V const b2) {
+		return (b1 < b2) ? (b1 < v && v < b2) : (b2 < v && v < b1);
+	}
+	
+	template<typename V>
+	inline constexpr bool intersects(V const v1, V const v2, V const b1, V const b2) {
+		V const vi{ std::min(v1, v2) };
+		V const va{ std::max(v1, v2) };
+		V const bi{ std::min(b1, b2) };
+		V const ba{ std::max(b1, b2) };
+		
+		return vi <= ba && bi <= va;
+	}
+	
+	template<typename V>
+	inline constexpr bool intersectsX(V const v1, V const v2, V const b1, V const b2) {
+		V const vi{ std::min(v1, v2) };
+		V const va{ std::max(v1, v2) };
+		V const bi{ std::min(b1, b2) };
+		V const ba{ std::max(b1, b2) };
+		
+		return vi < ba && bi < va;
+	}
+	
 	template <typename T> 
 	inline constexpr int sign(T val) {
 		return (T(0) < val) - (val < T(0));

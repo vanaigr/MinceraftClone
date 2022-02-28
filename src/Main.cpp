@@ -72,6 +72,10 @@ static Viewport playerViewport{
 
 static double const height{ 1.95 };
 static double const radius{ 0.45 };
+
+static int64_t const rad_i{ ChunkCoord::posToFracRAway(radius).x }; 
+static int64_t const height_i{ ChunkCoord::posToFracRAway(height).x };
+	
 static  vec3d const viewportOffset_{0,height*0.9,0};
 static bool isFreeCam{ false };
 
@@ -680,11 +684,6 @@ struct CollisionInfo {
 	vec3i normals;
 	
 	PosDir const *posDir;
-	//vec3l chunkPart;
-	//vec3d pos;
-	//vec3d dir;
-	//vec3d force;
-	//vec3d stepLength;
 	
 	double radius;
 	double height;
@@ -775,10 +774,15 @@ static CollisionResult checkSide(CollisionInfo const ci, vec3b const forwardAxis
 		auto const minEdgeAbs{ fi * minEdge.x + ri * minEdge.y };
 		v = ChunkCoord::posToFrac(end * ud) + ChunkCoord::blockToFrac(minEdgeAbs) + offsetAbs;*/
 	}
-	bool const checkU = 
-		ChunkCoord::blockToFrac(ci.blockCoord).dot(ul) < (v+ChunkCoord::posToFrac(vec3d(ci.height))).dot(ul)
-		&& 
-		(ChunkCoord::blockToFrac(ci.blockCoord+1).dot(ul) > v.dot(ul));
+	
+	int64_t const blockPos{ ChunkCoord::blockToFrac(ci.blockCoord).dot(ul) };
+	bool const checkU = misc::intersectsX( 
+		blockPos, blockPos+ChunkCoord::blockToFrac(vec3i{1}).x,
+		 v.dot(ul), (v+height_i).dot(ul)
+	);
+		//ChunkCoord::blockToFrac(ci.blockCoord).dot(ul) < (v+height_i).dot(ul)
+		//&& 
+		//(ChunkCoord::blockToFrac(ci.blockCoord+1).dot(ul) > v.dot(ul));
 	
 	double const strengthF{ static_cast<vec3d>(normal).dot(-pd.line) };
 	if(checkU && strengthF >= 0) {
@@ -833,6 +837,7 @@ struct DDA {
 private:
 	//const
 	PosDir posDir;
+	vec3i firstCellRow;
 	vec3d firstCellDiff;
 	double maxLen;
 	
@@ -842,13 +847,14 @@ private:
 public:
 	DDA(PosDir const pd_) : 
 	    posDir{ pd_ },
-		firstCellDiff{ ( pd_.posInChunk - ( pd_.posInChunk + vec3d(pd_.dir.sign().max(vec3i{0})) ).floor() ).abs() }, //distance to the frist border 
+		firstCellRow{ vec3l((pd_.posInChunk + vec3d(pd_.dir.sign().max(vec3i{0}))).floor()) },
+		firstCellDiff{ ( pd_.posInChunk - vec3d(firstCellRow) ).abs() }, //distance to the frist border 
 		maxLen{ pd_.line.length() },
 		curSteps{ 0 },
 		end{ false }
 	{}
 	
-	std::tuple<double, vec3b> next() {
+	std::tuple<double, vec3b, vec3i> next() {
 		vec3d const curLen{ (firstCellDiff + vec3d{curSteps}) * posDir.stepLength };
 		double minCurLen{ fmin(fmin(curLen.x, curLen.y), curLen.z) };
 		
@@ -858,13 +864,15 @@ public:
 		}
 		vec3b const minAxis{ curLen.equal(minCurLen) };
 		
+		vec3i const curSteps_{ curSteps };
 		curSteps += vec3i(minAxis);
 		
-		return std::make_tuple( minCurLen, minAxis );
+		return std::make_tuple( minCurLen, minAxis, curSteps_ );
 	}
 	
 	#define G(name) auto get_##name() const { return name ; }
 	G(posDir)
+	G(firstCellRow)
 	G(firstCellDiff)
 	G(maxLen)
 	G(curSteps)
@@ -874,8 +882,6 @@ public:
 
 static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround, std::vector<vec3i> &candidates, vec3i *(&collided)) {	
 	static int prev = 0;
-	auto const rad_i{ ChunkCoord::posToFracRAway(radius).x }; 
-	auto const height_i{ ChunkCoord::posToFracRAway(height).x };
 		
 	PosDir const posDir{ player, playerForce };
 	DDA dda{ posDir };
@@ -1013,6 +1019,22 @@ static std::vector<vec3f> positions{};
 static std::vector<vec3i> candidates{}; //collision candidates
 static std::vector<vec3i> collided{};
 
+bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
+	ChunkCoord const relativeBlockCoord{ ChunkCoord{ blockChunk, ChunkCoord::Block{blockCoord} } - playerCoord_ };
+	vec3l const relativeBlockPos{ relativeBlockCoord.position__long() };
+	vec3l const relativeBlockEndPos{ relativeBlockPos + ChunkCoord::blockToFrac(vec3i{1}) };
+	bool const checkY{ misc::intersectsX(relativeBlockPos.y, relativeBlockEndPos.y, 0ll, height_i) };
+	if(!checkY) return true;
+	vec3l const nearest{ vec3l{0}.clamp( 
+		relativeBlockPos, 
+		relativeBlockEndPos
+	) };
+	vec2l nearestXZ{ nearest.x, nearest.z };
+	
+	if(nearestXZ.lengthSquare() >= rad_i*rad_i) return true;
+	return false;
+}
+
 static void update() {	
 	static std::chrono::time_point<std::chrono::steady_clock> lastPhysicsUpdate{std::chrono::steady_clock::now()};
 	static std::chrono::time_point<std::chrono::steady_clock> lastBlockUpdate{std::chrono::steady_clock::now()};
@@ -1031,6 +1053,7 @@ static void update() {
 
 		ChunkCoord const viewport{ playerCoord_ + ChunkCoord::Fractional{ChunkCoord::posToFracTrunk(viewportOffset_)} };
 		PosDir const pd{ PosDir(viewport, viewport_current().forwardDir() * 7) };
+		vec3i const dirSign{ pd.dir.sign() };
 		DDA checkBlock{ pd };
 		
 		vec3i lastChunkCoord{};
@@ -1040,9 +1063,20 @@ static void update() {
 			for(int i = 0;; i++) {
 				double at;
 				vec3b minAxis;
-				std::tie(at, minAxis) = checkBlock.next();
+				vec3b otherAxis;
+				vec3i curSteps;
+				std::tie(at, minAxis, curSteps) = checkBlock.next();
+				otherAxis = !minAxis;
 				
-				ChunkCoord const coord{ pd.at(at) + ChunkCoord::Block{ pd.dir.sign().min(0) * vec3i{minAxis} } };
+				vec3i const coord_{ ChunkCoord::fracToBlock(pd.part_at(at)) };
+				ChunkCoord const coord{ 
+					pd.chunk,
+					ChunkCoord::Block{ 
+						coord_ * vec3i(otherAxis) + 
+						(checkBlock.get_firstCellRow() + dirSign * curSteps) * vec3i(minAxis) + 
+						pd.dir.sign().min(0) * vec3i{minAxis} 
+					} 
+				};
 				
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
@@ -1059,7 +1093,7 @@ static void update() {
 				if(chunkIndex == -1) { 
 					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
 					//chunkIndex = chunks.usedChunks()[usedIndex];
-					std::cout << "block: add chunk gen!\n"; 
+					std::cout << "block br: add chunk gen!" << coord << '\n'; 
 					break;
 				}
 				
@@ -1068,11 +1102,11 @@ static void update() {
 				uint16_t const &block{ chunkData[index] };
 				
 				if(block != 0) {
+					std::cout << blockCoord << ' ' ;
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
 					block = 0;
 					chunks.gpuPresent()[chunkIndex] = false;
-
 					break;
 				}
 				else if(checkBlock.get_end() || i >= 100) break;
@@ -1080,12 +1114,25 @@ static void update() {
 		}
 		else {
 			for(int i = 0;; i++) {
+			
 				double at;
-				vec3b curMinAxis;
-				std::tie(at, curMinAxis) = checkBlock.next();
+				vec3b minAxis;
+				vec3b otherAxis;
+				vec3i curSteps;
+				std::tie(at, minAxis, curSteps) = checkBlock.next();
+				otherAxis = !minAxis;
 				
-				ChunkCoord const coord{ pd.at(at) };
-				ChunkCoord const nextCoord{ pd.at(at) + ChunkCoord::Block{ pd.dir.sign().min(0) * vec3i{curMinAxis} } };
+				vec3i const coord_{ ChunkCoord::fracToBlock(pd.part_at(at)) };
+				ChunkCoord const coord{ 
+					pd.chunk,
+					ChunkCoord::Block{ 
+						coord_ * vec3i(otherAxis) + 
+						(checkBlock.get_firstCellRow() + dirSign * curSteps) * vec3i(minAxis) + 
+						pd.dir.sign().min(0) * vec3i{minAxis} 
+					} 
+				};
+				
+				ChunkCoord const nextCoord{ pd.at(at) + ChunkCoord::Block{ pd.dir.sign().min(0) * vec3i{minAxis} } };
 				
 				vec3i const blockCoord = nextCoord.blockInChunk();
 				vec3i const blockChunk = nextCoord.chunk();
@@ -1102,7 +1149,7 @@ static void update() {
 				if(chunkIndex == -1) { 
 					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
 					//chunkIndex = chunks.usedChunks()[usedIndex];
-					std::cout << "block: add chunk gen!\n"; 
+					std::cout << "block pl: add chunk gen!" << coord << '\n'; 
 					break;
 				}
 				
@@ -1111,9 +1158,7 @@ static void update() {
 				uint16_t const &block{ chunkData[index] };
 				
 				if(block != 0) {
-					std::cout << blockCoord << '\n';
-					
-					ChunkCoord const bc{ coord - ChunkCoord::Block{ pd.dir.sign().max(0) * vec3i{curMinAxis} } };
+					ChunkCoord const bc{ coord - ChunkCoord::Block{ dirSign * vec3i{minAxis} } };
 					vec3i const blockCoord = bc.blockInChunk();
 					vec3i const blockChunk = bc.chunk();
 			
@@ -1125,9 +1170,11 @@ static void update() {
 					
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
-					block = 1;
-					chunks.gpuPresent()[chunkIndex] = false;
-
+					
+					if(checkCanPlaceBlock(blockChunk, blockCoord)) {
+						block = 1;
+						chunks.gpuPresent()[chunkIndex] = false;
+					}
 					break;
 				}
 				else if(checkBlock.get_end() || i >= 100) break;
