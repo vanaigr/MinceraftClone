@@ -249,9 +249,11 @@ void main() {
 		//else 
 		if(blockId == 2) col = mix(col, vec4(0,0,1,1), 0.5);
 		if(blockId == 3) col = mix(col, vec4(1,0,0,1), 0.5);
-		//if(i.id != 1) {
-		//	col = mix(col, vec4(1, 0, 0, 1), 0.5);
-		//}
+
+
+		const float shading =map(dot(normalize(vec3(1)), normalize(vec3(i.side))), -1, 1, 0.6, 0.9);
+		
+		col = vec4(col.xyz * shading, col.w);
 	}
 	else col = vec4(0,0,0,0);
 	
