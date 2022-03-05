@@ -134,11 +134,12 @@ void swap(inout float v1, inout float v2) {
 }
 
 struct BlockIntersection {
-	float t;
 	ivec3 index;
-	uint id;
-	vec2 uv;
 	ivec3 side;
+	vec2 uv;
+	float t;
+	uint id;
+
 };
 
 
@@ -147,7 +148,7 @@ struct Optional_BlockIntersection {
 	BlockIntersection it;
 };
 
-Optional_BlockIntersection empty_Optional_BlockIntersection() {
+Optional_BlockIntersection emptyOptional_BlockIntersection() {
 	Optional_BlockIntersection a;
 	return a;
 }
@@ -184,6 +185,7 @@ Optional_BlockIntersection isInters(const Ray ray) {
 	const ivec3 farBoundaries = positive_ * 17 - 1;
 	
 	int i = 0;
+	
 	for(; i < 100; i++) {
 		const float minCurLen = min(min(curLen.x, curLen.y), curLen.z);
 		const bvec3 minAxis_b = equal(curLen, vec3(1,1,1) * minCurLen);
@@ -197,27 +199,39 @@ Optional_BlockIntersection isInters(const Ray ray) {
 		const ivec3 cellAt =  
 				+   minAxis_i * (firstCellRow + curSteps*dir_)
 				+ otherAxis_i * curCoord;
-				
-		
+	
 		if(all(lessThan((cellAt - farBoundaries) * dir_, ivec3(0,0,0)))) {
-			const uint blockId = blockAt(cellAt);	
-			if(blockId != 0) { 
-				const vec3 blockCoord = curCoordF - curCoord;
-				vec2 uv = vec2(
-					dot(minAxis_f, blockCoord.zxx),
-					dot(minAxis_f, blockCoord.yzy)
-				);
-				ivec3 side = -minAxis_i*dir_;
-				return Optional_BlockIntersection(
-					true,    
-					BlockIntersection(
-						minCurLen,
-						cellAt,
-						blockId,
-						uv,
-						side
-					)
-				);
+			const ivec3 checks = ivec3( (equal(curCoordF, curCoord) || minAxis_b) );
+			
+			for(int x = checks.x; x >= 0; x --) {
+				for(int y = checks.y; y >= 0; y --) {
+					for(int z = checks.z; z >= 0; z --) {
+						const ivec3 ca = cellAt - ivec3(x, y, z) * dir_;
+						
+						if(!checkBoundaries(ca)) continue;
+						const uint blockId = blockAt(ca);	
+						if(blockId != 0) { 
+							const vec3 blockCoord = curCoordF - curCoord;
+							vec2 uv = vec2(
+								dot(minAxis_f, blockCoord.zxx),
+								dot(minAxis_f, blockCoord.yzy)
+							);
+							ivec3 side = -minAxis_i*dir_;
+							
+							if(blockId != 5 || blockId == 5 && int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 == 0)
+								return Optional_BlockIntersection(
+									true,    
+									BlockIntersection(
+										ca,
+										side,
+										uv,
+										minCurLen,
+										blockId
+									)
+								);
+						}
+					}	
+				}
 			}
 		} else break;
 		
@@ -225,7 +239,7 @@ Optional_BlockIntersection isInters(const Ray ray) {
 		curLen += minAxis_f * stepLength;
 	}
 
-	return empty_Optional_BlockIntersection();
+	return emptyOptional_BlockIntersection();
 }
 
 void main() {
@@ -244,28 +258,10 @@ void main() {
 		const BlockIntersection i = intersection.it;
 		t = i.t;
 		const vec2 uv = ((i.uv-0.5f) * 0.9999f)+0.5f;
-		//const bool isTop = i.side.y ==  1;
-		//const bool isBot = i.side.y == -1;
 		const uint blockId = i.id;
 		
 		const vec2 offset = atlasAt(blockId, i.side);
-		col = vec4( sampleAtlas(offset, uv), 1 );
-		//if(blockId == 1) {
-		//	col = vec4(
-		//		mix(
-		//		mix(
-		//			sampleAtlas(vec2(0, 0), uv),
-		//			sampleAtlas(vec2(1, 0), uv),
-		//			float(isTop)
-		//		),
-		//		sampleAtlas(vec2(2, 0), uv),
-		//		float(isBot)
-		//		), 1);
-		//}
-		//else 
-		//if(blockId == 2) col = mix(col, vec4(0,0,1,1), 0.5);
-		//if(blockId == 3) col = mix(col, vec4(1,0,0,1), 0.5);
-
+		col = vec4(sampleAtlas(offset, uv), 1 );
 
 		const float shading = map(dot(normalize(vec3(1)), normalize(vec3(i.side))), -1, 1, 0.6, 0.9);
 		
