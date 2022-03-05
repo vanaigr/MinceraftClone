@@ -132,10 +132,10 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 		jump = isPress;
 	}
 		
-	if (key == GLFW_KEY_KP_0 && isPress) 
+	if (key == GLFW_KEY_KP_0 && !isPress) 
 			debugBtn0 = !debugBtn0;
-	if (key == GLFW_KEY_KP_1 && isPress) 
-		debugBtn1 = !debugBtn0;	
+	if (key == GLFW_KEY_KP_1 && !isPress) 
+		debugBtn1 = !debugBtn1;	
 
 	if(key == GLFW_KEY_D)
 		movementDir.x = 1 * isPress;
@@ -765,6 +765,7 @@ static int32_t genChunkAt(vec3i const position) {
 }
 
 static void loadChunks() {
+	if(debugBtn1) return;
 	static std::vector<int8_t> chunksPresent{};
 	auto const viewWidth = (viewDistance*2+1);
 	chunksPresent.resize(viewWidth*viewWidth*viewWidth);
@@ -1252,11 +1253,30 @@ static void update() {
 				uint16_t const &block{ chunkData[index] };
 				
 				if(block != 0) {
+					auto &chunkData{ chunks.chunksData()[chunkIndex] };
 					auto const index{ Chunks::blockIndex(blockCoord) };
-					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
+					uint16_t &block{ chunkData[index] };
 					block = 0;
 					chunks.gpuPresent()[chunkIndex] = false;
 					isAction = true;
+					
+					auto &aabb{ chunks.chunksAABB[chunkIndex] };
+					vec3i const start_{ aabb.start() };
+					vec3i const end_  { aabb.end  () };
+					
+					vec3i start{ 16 };
+					vec3i end  { 0 };
+					for(int32_t x = start_.x; x <= end_.x; x++)
+					for(int32_t y = start_.y; y <= end_.y; y++)
+					for(int32_t z = start_.z; z <= end_.z; z++) {
+						vec3i const blk{x, y, z};
+						if(chunkData[Chunks::blockIndex(blk)] != 0) {
+							start = start.min(blk);
+							end   = end  .max(blk);
+						}
+					}
+					
+					aabb = Chunks::AABB(start, end);
 					break;
 				}
 				else if(checkBlock.get_end() || i >= 100) break;
@@ -1330,7 +1350,16 @@ static void update() {
 						block = 1;
 						chunks.gpuPresent()[chunkIndex] = false;
 						isAction = true;
-					}
+						
+						auto &aabb{ chunks.chunksAABB[chunkIndex] };
+						vec3i start{ aabb.start() };
+						vec3i end  { aabb.end  () };
+						
+						start = start.min(blockCoord);
+						end   = end  .max(blockCoord);
+					
+						aabb = Chunks::AABB(start, end);
+						}
 					break;
 				}
 				else if(checkBlock.get_end() || i >= 100) break;
