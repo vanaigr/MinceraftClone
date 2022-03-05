@@ -25,7 +25,15 @@ public:
 		};
 	}
 
-
+	inline constexpr vec2<bool> operator<(const vec2<C> o) const {
+		return vec2<bool>(x < o.x, y < o.y);
+	}
+	inline constexpr vec2<bool> operator<=(const vec2<C> o) const {
+		return vec2<bool>(x <= o.x, y <= o.y);
+	}
+	inline constexpr vec2<C> operator==(vec2<C> o) const {
+		return vec2(x == o.x, y == o.y);
+	}
 	inline constexpr vec2<C> operator+(const vec2<C>& o) const {
 		return vec2(x + o.x, y + o.y);
 	}
@@ -117,6 +125,26 @@ public:
 	inline constexpr vec2<C> normalized() const {
 		return *this / this->length();
 	}
+	
+	inline constexpr vec2<C> floor() const {
+		return this->applied([](C const &it, size_t const index) -> C { return std::floor(it); });
+	}
+	
+	inline constexpr vec2<C> fract() const {
+		return *this - floor();
+	}
+	
+	inline constexpr C all() const {
+		return x && y;
+	}
+	
+	inline constexpr vec2<C> clamp(C const b1, C const b2) const {
+		return this->applied([&](C const &it, size_t const index) -> C { return misc::clamp<C>(it, b1, b2); });
+	}
+	
+	inline constexpr vec2<C> clamp(vec2<C> const b1, vec2<C>  const b2) const {
+		return this->applied([&](C const &it, size_t const index) -> C { return misc::clamp<C>(it, b1[index], b2[index]); });
+	}
 };
 
 template<typename C>
@@ -147,6 +175,12 @@ public:
 		};
 	}
 
+	inline constexpr vec3<bool> operator<(const vec3<C> o) const {
+		return vec3<bool>(x < o.x, y < o.y, z < o.z);
+	}
+	inline constexpr vec3<bool> operator<=(const vec3<C> o) const {
+		return vec3<bool>(x <= o.x, y <= o.y, z <= o.z);
+	}
 	inline constexpr vec3<C> operator+(const vec3<C> o) const {
 		return vec3(x + o.x, y + o.y, z + o.z);
 	}

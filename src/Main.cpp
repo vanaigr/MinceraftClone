@@ -602,19 +602,109 @@ inline void apply(size_t size, T &t, L&& l) {
 		if(l(t[i], i) == true) break;
 }
 
-siv::PerlinNoise perlin{ (uint32_t)rand() };
 static int viewDistance = 3;
 
-void generateChunk(vec3<int> const pos, Chunks::ChunkData &data) {
+template<typename T, int32_t maxSize, typename = std::enable_if<(maxSize>0)>>
+struct CircularArray {
+private:
+	T arr[maxSize];
+	uint32_t curIndex;
+public:
+	CircularArray() : curIndex{0} {};
+	
+	T *begin() { return arr[0]; }
+	T *end() { return arr[size()]; }
+	T const *cbegin() const { return arr[0]; }
+	T const *cend() const { return arr[size()]; }
+	
+	template<typename T2>
+	void push(T2 &&el) {
+		auto ind = curIndex & ~(0x80000000);
+		auto const flag = curIndex & (0x80000000);
+		arr[ ind ] = std::forward<T2>(el);
+		
+		curIndex = (ind+1 == maxSize) ? 0x80000000 : (ind+1 | flag);
+	}
+	
+	int32_t size() const {
+		bool const max{ (curIndex & 0x80000000) != 0 };
+		return max ? maxSize : curIndex;
+	}
+	T &operator[](int32_t index) {
+		return arr[index];
+	}
+};
+
+//CircularArray<BlockCoord, 20> treeBlocks{};
+
+
+double heightAt(vec2i const flatChunk, vec2i const block) {
+	static siv::PerlinNoise perlin{ (uint32_t)rand() };
+	auto const value = perlin.octave2D(
+		(flatChunk.x * 1.0 * Chunks::chunkDim + block.x) / 20.0, 
+		(flatChunk.y * 1.0 * Chunks::chunkDim + block.y) / 20.0, 
+		3
+	);
+						
+	return misc::map<double>(misc::clamp<double>(value,-1,1), -1, 1, 5, 15);
+}
+
+vec3i getTreeBlock(vec2i const flatChunk) {
+	static auto const random = [](vec2i const co) -> double {
+		auto const fract = [](auto it) -> auto { return it - std::floor(it); };
+		return fract(sin( vec2d(co).dot(vec2d(12.9898, 78.233)) ) * 43758.5453);
+	};
+	
+	vec2i const it( 
+		(vec2d(random(vec2i{flatChunk.x+1, flatChunk.y}), random(vec2i{flatChunk.x*3, flatChunk.y*5})) 
+		 * Chunks::chunkDim)
+		.floor().clamp(0, 15)
+	);
+	
+	auto const height{ heightAt(flatChunk,it) };
+	
+	assert(height >= 0 && height < 16);
+	return vec3i{ it.x, int32_t(std::floor(height))+1, it.y };
+}
+
+void genTrees(vec3i const chunk, Chunks::ChunkData &data) {	
+	for(int32_t cx{-1}; cx <= 1; cx ++) {
+		for(int32_t cz{-1}; cz <= 1; cz ++) {
+			vec3i const chunkOffset{ cx, -chunk.y, cz };
+			auto const curChunk{ chunk + chunkOffset };
+			
+			auto const treeBlock{ getTreeBlock(vec2i{curChunk.x, curChunk.z}) };
+			
+			for(int32_t x{-2}; x <= 2; x++) {
+				for(int32_t y{0}; y < 6; y++) {
+					for(int32_t z{-2}; z <= 2; z++) {
+						vec3i tl{ x,y,z };// tree-local block
+						auto const blk{ chunkOffset * Chunks::chunkDim + treeBlock + tl };
+						auto const index{ Chunks::blockIndex(blk) };
+						if(blk.inMMX(vec3i{0}, vec3i{Chunks::chunkDim}).all() && data[index] == 0) {
+							if(tl.x == 0 && tl.z == 0 && tl.y <= 4) data[index] = 4;
+							else if(
+									 (tl.y >= 2 && tl.y <= 3
+									  && !( (abs(x) == abs(z))&&(abs(x)==2) )
+								     ) || 
+								     (tl.in(vec3i{-1, 4, -1}, vec3i{1, 5, 1}).all()
+									  && !( (abs(x) == abs(z))&&(abs(x)==1) &&(tl.y==5 || (treeBlock.x*(x+1)/2+treeBlock.z*(z+1)/2)%2==0) )
+									 )
+							) data[index] = 5;
+						}
+					}
+				}
+			}
+		}
+	}
+	//auto const treeBlock_{ getTreeBlock(chunk) };
+}
+
+void generateChunk(vec3i const pos, Chunks::ChunkData &data) {
 	for(int y = 0; y < Chunks::chunkDim; ++y) 
 		for(int z = 0; z < Chunks::chunkDim; ++z)
 			for(int x = 0; x < Chunks::chunkDim; ++x) {
-				auto const value = perlin.octave2D(
-					(pos.x * Chunks::chunkDim + x) / 20.0, 
-					(pos.z * Chunks::chunkDim  + z) / 20.0, 
-					3
-				);
-				auto const height = misc::map<double>(value, -1, 1, 5, 15);
+				auto const height{ heightAt(vec2i{pos.x,pos.z}, vec2i{x,z}) };
 				auto const index{ Chunks::blockIndex(vec3<int32_t>{x, y, z}) };
 				//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
 				double const diff{ height - double(pos.y * Chunks::chunkDim + y) };
@@ -622,7 +712,7 @@ void generateChunk(vec3<int> const pos, Chunks::ChunkData &data) {
 					//data[index] = 1;
 					uint16_t block = 0;
 					if(diff < 1) block = 1; //grass
-					else if(diff < 5) block = 2; //dift
+					else if(diff < 5) block = 2; //dirt
 					else block = 6; //stone
 					data[index] = block;
 				}
@@ -630,6 +720,8 @@ void generateChunk(vec3<int> const pos, Chunks::ChunkData &data) {
 					data[index] = 0;
 				}
 			}
+			
+	genTrees(pos, data);
 }
 
 static int32_t genChunkAt(vec3i const position) {
