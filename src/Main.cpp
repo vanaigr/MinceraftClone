@@ -213,6 +213,7 @@ static GLuint chunk_u;
 static GLuint debugProgram2, db2_projection_u, db2_model_matrix_u;
 
 static GLuint chunkIndex_u;
+static GLuint blockSides_u;
 
 static GLuint bgProjection_u;
 static GLuint bgRightDir_u;
@@ -327,6 +328,26 @@ static void reloadShaders() {
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, textures[0]);
 	
+
+		{
+			auto const c = [](int16_t const x, int16_t const y) -> int32_t {
+				return int32_t( uint32_t(uint16_t(x)) | (uint32_t(uint16_t(y)) << 16) );
+			}; //pack coord
+			int32_t const sides[] = { //side, top, bot;
+				c(0, 0), c(0, 0), c(0, 0), //0
+				c(1, 0), c(2, 0), c(3, 0), //grass
+				c(3, 0), c(3, 0), c(3, 0), //dirt
+				c(4, 0), c(4, 0), c(4, 0), //planks
+				c(5, 0), c(6, 0), c(6, 0), //wood
+				c(7, 0), c(7, 0), c(7, 0), //leaves
+				c(8, 0), c(8, 0), c(8, 0), //stone
+			};
+			glGenBuffers(1, &blockSides_u);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, blockSides_u);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(sides), &sides, GL_STATIC_DRAW);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, blockSides_u);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+		}
 		/*GLuint ssbo;
 		glGenBuffers(1, &ssbo);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
@@ -594,8 +615,14 @@ void generateChunk(vec3<int> const pos, Chunks::ChunkData &data) {
 				auto const height = misc::map<double>(value, -1, 1, 5, 15);
 				auto const index{ Chunks::blockIndex(vec3<int32_t>{x, y, z}) };
 				//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
-				if(height > (pos.y * Chunks::chunkDim + y)) {
-					data[index] = 1;
+				double const diff{ height - double(pos.y * Chunks::chunkDim + y) };
+				if(diff >= 0) {
+					//data[index] = 1;
+					uint16_t block = 0;
+					if(diff < 1) block = 1; //grass
+					else if(diff < 5) block = 2; //dift
+					else block = 6; //stone
+					data[index] = block;
 				}
 				else {
 					data[index] = 0;
@@ -1102,7 +1129,6 @@ static void update() {
 				uint16_t const &block{ chunkData[index] };
 				
 				if(block != 0) {
-					std::cout << blockCoord << ' ' ;
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
 					block = 0;

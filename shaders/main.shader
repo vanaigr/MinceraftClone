@@ -44,8 +44,9 @@ uniform uint chunk;
 struct Block {
 	uint id;
 };
-layout(binding = 2) restrict readonly buffer Blocks {
-    Block blocks[];
+
+layout(binding = 2) restrict readonly buffer AtlasDescription {
+    int positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot 
 };
 
 
@@ -60,6 +61,18 @@ vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
         coord.y + atlasTileCount.y - (offset.y + 1)
     ) / atlasTileCount;
     return texture2D(atlas, uv).rgb;
+}
+
+vec2 atlasAt(const uint id, const ivec3 side) {
+	const int positions_[] = {
+		0, 0, 0,
+		0, 1, 2
+	};
+	const int offset = int(side.y == 1) + int(side.y == -1) * 2;
+	const int index = (int(id) * 3 + offset);
+	const int pos = positions[index];
+	const int bit16 = 65535;
+	return vec2( pos&bit16, (pos>>16)&bit16 );
 }
 
 bool checkBoundaries(const ivec3 i) {
@@ -231,27 +244,30 @@ void main() {
 		const BlockIntersection i = intersection.it;
 		t = i.t;
 		const vec2 uv = ((i.uv-0.5f) * 0.9999f)+0.5f;
-		const bool isTop = i.side.y ==  1;
-		const bool isBot = i.side.y == -1;
+		//const bool isTop = i.side.y ==  1;
+		//const bool isBot = i.side.y == -1;
 		const uint blockId = i.id;
+		
+		const vec2 offset = atlasAt(blockId, i.side);
+		col = vec4( sampleAtlas(offset, uv), 1 );
 		//if(blockId == 1) {
-			col = vec4(
-				mix(
-				mix(
-					sampleAtlas(vec2(0, 0), uv),
-					sampleAtlas(vec2(1, 0), uv),
-					float(isTop)
-				),
-				sampleAtlas(vec2(2, 0), uv),
-				float(isBot)
-				), 1);
+		//	col = vec4(
+		//		mix(
+		//		mix(
+		//			sampleAtlas(vec2(0, 0), uv),
+		//			sampleAtlas(vec2(1, 0), uv),
+		//			float(isTop)
+		//		),
+		//		sampleAtlas(vec2(2, 0), uv),
+		//		float(isBot)
+		//		), 1);
 		//}
 		//else 
-		if(blockId == 2) col = mix(col, vec4(0,0,1,1), 0.5);
-		if(blockId == 3) col = mix(col, vec4(1,0,0,1), 0.5);
+		//if(blockId == 2) col = mix(col, vec4(0,0,1,1), 0.5);
+		//if(blockId == 3) col = mix(col, vec4(1,0,0,1), 0.5);
 
 
-		const float shading =map(dot(normalize(vec3(1)), normalize(vec3(i.side))), -1, 1, 0.6, 0.9);
+		const float shading = map(dot(normalize(vec3(1)), normalize(vec3(i.side))), -1, 1, 0.6, 0.9);
 		
 		col = vec4(col.xyz * shading, col.w);
 	}
