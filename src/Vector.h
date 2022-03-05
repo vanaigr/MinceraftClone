@@ -363,6 +363,10 @@ public:
 	inline constexpr C all() const {
 		return x && y && z;
 	}
+
+	inline constexpr C any() const {
+		return x || y || z;
+	}
 	
 	inline constexpr vec3<C> nonan() const {
 		return applied([](auto const coord, auto i) -> C {

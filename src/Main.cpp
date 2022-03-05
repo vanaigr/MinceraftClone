@@ -251,6 +251,7 @@ static void reloadShaders() {
 		mainProgram = glCreateProgram();
 		ShaderLoader sl{};
 	
+		static_assert(Chunks::chunkDim == 16);
 		//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
 		//https://gist.github.com/rikusalminen/9393151
 		//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
@@ -258,6 +259,14 @@ static void reloadShaders() {
 			R"(#version 420
 			uniform mat4 projection;
 			uniform mat4 model_matrix;
+			//uniform uint aabb;
+			
+			//ivec3 indexBlock(const uint index) {
+			//	return vec3i{ index & 15, (index >> 4) & 15, (index >> 8) & 15 };
+			//}
+	
+			//ivec3 b1() { return indexBlock(aabb    ); }
+			//ivec3 b2() { return indexBlock(aabb>>16); }
 			
 			void main()
 			{
@@ -282,9 +291,12 @@ static void reloadShaders() {
 			
 				float mirror = -1 + 2 * top;
 				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-				xyz = (xyz + 1) / 2 * 16;
+				xyz = (xyz + 1) / 2;
 			
 				gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
+				//const ivec3 b = b1();
+				//const ivec3 c = b2();
+				//gl_Position = projection * ( (vec4(xyz, 1.0) ) + b);
 			}
 			)",
 			GL_VERTEX_SHADER,
@@ -423,7 +435,7 @@ static void reloadShaders() {
 		glDeleteProgram(debugProgram);
 		debugProgram = glCreateProgram();
 		ShaderLoader dbsl{};
-	
+		
 		//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
 		//https://gist.github.com/rikusalminen/9393151
 		//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
@@ -454,7 +466,7 @@ static void reloadShaders() {
 			
 				float mirror = -1 + 2 * top;
 				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-				xyz = (xyz + 1) / 2 * 16;
+				xyz = (xyz + 1) / 2;
 			
 				gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
 			}
@@ -667,7 +679,7 @@ vec3i getTreeBlock(vec2i const flatChunk) {
 	return vec3i{ it.x, int32_t(std::floor(height))+1, it.y };
 }
 
-void genTrees(vec3i const chunk, Chunks::ChunkData &data) {	
+void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i start, vec3i end, Chunks::AABB &aabb) {	
 	for(int32_t cx{-1}; cx <= 1; cx ++) {
 		for(int32_t cz{-1}; cz <= 1; cz ++) {
 			vec3i const chunkOffset{ cx, -chunk.y, cz };
@@ -682,30 +694,40 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data) {
 						auto const blk{ chunkOffset * Chunks::chunkDim + treeBlock + tl };
 						auto const index{ Chunks::blockIndex(blk) };
 						if(blk.inMMX(vec3i{0}, vec3i{Chunks::chunkDim}).all() && data[index] == 0) {
-							if(tl.x == 0 && tl.z == 0 && tl.y <= 4) data[index] = 4;
-							else if(
+							bool is = false;
+							if((is = tl.x == 0 && tl.z == 0 && tl.y <= 4)) data[index] = 4;
+							else if((is = 
 									 (tl.y >= 2 && tl.y <= 3
 									  && !( (abs(x) == abs(z))&&(abs(x)==2) )
 								     ) || 
 								     (tl.in(vec3i{-1, 4, -1}, vec3i{1, 5, 1}).all()
 									  && !( (abs(x) == abs(z))&&(abs(x)==1) &&(tl.y==5 || (treeBlock.x*(x+1)/2+treeBlock.z*(z+1)/2)%2==0) )
 									 )
-							) data[index] = 5;
+							)) data[index] = 5;
+							
+							if(is) {
+								start = start.min(blk);
+								end   = end  .max(blk);
+							}
 						}
 					}
 				}
 			}
 		}
 	}
-	//auto const treeBlock_{ getTreeBlock(chunk) };
+	
+	aabb = Chunks::AABB(start, end);
 }
 
-void generateChunk(vec3i const pos, Chunks::ChunkData &data) {
+void generateChunk(vec3i const pos, Chunks::ChunkData &data, Chunks::AABB &aabb) {
+	vec3i start{15};
+	vec3i end  {0 };
 	for(int y = 0; y < Chunks::chunkDim; ++y) 
 		for(int z = 0; z < Chunks::chunkDim; ++z)
 			for(int x = 0; x < Chunks::chunkDim; ++x) {
+				vec3i const blockCoord{ x, y, z };
 				auto const height{ heightAt(vec2i{pos.x,pos.z}, vec2i{x,z}) };
-				auto const index{ Chunks::blockIndex(vec3<int32_t>{x, y, z}) };
+				auto const index{ Chunks::blockIndex(blockCoord) };
 				//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
 				double const diff{ height - double(pos.y * Chunks::chunkDim + y) };
 				if(diff >= 0) {
@@ -715,13 +737,20 @@ void generateChunk(vec3i const pos, Chunks::ChunkData &data) {
 					else if(diff < 5) block = 2; //dirt
 					else block = 6; //stone
 					data[index] = block;
+					
+					start = start.min(blockCoord);
+					end   = end  .max(blockCoord);
 				}
 				else {
 					data[index] = 0;
 				}
 			}
-			
-	genTrees(pos, data);
+		
+	genTrees(pos, data, start, end, aabb);
+}
+
+void generateChunk(int32_t const chunkIndex) {
+	generateChunk(chunks.chunksPos[chunkIndex], chunks.chunksData()[chunkIndex], chunks.chunksAABB[chunkIndex]);
 }
 
 static int32_t genChunkAt(vec3i const position) {
@@ -730,7 +759,7 @@ static int32_t genChunkAt(vec3i const position) {
 					
 	chunks.chunksPosition()[chunkIndex] = position;
 	chunks.gpuPresent()[chunkIndex] = false;
-	generateChunk(position, chunks.chunksData()[chunkIndex]);
+	generateChunk(chunkIndex);
 	
 	return usedIndex;
 }
@@ -1595,6 +1624,13 @@ int main(void) {
 		viewport_current().projectionMatrix(&projection);
 		
 		for(auto const [_ignore_, chunkIndex] : chunksSorted) {
+			Chunks::AABB const aabb{ chunks.chunksAABB[chunkIndex] };
+				
+			vec3i const b1{ aabb.start() };
+			vec3i const b2{ aabb.onePastEnd() };
+			
+			if((b2 <= b1).any()) continue;
+				
 			auto const chunkPos{ chunks.chunksPosition()[chunkIndex] };
 			auto  &chunkData{ chunks.chunksData()[chunkIndex] };
 			vec3<int32_t> const relativeChunkPos_{ chunkPos-playerChunk };
@@ -1621,43 +1657,6 @@ int main(void) {
 				} 
 			}
 				
-			/*static std::vector<size_t> fix{};
-			fix.clear();
-			
-			for(size_t i = 0; i < candidates.size(); i ++) {
-				auto cand{candidates[i]};
-				auto coord{ ChunkCoord(vec3i{}, ChunkCoord::Block(cand)) };
-				if(coord.chunk() == chunkPos) {
-					auto index{ Chunks::blockIndex(coord.blockInChunk()) };
-					chunkData[index] = 2;
-					fix.push_back(index);
-				}
-			}
-			for(size_t i = 0; i < collided.size(); i ++) {
-				auto cand{collided[i]};
-				auto coord{ ChunkCoord(vec3i{}, ChunkCoord::Block(cand)) };
-				if(coord.chunk() == chunkPos) {
-					auto index{ Chunks::blockIndex(coord.blockInChunk()) };
-					chunkData[index] = 3;
-					fix.push_back(index);
-				}
-			}
-			
-			glUniform1ui(chunk_u, 0);
-			if(gpuChunksCount < 1) {
-				resizeBuffer(1);
-			}
-			
-			static_assert(sizeof chunkData == (8192));
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 8192, &chunkData);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-			
-			for(size_t i = 0; i < fix.size(); i ++) {
-				chunkData[fix[i]] = 1;
-			}*/
-				
-
 			{
 				float const translation4[4][4] ={
 					{ 1, 0, 0, relativeChunkPos.x },
@@ -1665,10 +1664,23 @@ int main(void) {
 					{ 0, 0, 1, relativeChunkPos.z },
 					{ 0, 0, 0, 1                  },
 				};
+				
+				auto const scale{ vec3f(b2 - b1) };
+				auto const lb{ vec3f(b1) };
+				
+				float const bounds[4][4] = {
+					{ scale.x, 0, 0, lb.x },
+					{ 0, scale.y, 0, lb.y },
+					{ 0, 0, scale.z, lb.z },
+					{ 0, 0, 0, 1 },
+				};
 		
+				float chunkToScale[4][4];
 				float chunkToLocal[4][4];
 				
-				misc::matMult(toLoc4, translation4, &chunkToLocal);
+				misc::matMult(translation4, bounds, &chunkToScale);
+				misc::matMult(toLoc4, chunkToScale, &chunkToLocal);
+				
 				
 				if(debug) {
 					glUseProgram(debugProgram);
@@ -1682,6 +1694,7 @@ int main(void) {
 				glUniformMatrix4fv(model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
 				glDrawArrays(GL_TRIANGLES, 0, 36);
 			}
+		
 		}
 		
 		if(isFreeCam){
