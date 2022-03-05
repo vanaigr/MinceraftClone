@@ -233,8 +233,10 @@ Chunks chunks{};
 void resizeBuffer(int32_t newGpuChunksCount) {
 	assert(newGpuChunksCount >= 0);
 	gpuChunksCount = newGpuChunksCount;
-	chunks.gpuPresent().clear();
-	chunks.gpuPresent().resize(gpuChunksCount);
+	auto &it = chunks.gpuPresent();
+	for(auto &&el : it) {
+		el = false;
+	}
 	
 	static_assert(sizeof(chunks.chunksData()[0]) == 8192);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
@@ -1076,7 +1078,7 @@ static void update() {
     vec2<double> diff = (mousePos - pmousePos) / windowSize_d;
 	
 	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE && !isFreeCam) {
-		lastBlockUpdate = now;
+		bool isAction = false;
 
 		ChunkCoord const viewport{ playerCoord_ + ChunkCoord::Fractional{ChunkCoord::posToFracTrunk(viewportOffset_)} };
 		PosDir const pd{ PosDir(viewport, viewport_current().forwardDir() * 7) };
@@ -1133,6 +1135,7 @@ static void update() {
 					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
 					block = 0;
 					chunks.gpuPresent()[chunkIndex] = false;
+					isAction = true;
 					break;
 				}
 				else if(checkBlock.get_end() || i >= 100) break;
@@ -1194,17 +1197,27 @@ static void update() {
 					else for(auto const elChunkIndex : chunks.usedChunks())
 						if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
 					
+					if(chunkIndex == -1) { 
+						std::cout << "block pl(2): add chunk gen!" << coord << '\n'; 
+						break;
+					}
+				
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
 					
 					if(checkCanPlaceBlock(blockChunk, blockCoord)) {
 						block = 1;
 						chunks.gpuPresent()[chunkIndex] = false;
+						isAction = true;
 					}
 					break;
 				}
 				else if(checkBlock.get_end() || i >= 100) break;
 			}
+		}
+	
+		if(isAction) {
+			lastBlockUpdate = now;
 		}
 	}
 	
