@@ -684,13 +684,19 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i start, vec3i end
 }
 
 void generateChunk(vec3i const pos, Chunks::ChunkData &data, Chunks::AABB &aabb) {
+	double heights[Chunks::chunkDim * Chunks::chunkDim];
+	for(int z = 0; z < Chunks::chunkDim; z++) 
+	for(int x = 0; x < Chunks::chunkDim; x++) {
+		heights[z* Chunks::chunkDim + x] = heightAt(vec2i{pos.x,pos.z}, vec2i{x,z});
+	}
 	vec3i start{15};
 	vec3i end  {0 };
 	for(int y = 0; y < Chunks::chunkDim; ++y) 
 		for(int z = 0; z < Chunks::chunkDim; ++z)
 			for(int x = 0; x < Chunks::chunkDim; ++x) {
 				vec3i const blockCoord{ x, y, z };
-				auto const height{ heightAt(vec2i{pos.x,pos.z}, vec2i{x,z}) };
+				//auto const height{ heightAt(vec2i{pos.x,pos.z}, vec2i{x,z}) };
+				auto const height{ heights[z * Chunks::chunkDim + x] };
 				auto const index{ Chunks::blockIndex(blockCoord) };
 				//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
 				double const diff{ height - double(pos.y * Chunks::chunkDim + y) };
