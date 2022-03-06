@@ -281,6 +281,10 @@ public:
 	inline constexpr vec3<C> normalized() const {
 		return *this / this->length();
 	}
+	
+	inline constexpr C distance(vec3<C> const other) const {
+		return (*this - other).length();
+	}
 
 	template<typename Action, typename C2 = decltype(std::declval<Action>()(std::declval<C>(), 0))>
 	inline constexpr vec3<C2> applied(Action&& action) const {

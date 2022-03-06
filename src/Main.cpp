@@ -204,6 +204,8 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) 
 static GLuint rightDir_u;
 static GLuint topDir_u;
 static GLuint near_u, far_u;
+static GLuint isInChunk_u;
+static GLuint isInChunk2_u;
 static GLuint time_u;
 static GLuint mouseX_u, mouseY_u;
 static GLuint relativeChunkPos_u;
@@ -255,50 +257,8 @@ static void reloadShaders() {
 		//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
 		//https://gist.github.com/rikusalminen/9393151
 		//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
-		sl.addShaderFromCode(
-			R"(#version 420
-			uniform mat4 projection;
-			uniform mat4 model_matrix;
-			//uniform uint aabb;
-			
-			//ivec3 indexBlock(const uint index) {
-			//	return vec3i{ index & 15, (index >> 4) & 15, (index >> 8) & 15 };
-			//}
-	
-			//ivec3 b1() { return indexBlock(aabb    ); }
-			//ivec3 b2() { return indexBlock(aabb>>16); }
-			
-			void main()
-			{
-				int tri = gl_VertexID / 3;
-				int idx = gl_VertexID % 3;
-				int face = tri / 2;
-				int top = tri % 2;
-			
-				int dir = face % 3;
-				int pos = face / 3;
-			
-				int nz = dir >> 1;
-				int ny = dir & 1;
-				int nx = 1 ^ (ny | nz);
-			
-				vec3 d = vec3(nx, ny, nz);
-				float flip = 1 - 2 * pos;
-			
-				vec3 n = flip * d;
-				vec3 u = -d.yzx;
-				vec3 v = flip * d.zxy;
-			
-				float mirror = -1 + 2 * top;
-				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-				xyz = (xyz + 1) / 2;
-			
-				gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
-				//const ivec3 b = b1();
-				//const ivec3 c = b2();
-				//gl_Position = projection * ( (vec4(xyz, 1.0) ) + b);
-			}
-			)",
+		sl.addShaderFromProjectFileName(
+			"shaders/vertex.shader",
 			GL_VERTEX_SHADER,
 			"main vertex"
 		);
@@ -316,6 +276,8 @@ static void reloadShaders() {
 		glUniform2ui(glGetUniformLocation(mainProgram, "windowSize"), windowSize.x, windowSize.y);
 		glUniform2f(glGetUniformLocation(mainProgram, "atlasTileCount"), 512 / 16, 512 / 16);
 	
+		isInChunk_u = glGetUniformLocation(mainProgram, "isInChunk");
+		
 		time_u   = glGetUniformLocation(mainProgram, "time");
 		mouseX_u = glGetUniformLocation(mainProgram, "mouseX");
 		mouseY_u = glGetUniformLocation(mainProgram, "mouseY");
@@ -473,9 +435,10 @@ static void reloadShaders() {
 		)", GL_VERTEX_SHADER, "debug vertex");
 		dbsl.addShaderFromCode(
 			R"(#version 420
+			uniform bool isInChunk;
 			out vec4 color;
 			void main() {
-				color = vec4(1, 0, 0, 1);
+				color = vec4(float(!isInChunk), 0, float(isInChunk), 1);
 			})",
 			GL_FRAGMENT_SHADER, "debug shader"
 		);
@@ -491,6 +454,7 @@ static void reloadShaders() {
 		
 		db_model_matrix_u = glGetUniformLocation(debugProgram, "model_matrix");
 		db_projection_u = glGetUniformLocation(debugProgram, "projection");
+		isInChunk2_u = glGetUniformLocation(debugProgram, "isInChunk");
 	}
 	
 	{
@@ -567,12 +531,12 @@ static void reloadShaders() {
 				const vec3 n = normalize(norm);
 				const vec3 sun = normalize(vec3(1, 1, 1));
 				color = vec4(
-					vec3(1, 1, 1) * map(dot(n, sun), -1, 1, 0.6, 0.9),
+					vec3(gl_FragCoord.z), //vec3(1, 1, 1) * map(dot(n, sun), -1, 1, 0.6, 0.9),
 					1
 				);
 			}
 			)", 
-			GL_FRAGMENT_SHADER, 
+			GL_FRAGMENT_SHADER,  
 			"Player shader"
 		);
 	
@@ -597,7 +561,7 @@ static void reloadShaders() {
 	
 	glUseProgram(bgProgram);
 	glUniformMatrix4fv(bgProjection_u, 1, GL_TRUE, &projection[0][0]);
-	
+	 
 	glUseProgram(debugProgram);
 	glUniformMatrix4fv(db_projection_u, 1, GL_TRUE, &projection[0][0]);	
 	
@@ -1482,6 +1446,7 @@ int main(void) {
 	glDepthFunc(GL_LESS); 
 	
 	glEnable(GL_CULL_FACE); 
+	glCullFace(GL_BACK); 
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	
@@ -1510,7 +1475,7 @@ int main(void) {
 	vec3f botCap[(radialCount+1)  *2];
 	
 	for(int i = 0; i < radialCount+1; i ++) {
-		double const angle{ -i / (double)radialCount * 2.0 * misc::pi };
+		double const angle{ i / (double)radialCount * 2.0 * misc::pi };
 		
 		auto const x{ (float) (cos(angle) * radius) };
 		auto const y{ (float) (sin(angle) * radius) };
@@ -1522,7 +1487,7 @@ int main(void) {
 		verts[(i*2+1)*2  ] = topCap[(radialCount-i)*2] = vec3f{ x, (float) height, y };
 		verts[(i*2+1)*2+1] = vec3f{ x, 0, y };
 		topCap[(radialCount-i)*2+1] = vec3f{0,1,0};
-	}
+	} 
 
 	GLuint vbo;
 	glGenBuffers(1, &vbo);
@@ -1587,13 +1552,13 @@ int main(void) {
 		glUseProgram(bgProgram);
 		glUniform3f(bgRightDir_u, rightDir.x, rightDir.y, rightDir.z);
         glUniform3f(bgTopDir_u, topDir.x, topDir.y, topDir.z);
-		glCullFace(GL_FRONT); 
 		
 		glDepthMask(GL_FALSE);
 		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
 		glDepthMask(GL_TRUE);
 		
 		glUseProgram(mainProgram);
+		
         glUniform3f(rightDir_u, rightDir.x, rightDir.y, rightDir.z);
         glUniform3f(topDir_u, topDir.x, topDir.y, topDir.z);
 
@@ -1646,7 +1611,7 @@ int main(void) {
 			chunksSorted.push_back({ relativeChunkPos.lengthSquare(), chunkIndex });
 		}
 		std::sort(chunksSorted.begin(), chunksSorted.end(), [](ChunkSort const c1, ChunkSort const c2) -> bool {
-			return c1.sqDistance > c2.sqDistance; //chunks located nearer are rendered last
+			return c1.sqDistance < c2.sqDistance; //chunks located nearer are rendered first
 		});
 		
 		float projection[4][4];
@@ -1669,6 +1634,13 @@ int main(void) {
 			};
 			glUniform3f(relativeChunkPos_u, relativeChunkPos.x, relativeChunkPos.y, relativeChunkPos.z);
 
+			vec3d const relativeCameraPos{ cameraPosInChunk - vec3d(relativeChunkPos_*Chunks::chunkDim) };
+			
+			auto const nearestCameraPos { relativeCameraPos.clamp(vec3d(b1), vec3d(b2)) };
+			bool const isInChunk{ 
+				nearestCameraPos.inX(vec3d(b1), vec3d(b2)).all()
+				|| nearestCameraPos.distance(relativeCameraPos) <= 5*currentViewport.near
+			};
 
 			glUniform1ui(chunk_u, chunkIndex);
 			{ 
@@ -1711,17 +1683,30 @@ int main(void) {
 				misc::matMult(toLoc4, chunkToScale, &chunkToLocal);
 				
 				
+				glUniformMatrix4fv(model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
+				
+				if(isInChunk) {
+					glUniform1i(isInChunk_u, 1);
+					glDrawArrays(GL_TRIANGLES, 0, 6);
+					glUniform1i(isInChunk_u, 0);
+				}
+				else {
+					glDrawArrays(GL_TRIANGLES, 0, 36);
+				}
+				
 				if(debug) {
 					glUseProgram(debugProgram);
+					glUniform1i(isInChunk2_u, isInChunk);
 					glUniformMatrix4fv(db_model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
 					glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+					glDepthMask(GL_FALSE);
+					glDisable(GL_CULL_FACE); 
 					glDrawArrays(GL_TRIANGLES, 0, 36);
+					glDepthMask(GL_TRUE);
+					glEnable(GL_CULL_FACE); 
 					glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 					glUseProgram(mainProgram);
 				}
-				
-				glUniformMatrix4fv(model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
-				glDrawArrays(GL_TRIANGLES, 0, 36);
 			}
 		
 		}
@@ -1793,15 +1778,11 @@ int main(void) {
 			glBindVertexArray(0); 
 		}
 		
+		if(testInfo) std::cout << "FPS:" << (1000000.0 / mc.mean()) << '\n';
+		
 		testInfo = false; 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
-		
-		if(_i_ == 0) {
-			mc.add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - startFrame).count());
-			//if(mc.index() == 0) std::cout << "mean:" << mc.mean() << '\n';
-		}
-		else _i_--;
 		
 		static GLenum lastError;
         while ((err = glGetError()) != GL_NO_ERROR) {
@@ -1815,6 +1796,8 @@ int main(void) {
 		}
 
         update();
+		
+		mc.add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - startFrame).count());
     }
 
     glfwTerminate();

@@ -15,7 +15,7 @@ uniform vec3 rightDir, topDir;
 
 in vec4 gl_FragCoord;
 out vec4 color;
-layout (depth_any) out float gl_FragDepth;
+layout (depth_greater) out float gl_FragDepth;
 
 uint fragCount = 4;
 
@@ -200,7 +200,7 @@ Optional_BlockIntersection isInters(const Ray ray) {
 				+   minAxis_i * (firstCellRow + curSteps*dir_)
 				+ otherAxis_i * curCoord;
 	
-		if(all(lessThan((cellAt - farBoundaries) * dir_, ivec3(0,0,0)))) {
+		if(all(lessThanEqual((cellAt - farBoundaries) * dir_, ivec3(0,0,0)))) {
 			const ivec3 checks = ivec3( (equal(curCoordF, curCoord) || minAxis_b) );
 			
 			for(int x = checks.x; x >= 0; x --) {
@@ -252,7 +252,7 @@ void main() {
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
 	
 	const Optional_BlockIntersection intersection = isInters(ray);
-	double t = 1.0/0.0;
+	float t = 1.0/0.0;
 	vec4 col;
 	if(intersection.is) {
 		const BlockIntersection i = intersection.it;
@@ -269,7 +269,10 @@ void main() {
 	}
 	else col = vec4(0,0,0,0);
 	
-	const float depth = float( ((far - (near * far) / (dot(forwardDir, rayDir) * t)) / (far - near) + 1) / 2 );
+	
+	const vec4 proj = projection * vec4(0, 0, (dot(forwardDir, rayDir) * t), 1);
+	const float z = (1.0 / (proj.z) - 1.0 / near) / (1.0 / far - 1.0 / near);
+
 	
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) {
 		color = vec4(vec3(0.98), 1);
@@ -277,6 +280,6 @@ void main() {
 	}
 	else {
 		color = col;
-		gl_FragDepth = depth;
+		gl_FragDepth = z;
 	}
 }		

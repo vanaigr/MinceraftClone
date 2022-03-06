@@ -38,7 +38,6 @@ struct Viewport {
     }
     constexpr vec3<double> flatForwardDir() const {
         return flatTopDir().cross(flatRightDir());
-		//return vec3<double>(cos(rotation.y) * sin(rotation.x), sin(rotation.y), -cos(rotation.y) * cos(rotation.x));
     }
 	
 	template<typename O, typename = std::enable_if_t<std::is_convertible<double, O>::value>>
@@ -81,9 +80,13 @@ struct Viewport {
 		O const pm[4][4] = {
 			{ static_cast<O>(1/htF*aspectRatio), static_cast<O>(0.0), static_cast<O>(0), static_cast<O>(0.0) },
 			{ static_cast<O>(0.0), static_cast<O>(1/htF), static_cast<O>(0.0), static_cast<O>(0.0) },
-			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>( far / (far - near)), static_cast<O>(-(far * near) / (far - near)) },
+			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>( (far+near) / (far - near)), static_cast<O>(-(2*far * near) / (far - near)) },
 			{ static_cast<O>(0.0), static_cast<O>(0.0), static_cast<O>( 1.0), static_cast<O>(0.0) }
 		};
+		
+		//z *(far+near) / (far - near) -(2*far * near) / (far - near)
+		//n -> -n (w=n) -> -1
+		//f -> f (w=f) -> 1
 	
 		copy2DArray<O, 4, 4>(
 			pm,
