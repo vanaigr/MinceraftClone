@@ -181,6 +181,13 @@ public:
 	inline constexpr vec3<bool> operator<=(const vec3<C> o) const {
 		return vec3<bool>(x <= o.x, y <= o.y, z <= o.z);
 	}
+	inline constexpr vec3<bool> operator>(const vec3<C> o) const {
+		return vec3<bool>(x > o.x, y > o.y, z > o.z);
+	}
+	inline constexpr vec3<bool> operator>=(const vec3<C> o) const {
+		return vec3<bool>(x >= o.x, y >= o.y, z >= o.z);
+	}
+	
 	inline constexpr vec3<C> operator+(const vec3<C> o) const {
 		return vec3(x + o.x, y + o.y, z + o.z);
 	}
@@ -303,6 +310,10 @@ public:
 			action(this->y),
 			action(this->z)
 		);
+	}
+	
+	inline constexpr vec2<C> xz() const {
+		return vec2<C>{ x, z };
 	}
 	
 	inline constexpr vec3<bool> in(vec3<C> const b1, vec3<C> const b2) const {

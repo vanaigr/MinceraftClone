@@ -71,9 +71,9 @@ static Viewport playerViewport{
 };
 
 static double const height{ 1.95 };
-static double const radius{ 0.45 };
+static double const width{ 0.6 };
 
-static int64_t const rad_i{ ChunkCoord::posToFracRAway(radius).x }; 
+static int64_t const width_i{ ChunkCoord::posToFracRAway(width).x }; 
 static int64_t const height_i{ ChunkCoord::posToFracRAway(height).x };
 	
 static  vec3d const viewportOffset_{0,height*0.9,0};
@@ -211,8 +211,6 @@ static GLuint mouseX_u, mouseY_u;
 static GLuint relativeChunkPos_u;
 static GLuint projection_u, db_projection_u, model_matrix_u, db_model_matrix_u;
 static GLuint chunk_u;
-
-static GLuint debugProgram2, db2_projection_u, db2_model_matrix_u;
 
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
@@ -458,44 +456,6 @@ static void reloadShaders() {
 	}
 	
 	{
-		glDeleteProgram(debugProgram2);
-		debugProgram2 = glCreateProgram();
-		ShaderLoader dbsl{};
-
-		dbsl.addShaderFromCode(R"(#version 420
-			layout(location = 0) in vec3 pos;
-			
-			uniform mat4 projection;
-			uniform mat4 model_matrix;
-			
-			void main() {			
-				gl_Position = projection * (model_matrix * vec4(pos, 1.0));
-			}
-		)", GL_VERTEX_SHADER, "debug2 vertex");
-		dbsl.addShaderFromCode(
-			R"(#version 420
-			out vec4 color;
-			void main() {
-				color = vec4(1, 0, 0, 1);
-			})",
-			GL_FRAGMENT_SHADER, "debug2 shader"
-		);
-	
-		dbsl.attachShaders(debugProgram2);
-	
-		glLinkProgram(debugProgram2);
-		glValidateProgram(debugProgram2);
-	
-		dbsl.deleteShaders();
-	
-		glUseProgram(debugProgram2);
-		
-		db2_model_matrix_u = glGetUniformLocation(debugProgram2, "model_matrix");
-		db2_projection_u = glGetUniformLocation(debugProgram2, "projection");
-	}
-	
-	
-	{
 		glDeleteProgram(playerProgram);
 		playerProgram = glCreateProgram();
 		ShaderLoader plsl{};
@@ -503,17 +463,38 @@ static void reloadShaders() {
 		plsl.addShaderFromCode(
 			R"(#version 420
 			uniform mat4 projection;
-			uniform mat4 modelMatrix;
-			
-			layout(location = 0) in vec3 pos_;
-			layout(location = 1) in vec3 norm_;
+			uniform mat4 model_matrix;
 			
 			out vec3 norm;
+			void main()
+			{
+				int tri = gl_VertexID / 3;
+				int idx = gl_VertexID % 3;
+				int face = tri / 2;
+				int top = tri % 2;
 			
-			void main() {
-				gl_Position = projection * (modelMatrix * vec4(pos_, 1));
-				norm = norm_;
-			})", GL_VERTEX_SHADER, "Player vertex"
+				int dir = face % 3;
+				int pos = face / 3;
+			
+				int nz = dir >> 1;
+				int ny = dir & 1;
+				int nx = 1 ^ (ny | nz);
+			
+				vec3 d = vec3(nx, ny, nz);
+				float flip = 1 - 2 * pos;
+			
+				vec3 n = flip * d;
+				vec3 u = -d.yzx;
+				vec3 v = flip * d.zxy;
+			
+				float mirror = -1 + 2 * top;
+				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
+				xyz = (xyz + 1) / 2;
+			
+				gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
+				norm = n; //works for simple model matrix
+			}
+			)", GL_VERTEX_SHADER, "Player vertex"
 		);
 		
 		plsl.addShaderFromCode(
@@ -531,7 +512,7 @@ static void reloadShaders() {
 				const vec3 n = normalize(norm);
 				const vec3 sun = normalize(vec3(1, 1, 1));
 				color = vec4(
-					vec3(gl_FragCoord.z), //vec3(1, 1, 1) * map(dot(n, sun), -1, 1, 0.6, 0.9),
+					vec3(1, 1, 1) * map(dot(n, sun), -1, 1, 0.6, 0.9),
 					1
 				);
 			}
@@ -550,7 +531,7 @@ static void reloadShaders() {
 		glUseProgram(playerProgram);
 		
 		pl_projection_u = glGetUniformLocation(playerProgram, "projection");
-		pl_modelMatrix_u = glGetUniformLocation(playerProgram, "modelMatrix");
+		pl_modelMatrix_u = glGetUniformLocation(playerProgram, "model_matrix");
 	}
 	
 	float projection[4][4];
@@ -564,9 +545,6 @@ static void reloadShaders() {
 	 
 	glUseProgram(debugProgram);
 	glUniformMatrix4fv(db_projection_u, 1, GL_TRUE, &projection[0][0]);	
-	
-	glUseProgram(debugProgram2);
-	glUniformMatrix4fv(db2_projection_u, 1, GL_TRUE, &projection[0][0]);
 	
 	glUseProgram(mainProgram);
 	glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
@@ -800,160 +778,6 @@ struct PosDir {
 	ChunkCoord at(double const t) const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_at(t)} }; }
 };
 
-struct CollisionInfo {
-	vec3i blockCoord;
-	vec3i normals;
-	
-	PosDir const *posDir;
-	
-	double radius;
-	double height;
-	double maxDist;
-};
-
-struct CollisionResult {
-	vec3l pos;
-	vec3d force;
-	double distance;
-	bool isCollision;
-	
-	static CollisionResult noCollision() {
-		return CollisionResult{};
-	}
-	
-	friend std::ostream &operator<<(std::ostream &o, CollisionResult const &it) {
-		return o  << '(' << it.pos << ';' << it.force << ';' << it.distance << ';' << it.isCollision << ')';
-	}
-};
-
-static CollisionResult checkSide(CollisionInfo const ci, vec3b const forwardAxis, vec3b const rightAxis, vec3b const upAxis) {
-	vec3i const fi{ forwardAxis };
-	vec3l const fl{ forwardAxis };
-	vec3d const fd{ forwardAxis };
-	vec3i const ri{ rightAxis };
-	vec3l const rl{ rightAxis };
-	vec3d const rd{ rightAxis };
-	vec3d const ud{ upAxis };
-	vec3l const ul{ upAxis };
-	auto const &pd{ *ci.posDir };
-	
-	vec3i const facesCoord_i{ ci.blockCoord + ci.normals.max(0) };
-	vec3d const localFacesCoord{ vec3d(facesCoord_i) - pd.posInChunk };
-	auto  newT = (localFacesCoord.dot(fd)*pd.dir.sign().dot(fi) - radius) * pd.stepLength.dotNonan(fd);
-	vec3d normal{ ci.normals * fi };
-	if(normal == 0) return CollisionResult::noCollision();
-	vec3l v{ pd.chunkPart + ChunkCoord::posToFracTrunk(pd.dir * newT) };
-	
-	bool const checkRight = v.in(ChunkCoord::blockToFrac(ci.blockCoord), ChunkCoord::blockToFrac(ci.blockCoord+1)).dot(rightAxis);
-	if(!checkRight) {
-		vec2i minEdge;
-		double minDist, minT;
-		
-		vec2d flatBotInChunk{ pd.posInChunk.dot(fd), pd.posInChunk.dot(rd) };
-		vec2d flatDir{ vec2d{pd.dir.dot(fd), pd.dir.dot(rd)}.normalized() };
-		
-		vec2i const edge1{ facesCoord_i.dot(fi), ci.blockCoord.dot(ri)+0 };
-		vec2i const edge2{ facesCoord_i.dot(fi), ci.blockCoord.dot(ri)+1 };
-		vec2d const toEdge1{ static_cast<vec2d>(edge1) - flatBotInChunk };
-		vec2d const toEdge2{ static_cast<vec2d>(edge2) - flatBotInChunk };
-		
-		
-		auto const minDist1{ abs(flatDir.cross(toEdge1)) };
-		auto const minDist2{ abs(flatDir.cross(toEdge2)) };
-		
-		auto const minT1{ flatDir.dot(toEdge1) };
-		auto const minT2{ flatDir.dot(toEdge2) };
-		
-		if(minDist1 < minDist2) { minT = minT1; minEdge = edge1; minDist = minDist1; }
-		else					{ minT = minT2; minEdge = edge2; minDist = minDist2; }
-		
-		if(minDist > radius || isnan(minDist)) return CollisionResult::noCollision();
-		
-		double const dt{sqrt(radius*radius - minDist*minDist)};
-		if(std::isnan(dt)) {
-			std::cout.precision(17);
-			std::cerr << "err:" << radius << ' ' << minDist << '\n';
-			assert(false);
-		}
-		
-		newT = minT - dt;
-		
-		v = pd.part_at(newT);
-		vec2l const newToMinEdge{ ChunkCoord::blockToFrac(minEdge) - vec2l{v.dot(fl), v.dot(rl)} };
-		
-		vec3l const newToMinEdgeAbs{ fi * newToMinEdge.x + ri * newToMinEdge.y };
-		normal = -ChunkCoord::fracToPos(newToMinEdgeAbs).normalized();
-		
-		/*vec3d end = pd.posInChunk + pd.dir * newT;
-		
-		vec2d const newToMinEdge{ vec2d(minEdge) - vec2d{end.dot(fd), end.dot(rd)} };
-		
-		vec3d const newToMinEdgeAbs{ fd * newToMinEdge.x + rd * newToMinEdge.y };
-		normal = -vec3d{ newToMinEdgeAbs }.normalized();
-		
-		auto const offsetAbs{ ChunkCoord::posToFracRAway(normal * radius)  };
-		auto const minEdgeAbs{ fi * minEdge.x + ri * minEdge.y };
-		v = ChunkCoord::posToFrac(end * ud) + ChunkCoord::blockToFrac(minEdgeAbs) + offsetAbs;*/
-	}
-	
-	int64_t const blockPos{ ChunkCoord::blockToFrac(ci.blockCoord).dot(ul) };
-	bool const checkU = misc::intersectsX( 
-		blockPos, blockPos+ChunkCoord::blockToFrac(vec3i{1}).x,
-		 v.dot(ul), (v+height_i).dot(ul)
-	);
-		//ChunkCoord::blockToFrac(ci.blockCoord).dot(ul) < (v+height_i).dot(ul)
-		//&& 
-		//(ChunkCoord::blockToFrac(ci.blockCoord+1).dot(ul) > v.dot(ul));
-	
-	double const strengthF{ static_cast<vec3d>(normal).dot(-pd.line) };
-	if(checkU && strengthF >= 0) {
-		return CollisionResult {
-			v,
-			pd.line + normal * strengthF,
-			newT,
-			true
-		};
-		//newForce = playerForce + normal * 2 * strengthF;
-	}
-	return CollisionResult::noCollision();
-}
-
-static CollisionResult checkTB(CollisionInfo const ci, bool top, vec3b const forwardAxis, vec3b const rightAxis, vec3b const upAxis) {
-	vec3d  const fd{ forwardAxis };
-	vec3d  const rd{ rightAxis };
-	vec3d  const ud{ upAxis };
-	auto const &pd{ *ci.posDir };
-	
-	vec3d const checkPos{ top ? (pd.posInChunk + fd * ci.height) : pd.posInChunk };
-	
-	vec3i const facesCoord_i{ ci.blockCoord + ci.normals.max(0) };
-	vec3d const localFacesCoord{ vec3d(facesCoord_i) - checkPos };
-	double const distToSide{( localFacesCoord * pd.stepLength * vec3d(pd.dir.sign()) ).dotNonan(fd)};
-
-	vec3d const normal{ vec3d(ci.normals) * fd };
-	if(normal == 0) return CollisionResult::noCollision();
-	double const strength{ normal.dot(-pd.line) };
-	
-	if(strength > 0) { 
-		vec3d const coordAtSide{ checkPos + pd.dir*distToSide };
-		vec3d const clp{ coordAtSide.clamp(vec3d(ci.blockCoord), vec3d(ci.blockCoord)+1.0) };
-		vec2d const closestPoint{
-			clp.dot(rd),
-			clp.dot(ud)
-		};
-
-		bool isIntersection{ (vec2d{coordAtSide.x, coordAtSide.z}-closestPoint).lengthSquare() < radius*radius };
-		
-		return CollisionResult{
-			pd.part_at(distToSide),
-			(pd.line + normal * strength) * vec3lerp(vec3d{0.8}, vec3d{1}, fd),
-			distToSide,
-			isIntersection
-		};
-	}
-	return CollisionResult::noCollision();
-}
-
 struct DDA {
 private:
 	//const
@@ -1001,159 +825,324 @@ public:
 	#undef G
 };
 
-static bool updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround, std::vector<vec3i> &candidates, vec3i *(&collided)) {	
-	static int prev = 0;
-		
-	PosDir const posDir{ player, playerForce };
-	DDA dda{ posDir };
+//static bool sqIntersect(vec2 const i1, vec2 const a1, vec2 const i2, vec2 const a2) {
+//	return misc::intersects(i1.x, a1.x, i2.x, a2.x) && misc::intersects(i1.y, a1.y, i2.y, a2.y);
+//}
+
+static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround) {	
+	auto const playerChunk{ player.chunk() };
 	
-	vec3i lastChunkCoord;
+	vec3l playerPos{ player.chunkPart__long() };
+	vec3d force{ playerForce };
+	
+	vec3l maxPlayerPos{};
+	
+	vec3i dir{};
+	vec3b positive_{};
+	vec3b negative_{};
+	vec3i positive{};
+	vec3i negative{};
+	
+	vec3l playerMin{};
+	vec3l playerMax{};
+	
+	vec3i min{};
+	vec3i max{};
+	
+	auto const updateBounds = [&]() {	
+		vec3l const force_ = ChunkCoord::posToFracTrunk(force);
+		
+		dir = force_.sign();
+		positive_ = dir > vec3i(0);
+		negative_ = dir < vec3i(0);
+		positive = vec3i(positive_);
+		negative = vec3i(negative_);
+		
+		maxPlayerPos = playerPos + force_;
+		
+		/*static_*/assert(width_i % 2 == 0);
+		playerMin = vec3l{ playerPos.x-width_i/2, playerPos.y         , playerPos.z-width_i/2 };
+		playerMax = vec3l{ playerPos.x+width_i/2, playerPos.y+height_i, playerPos.z+width_i/2 };
+		
+		min = (playerPos - vec3l{width_i/2,0,width_i/2}).applied([](auto const coord, auto i) -> int32_t {
+			return misc::divFloor(coord, ChunkCoord::fracBlockDim);
+		});
+		max = (playerPos + vec3l{width_i/2,height_i,width_i/2}).applied([](auto const coord, auto i) -> int32_t {
+			return misc::divCeil(coord, ChunkCoord::fracBlockDim)-1;
+		});
+	};
+	updateBounds();
+	
+	vec3i lastChunkCoord{};
 	int32_t lastChunkIndex = -1;
 	
-	vec3l newOffset{ posDir.part_end() };
-	vec3d newForce{ posDir.line };
-	double newPlayerDist = dda.get_maxLen();
-	bool isCollision{ false };	
-	bool newIsOnGround{ isOnGround };
-	
-	vec3i collided_;
-	
-	bool side = false;
-	bool skipS = false;
-	bool x__ = false;
-	
-	vec3i lastBBMin{0};
-	vec3i lastBBMax{0};
-	
-	for(int i = 0;; i ++) {
-		double const minLen{ std::get<0>(dda.next()) };
-		vec3l const curCoord = posDir.part_at(minLen);
-
-		vec2l const botXZ_i{ curCoord.x, curCoord.z };
+	/*
+	if(dir.y < 0){
+		auto const startY{ misc::divFloor(playerMin.y, ChunkCoord::fracBlockDim)-1 };
+		auto const endY{ misc::divFloor(newPlayerPos.y, ChunkCoord::fracBlockDim) };
+		auto const yCount{ (endY - startY) * dir.y };
 		
-		auto const curBBMin{ ChunkCoord::fracToBlock(vec3l{botXZ_i.x - rad_i, curCoord.y         , botXZ_i.y - rad_i}) };
-		auto const curBBMax{ ChunkCoord::fracToBlock(vec3l{botXZ_i.x + rad_i, curCoord.y+height_i, botXZ_i.y + rad_i}) };
+		bool is = false;
+		int64_t minY = newPlayerPos.y;
 		
-		for(int32_t x = curBBMin.x; x <= curBBMax.x; x++)	
-		for(int32_t y = curBBMin.y; y <= curBBMax.y; y++)
-		for(int32_t z = curBBMin.z; z <= curBBMax.z; z++) {
-			vec3i const coord{x,y,z};
-			
-			if(coord.in(lastBBMin, lastBBMax).all()) continue;
-			
-			ChunkCoord const coord_{ posDir.chunk, ChunkCoord::Block{coord} };
-			vec3i chunkCoord{ coord_.chunk() };
-			int chunkIndex = -1;
-			
-			if(lastChunkCoord == chunkCoord && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-			else for(auto const elChunkIndex : chunks.usedChunks())
-				if(chunks.chunksPosition()[elChunkIndex] == chunkCoord) { chunkIndex = elChunkIndex; break; }
-			
-			lastChunkIndex = chunkIndex;
-			lastChunkCoord = chunkCoord; 
-			
-			if(chunkIndex == -1) { 
-				//auto const usedIndex{ genChunkAt(chunkCoord) }; //generates every frame
-				//chunkIndex = chunks.usedChunks()[usedIndex];
-				std::cout << "add chunk gen!\n"; playerForce = 0; return true; 
-			}
-			auto const chunkData{ chunks.chunksData()[chunkIndex] };
-			auto const index{ Chunks::blockIndex(coord_.blockInChunk()) };
-			uint16_t const &block{ chunkData[index] };
-			if(block != 0) {				
-				CollisionInfo const ci{
-					coord,
-					vec3i{1},
-					
-					&posDir,
-					
-					radius,
-					height,
-					newPlayerDist
+		for(auto x{ min.x }; x <= max.x; x++)
+		for(auto z{ min.z }; z <= max.z; z++)
+			for(int32_t yo{}; yo <= yCount; yo++) {
+				vec3l const blockPos{x, startY + yo * dir.y, z};
+				
+				ChunkCoord const coord{ //TODO: remove conversion from block to frac
+					playerChunk,
+					ChunkCoord::Block{ vec3i(blockPos) } 
 				};
+						
+				vec3i const blockCoord = coord.blockInChunk();
+				vec3i const blockChunk = coord.chunk();
 				
-
+				int chunkIndex = -1;
 				
-				CollisionInfo ci2{ ci };
-				ci2.normals = -ci2.normals;
-
+				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
+				else for(auto const elChunkIndex : chunks.usedChunks())
+					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
 				
-				CollisionResult collisions[] = {
-					checkTB(ci, false, vec3b{0,1,0}, vec3b{1,0,0}, vec3b{0,0,1}), //y-
-					checkTB(ci2, true, vec3b{0,1,0}, vec3b{1,0,0}, vec3b{0,0,1}), //y+
-					checkSide(ci,      vec3b{1,0,0}, vec3b{0,0,1}, vec3b{0,1,0}), //x
-					checkSide(ci2,     vec3b{1,0,0}, vec3b{0,0,1}, vec3b{0,1,0}), //x-
-					checkSide(ci,      vec3b{0,0,1}, vec3b{1,0,0}, vec3b{0,1,0}), //z
-					checkSide(ci2,     vec3b{0,0,1}, vec3b{1,0,0}, vec3b{0,1,0}), //z-
-				};
+				lastChunkIndex = chunkIndex;
+				lastChunkCoord = blockChunk; 
 				
-				int minI = -1;
-				double minDist = newPlayerDist;
+				if(chunkIndex == -1) { 
+					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
+					//chunkIndex = chunks.usedChunks()[usedIndex];
+					std::cout << "collision y: add chunk gen!" << coord << '\n'; 
+					break;
+				}
 				
-
-				for(size_t i = 0; i < sizeof(collisions)/sizeof(collisions[0]); i++) {
-					auto const &c{ collisions[i] };
-					if(c.isCollision) {
-						candidates.push_back(posDir.chunk * Chunks::chunkDim + coord);
-					}
-					if(c.isCollision && c.distance <= minDist && c.distance >= 0) {
-						minI = i;
-						minDist = c.distance;
+				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+				uint16_t const &block{ chunkData[index] };
+				
+				if(block != 0) {
+					auto const newY{ ChunkCoord::blockToFrac(vec3i(blockPos.y+1)).x }; 
+					if(newY >= minY) {
+						minY = newY;
+						is = true;
+						break;
 					}
 				}
+			}
+		
+		if(is) {
+			newPlayerPos.y = minY;
+			isOnGround = true;
+			newForce *= 0.8;
+			newForce.y = 0;
+		}
+	}
+	*/
+	
+	if(dir.y != 0){
+		auto const startY{ misc::divFloor(positive_.y ? playerMax.y : playerMin.y, ChunkCoord::fracBlockDim)-negative.y };
+		auto const endY{ misc::divFloor(maxPlayerPos.y + (positive_.y ? height_i : 0), ChunkCoord::fracBlockDim) };
+		auto const yCount{ (endY - startY) * dir.y };
+		
+		bool is = false;
+		int64_t minY = maxPlayerPos.y;
+		
+		for(auto x{ min.x }; x <= max.x; x++)
+		for(auto z{ min.z }; z <= max.z; z++)
+			for(int32_t yo{}; yo <= yCount; yo++) {
+				vec3l const blockPos{x, startY + yo * dir.y, z};
 				
-				if(minI != -1) {
-					auto &c{ collisions[minI] };
-					isCollision = true;
-					newIsOnGround = (minI == 0) || isOnGround;
-					newPlayerDist = minDist;
-					newOffset = c.pos;
-
-					newForce = c.force;
-					
-					if(minI >= 2) { side = true; prev = 5; x__ = minI < 4; skipS = false; }
-					else side = false;
-					collided_ = posDir.chunk * Chunks::chunkDim + coord;
+				ChunkCoord const coord{ //TODO: remove conversion from block to frac
+					playerChunk,
+					ChunkCoord::Block{ vec3i(blockPos) } 
+				};
+						
+				vec3i const blockCoord = coord.blockInChunk();
+				vec3i const blockChunk = coord.chunk();
+				
+				int chunkIndex = -1;
+				
+				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
+				else for(auto const elChunkIndex : chunks.usedChunks())
+					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				
+				lastChunkIndex = chunkIndex;
+				lastChunkCoord = blockChunk; 
+				
+				if(chunkIndex == -1) { 
+					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
+					//chunkIndex = chunks.usedChunks()[usedIndex];
+					std::cout << "collision y: add chunk gen!" << coord << '\n'; 
+					return;
 				}
-				else {
-					skipS = true;
+				
+				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+				uint16_t const &block{ chunkData[index] };
+				
+				if(block != 0) {
+					auto const newY{ ChunkCoord::blockToFrac(vec3i(blockPos.y+negative.y)).x - (positive_.y ? height_i : 0)}; 
+					if(positive_.y ? (newY >= playerPos.y && newY <= minY) : (newY <= playerPos.y && newY >= minY)) {
+						is = true;
+						minY = newY;
+						break;
+					}
 				}
 			}
+		
+		playerPos.y = minY;
+		
+		if(is) {
+			if(negative_.y) isOnGround = true;
+			force *= 0.8;
+			force.y = 0;
 		}
 		
-		if( i >= 100 || dda.get_end() || newPlayerDist <= minLen ) break;
-
-		lastBBMin = curBBMin;
-		lastBBMax = curBBMax;
+		updateBounds();
 	}
 	
-	player = ChunkCoord{ posDir.chunk, ChunkCoord::Fractional{newOffset} };
-	playerForce = newForce;
-	isOnGround = newIsOnGround;
+	if(dir.x != 0){
+		auto const start{ misc::divFloor(positive_.x ? playerMax.x : playerMin.x, ChunkCoord::fracBlockDim)-negative.x };
+		auto const end{ misc::divFloor(maxPlayerPos.x+width_i/2*dir.x, ChunkCoord::fracBlockDim) };
+		auto const count{ (end - start) * dir.x };
+		
+		bool is = false;
+		int64_t minX = maxPlayerPos.x;
+		
+		for(auto y{ min.y }; y <= max.y; y++)
+		for(auto z{ min.z }; z <= max.z; z++)
+			for(int32_t xo{}; xo <= count; xo++) {
+				vec3l const blockPos{start + xo * dir.x, y, z};
+				
+				ChunkCoord const coord{ //TODO: remove conversion from block to frac
+					playerChunk,
+					ChunkCoord::Block{ vec3i(blockPos) } 
+				};
+						
+				vec3i const blockCoord = coord.blockInChunk();
+				vec3i const blockChunk = coord.chunk();
+				
+				int chunkIndex = -1;
+				
+				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
+				else for(auto const elChunkIndex : chunks.usedChunks())
+					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				
+				lastChunkIndex = chunkIndex;
+				lastChunkCoord = blockChunk; 
+				
+				if(chunkIndex == -1) { 
+					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
+					//chunkIndex = chunks.usedChunks()[usedIndex];
+					std::cout << "collision y: add chunk gen!" << coord << '\n'; 
+					return;
+				}
+				
+				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+				uint16_t const &block{ chunkData[index] };
+				
+				if(block != 0) {
+					auto const newX{ ChunkCoord::blockToFrac(vec3i(blockPos.x + negative.x)).x - width_i/2*dir.x }; 
+					if(positive_.x ? (newX >= playerPos.x && newX <= minX) : (newX <= playerPos.x && newX >= minX)) {
+						minX = newX;
+						is = true;
+						break;
+					}
+				}
+			}
+		
+		playerPos.x = minX;
+		if(is) {
+			force.x = 0;
+		}
+		updateBounds();
+	}
 	
-	if(isCollision) *collided = collided_;
-	else collided = NULL;
-	return !isCollision || newForce.lengthSquare() == 0;
+	if(dir.z != 0){
+		auto const start{ misc::divFloor(positive_.z ? playerMax.z : playerMin.z, ChunkCoord::fracBlockDim)-negative.z };
+		auto const end{ misc::divFloor(maxPlayerPos.z+width_i/2*dir.z, ChunkCoord::fracBlockDim) };
+		auto const count{ (end - start) * dir.z };
+		
+		bool is = false;
+		int64_t minZ = maxPlayerPos.z;
+		
+		for(auto x{ min.x }; x <= max.x; x++)
+		for(auto y{ min.y }; y <= max.y; y++)
+			for(int32_t zo{}; zo <= count; zo++) {
+				vec3l const blockPos{x, y, start + zo * dir.z};
+				
+				ChunkCoord const coord{ //TODO: remove conversion from block to frac
+					playerChunk,
+					ChunkCoord::Block{ vec3i(blockPos) } 
+				};
+						
+				vec3i const blockCoord = coord.blockInChunk();
+				vec3i const blockChunk = coord.chunk();
+				
+				int chunkIndex = -1;
+				
+				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
+				else for(auto const elChunkIndex : chunks.usedChunks())
+					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				
+				lastChunkIndex = chunkIndex;
+				lastChunkCoord = blockChunk; 
+				
+				if(chunkIndex == -1) { 
+					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
+					//chunkIndex = chunks.usedChunks()[usedIndex];
+					std::cout << "collision y: add chunk gen!" << coord << '\n'; 
+					return;
+				}
+				
+				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+				uint16_t const &block{ chunkData[index] };
+				
+				if(block != 0) {
+					auto const newZ{ ChunkCoord::blockToFrac(vec3i(blockPos.z + negative.z)).x - width_i/2*dir.z }; 
+					if(positive_.z ? (newZ >= playerPos.z && newZ <= minZ) : (newZ <= playerPos.z && newZ >= minZ)) {
+						minZ = newZ;
+						is = true;
+						break;
+					}
+				}
+			}
+		
+		playerPos.z = minZ;
+		if(is) {
+			force.z = 0;			
+		}
+		updateBounds();
+	}
+	
+	player = ChunkCoord{ playerChunk, ChunkCoord::Fractional{playerPos} };
+	playerForce = force;
 }
 
-static std::vector<vec3f> positions{};
-static std::vector<vec3i> candidates{}; //collision candidates
-static std::vector<vec3i> collided{};
+void test() {
+	ChunkCoord player{ vec3i(0), vec3d{-1.5, 15, -7.3} };
+	vec3d playerForce{0, -1, 1};
+	playerCoord() = player; loadChunks();
+	
+	std::cout << player.positionInChunk() << "(b)\n";
+	updateCollision(player, playerForce, isOnGround);
+	std::cout << player.positionInChunk() << ' ' << isOnGround << '\n';
+	
+	exit(0);
+}
 
 bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
 	ChunkCoord const relativeBlockCoord{ ChunkCoord{ blockChunk, ChunkCoord::Block{blockCoord} } - playerCoord_ };
-	vec3l const relativeBlockPos{ relativeBlockCoord.position__long() };
-	vec3l const relativeBlockEndPos{ relativeBlockPos + ChunkCoord::blockToFrac(vec3i{1}) };
-	bool const checkY{ misc::intersectsX(relativeBlockPos.y, relativeBlockEndPos.y, 0ll, height_i) };
-	if(!checkY) return true;
-	vec3l const nearest{ vec3l{0}.clamp( 
-		relativeBlockPos, 
-		relativeBlockEndPos
-	) };
-	vec2l nearestXZ{ nearest.x, nearest.z };
+	vec3l const blockStartF{ relativeBlockCoord.position__long() };
+	vec3l const blockEndF{ blockStartF + ChunkCoord::fracBlockDim };
 	
-	if(nearestXZ.lengthSquare() >= rad_i*rad_i) return true;
-	return false;
+	/*static_*/assert(width_i % 2 == 0);
+	
+	return !(
+		misc::intersectsX(0ll       , height_i ,  blockStartF.y, blockEndF.y) &&
+		misc::intersectsX(-width_i/2, width_i/2,  blockStartF.x, blockEndF.x) &&
+		misc::intersectsX(-width_i/2, width_i/2,  blockStartF.z, blockEndF.z)
+	);
 }
 
 static void update() {	
@@ -1384,24 +1373,9 @@ static void update() {
 		lastPhysicsUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
 		
 		if(!debugBtn0) {
-			candidates.clear();
-			collided.clear();
 			playerForce+=vec3d{0,-1,0} * fixedDeltaTime;
-			positions.clear();
 			isOnGround = false;
-			int i = 0;
-			for(; i < 1000; i++) {
-				vec3i cd{};
-				vec3i *is = &cd;
-				bool const br = updateCollision(playerCoord_, playerForce, isOnGround, candidates, is);
-				
-				if(is)collided.push_back(cd);
-				if(br) break;
-			}
-			int r;
-			if((r = (int(positions.size()) - 1000)) > 0) {
-				positions.erase(positions.begin(), positions.begin() + r);
-			}
+			updateCollision(playerCoord_, playerForce, isOnGround);
 		}
 	}
 	
@@ -1411,11 +1385,7 @@ static void update() {
 }
 
 int main(void) {
-	//vec3d a{15.55, 0, -0.45};
-	//double x, y, z;
-	//std::cin >> x >> y >> z;
-	//std::cout << a.clamp(vec3d{x, y, z}, vec3d{x, y, z}+1);
-	//exit(0);
+	//test();
 	
     GLFWwindow* window;
 
@@ -1473,47 +1443,6 @@ int main(void) {
 	loadChunks();
 	
 	glUseProgram(mainProgram);
-	
-	
-	const int radialCount = 32;
-	vec3f verts [(radialCount+1)*2*2]; //radialCount+1 - closed loop, *2 - top & bottom, *2 - pos & normal
-	vec3f topCap[(radialCount+1)  *2];
-	vec3f botCap[(radialCount+1)  *2];
-	
-	for(int i = 0; i < radialCount+1; i ++) {
-		double const angle{ i / (double)radialCount * 2.0 * misc::pi };
-		
-		auto const x{ (float) (cos(angle) * radius) };
-		auto const y{ (float) (sin(angle) * radius) };
-		
-		verts[i*2*2  ] = botCap[i*2] = vec3f{ x, 0, y };
-		verts[i*2*2+1] = vec3f{ x, 0, y }; //normals are not normalized 
-		botCap[i*2+1] = vec3f{0,-1,0};
-		
-		verts[(i*2+1)*2  ] = topCap[(radialCount-i)*2] = vec3f{ x, (float) height, y };
-		verts[(i*2+1)*2+1] = vec3f{ x, 0, y };
-		topCap[(radialCount-i)*2+1] = vec3f{0,1,0};
-	} 
-
-	GLuint vbo;
-	glGenBuffers(1, &vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(verts), NULL, GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	
-	GLuint vao;
-	glGenVertexArrays(1, &vao);
-	
-	glBindVertexArray(vao);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 6, NULL); //pos
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 6, (void*)(sizeof(GLfloat)*3)); //norm
-	//glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 7, (void*) (sizeof(GLfloat) * 4));
-
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glBindVertexArray(0); 
-	
 	
 	GLuint vb;
 	glGenBuffers(1, &vb);
@@ -1719,69 +1648,31 @@ int main(void) {
 		
 		if(isFreeCam){
 			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
-			float playerToLocal[4][4];
 			float const translation4[4][4] ={
 					{ 1, 0, 0, playerRelativePos.x },
 					{ 0, 1, 0, playerRelativePos.y },
 					{ 0, 0, 1, playerRelativePos.z },
 					{ 0, 0, 0, 1                   },
 			};
+			float const model[4][4] ={
+				{ (float)width, 0, 0, (float)-width/2 },
+				{ 0, (float)height, 0, (float)0 },
+				{ 0, 0, (float)width, (float)-width/2 },
+				{ 0, 0, 0, 1  },
+			};
 						
-			misc::matMult(toLoc4, translation4, &playerToLocal);
+			float posToScale[4][4];
+			float playerToLocal[4][4];
+			
+			
+			misc::matMult(translation4, model, &posToScale);
+			misc::matMult(toLoc4, posToScale, &playerToLocal);
 			
 			glUseProgram(playerProgram);
 			
 			glUniformMatrix4fv(pl_modelMatrix_u, 1, GL_TRUE, &playerToLocal[0][0]);
-			glBindVertexArray(vao);
-			glBindBuffer(GL_ARRAY_BUFFER, vbo);
-			glEnableVertexAttribArray(0);
-			glEnableVertexAttribArray(1);
 						
-			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), &verts[0]);
-			glDrawArrays(GL_TRIANGLE_STRIP, 0, (radialCount+1)*2);
-			
-			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(topCap), &topCap[0]);
-			glDrawArrays(GL_TRIANGLE_FAN, 0, radialCount+1);
-			
-			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(botCap), &botCap[0]);
-			glDrawArrays(GL_TRIANGLE_FAN, 0, radialCount+1);
-			
-			glDisableVertexAttribArray(0);
-			glDisableVertexAttribArray(1);
-			glBindBuffer(GL_ARRAY_BUFFER, 0);
-			glBindVertexArray(0); 
-		}
-		
-		
-		if(positions.size() > 1 && debug){
-			float const translation4[4][4] ={
-				{ 1, 0, 0, (float)-position.x },
-				{ 0, 1, 0, (float)-position.y },
-				{ 0, 0, 1, (float)-position.z },
-				{ 0, 0, 0, 1                  },
-			};
-	
-			float possToLocal[4][4];
-				
-			misc::matMult(toLoc4, translation4, &possToLocal);
-			glUseProgram(debugProgram2);
-			glUniformMatrix4fv(db2_model_matrix_u, 1, GL_TRUE, &possToLocal[0][0]);
-			
-			glBindVertexArray(va);
-			glBindBuffer(GL_ARRAY_BUFFER, vb);
-			glBufferData(GL_ARRAY_BUFFER, sizeof(positions[0]) * positions.size(), &positions[0], GL_DYNAMIC_DRAW);
-			glEnableVertexAttribArray(0);
-
-			glClear(GL_DEPTH_BUFFER_BIT);
-			glDepthMask(GL_FALSE);
-			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-			glDrawArrays(GL_LINE_STRIP, 0, positions.size());
-			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-			glDepthMask(GL_TRUE);
-			
-			glDisableVertexAttribArray(0);
-			glBindBuffer(GL_ARRAY_BUFFER, 0);
-			glBindVertexArray(0); 
+			glDrawArrays(GL_TRIANGLES, 0,36);
 		}
 		
 		if(testInfo) std::cout << "FPS:" << (1000000.0 / mc.mean()) << '\n';
