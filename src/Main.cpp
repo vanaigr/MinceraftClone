@@ -10,6 +10,7 @@
 #include"ChunkCoord.h"
 #include"Viewport.h"
 
+#include"Font.h"
 #include"ShaderLoader.h"
 #include"Read.h"
 #include"Misc.h"
@@ -27,6 +28,7 @@
 #include<array>
 #include<limits>
 #include<tuple>
+#include<sstream>
 
 //#define FULLSCREEN
 
@@ -58,13 +60,15 @@ static double const fixedDeltaTime{ 16.0/1000.0 };
 static double movementSpeed{ 6 };
 static bool jump{ false };
 
+static double const aspect{ windowSize_d.y / windowSize_d.x };
+
 static bool isOnGround{false};
 static vec3d playerForce{};
 static ChunkCoord playerCoord_{ vec3i{0,0,0}, vec3d{0.01,12.001,0.01} };
 static ChunkCoord spectatorCoord{ playerCoord_ };
 static Viewport playerViewport{ 
 	vec2d{ misc::pi / 2.0, 0 },
-	windowSize_d.y / windowSize_d.x,
+	aspect,
 	90.0 / 180.0 * misc::pi,
 	0.001,
 	200
@@ -105,7 +109,7 @@ enum class BlockAction {
 	BREAK
 } static blockAction{ BlockAction::NONE };
 
-static double const blockActionCD{ 100.0 / 1000.0 };
+static double const blockActionCD{ 300.0 / 1000.0 };
 
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -201,6 +205,8 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) 
     size -= size * yoffset * 0.07;
 }
 
+static const Font font{ ".\\assets\\font.txt" };
+
 static GLuint rightDir_u;
 static GLuint topDir_u;
 static GLuint near_u, far_u;
@@ -211,6 +217,8 @@ static GLuint mouseX_u, mouseY_u;
 static GLuint relativeChunkPos_u;
 static GLuint projection_u, db_projection_u, model_matrix_u, db_model_matrix_u;
 static GLuint chunk_u;
+
+static GLuint fontProgram;
 
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
@@ -226,6 +234,8 @@ static GLuint playerProgram = 0;
 
 static GLuint pl_projection_u = 0;
 static GLuint pl_modelMatrix_u = 0;
+
+static GLuint textures[2];
 
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
@@ -246,12 +256,22 @@ void resizeBuffer(int32_t newGpuChunksCount) {
 }
 
 static void reloadShaders() {
+	//images
+	Image images[2];
+	char const* (paths)[2]{ 
+		"assets/atlas.bmp",
+		"assets/font.bmp",
+	};
+	glDeleteTextures(2, &textures[0]);
+	glGenTextures(2, &textures[0]);
+	ImageLoad(paths[0], &images[0]);
+	ImageLoad(paths[1], &images[1]);
+	
 	{
 		glDeleteProgram(mainProgram);
 		mainProgram = glCreateProgram();
 		ShaderLoader sl{};
-	
-		static_assert(Chunks::chunkDim == 16);
+
 		//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
 		//https://gist.github.com/rikusalminen/9393151
 		//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
@@ -288,21 +308,18 @@ static void reloadShaders() {
 		projection_u = glGetUniformLocation(mainProgram, "projection");
 		model_matrix_u = glGetUniformLocation(mainProgram, "model_matrix");
 		chunk_u = glGetUniformLocation(mainProgram, "chunk");
-		
-		//images
-		GLuint textures[1];
-		char const* (paths)[1]{ "assets/atlas.bmp"
-		};
-		loadGLImages<1>(textures, paths);
 	
 		GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
 	
-		glUniform1i(atlasTex_u, 0);
-	
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, textures[0]);
-	
-
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, images[0].sizeX, images[0].sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, images[0].data);
+        //glBindTexture(GL_TEXTURE_2D, 0);
+		
+		glUniform1i(atlasTex_u, 0);
+		
 		{
 			auto const c = [](int16_t const x, int16_t const y) -> int32_t {
 				return int32_t( uint32_t(uint16_t(x)) | (uint32_t(uint16_t(y)) << 16) );
@@ -389,6 +406,68 @@ static void reloadShaders() {
 		bgProjection_u = glGetUniformLocation(bgProgram, "projection");
 		bgRightDir_u = glGetUniformLocation(bgProgram, "rightDir");
 		bgTopDir_u = glGetUniformLocation(bgProgram, "topDir");
+	}
+	
+	{
+		glDeleteProgram(fontProgram);
+		fontProgram = glCreateProgram();
+		ShaderLoader sl{};
+		
+		sl.addShaderFromCode(
+		R"(#version 300 es
+			precision mediump float;
+			
+			layout(location = 0) in vec2 pos_;
+			layout(location = 1) in vec2 uv_;
+			
+			out vec2 uv;
+			void main(void){
+				gl_Position = vec4(pos_, 0, 1); /*vec4(
+					2 * (gl_VertexID % 2) - 1,
+					2 * (gl_VertexID / 2) - 1,
+					0.0,
+					1.0
+				);*/
+				uv = uv_;
+			}
+		)", GL_VERTEX_SHADER,"font vertex");
+		
+		sl.addShaderFromCode(
+		R"(#version 420
+			in vec4 gl_FragCoord;
+			in vec2 uv;
+			
+			uniform sampler2D font;
+			
+			out vec4 color;
+			void main() {
+				const vec4 col = texture2D(font, vec2(uv.x, uv.y));
+				color = vec4(vec3(0), 1-col.x*col.x);
+				//color = col;
+			}
+		)",
+		GL_FRAGMENT_SHADER,
+		"font shader");
+		
+		sl.attachShaders(fontProgram);
+	
+		glLinkProgram(fontProgram);
+		glValidateProgram(fontProgram);
+	
+		sl.deleteShaders();
+	
+		glUseProgram(fontProgram);
+		
+		GLuint const fontTex_u = glGetUniformLocation(fontProgram, "font");
+	
+		glActiveTexture(GL_TEXTURE1);
+		glBindTexture(GL_TEXTURE_2D, textures[1]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, images[1].sizeX, images[1].sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, images[1].data);
+        //glBindTexture(GL_TEXTURE_2D, 0);
+		
+		glUniform1i(fontTex_u, 1);
 	}
 	
 	{
@@ -825,10 +904,6 @@ public:
 	#undef G
 };
 
-//static bool sqIntersect(vec2 const i1, vec2 const a1, vec2 const i2, vec2 const a2) {
-//	return misc::intersects(i1.x, a1.x, i2.x, a2.x) && misc::intersects(i1.y, a1.y, i2.y, a2.y);
-//}
-
 static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround) {	
 	auto const playerChunk{ player.chunk() };
 	
@@ -875,67 +950,6 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	
 	vec3i lastChunkCoord{};
 	int32_t lastChunkIndex = -1;
-	
-	/*
-	if(dir.y < 0){
-		auto const startY{ misc::divFloor(playerMin.y, ChunkCoord::fracBlockDim)-1 };
-		auto const endY{ misc::divFloor(newPlayerPos.y, ChunkCoord::fracBlockDim) };
-		auto const yCount{ (endY - startY) * dir.y };
-		
-		bool is = false;
-		int64_t minY = newPlayerPos.y;
-		
-		for(auto x{ min.x }; x <= max.x; x++)
-		for(auto z{ min.z }; z <= max.z; z++)
-			for(int32_t yo{}; yo <= yCount; yo++) {
-				vec3l const blockPos{x, startY + yo * dir.y, z};
-				
-				ChunkCoord const coord{ //TODO: remove conversion from block to frac
-					playerChunk,
-					ChunkCoord::Block{ vec3i(blockPos) } 
-				};
-						
-				vec3i const blockCoord = coord.blockInChunk();
-				vec3i const blockChunk = coord.chunk();
-				
-				int chunkIndex = -1;
-				
-				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.usedChunks())
-					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
-				
-				lastChunkIndex = chunkIndex;
-				lastChunkCoord = blockChunk; 
-				
-				if(chunkIndex == -1) { 
-					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
-					//chunkIndex = chunks.usedChunks()[usedIndex];
-					std::cout << "collision y: add chunk gen!" << coord << '\n'; 
-					break;
-				}
-				
-				auto const chunkData{ chunks.chunksData()[chunkIndex] };
-				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				uint16_t const &block{ chunkData[index] };
-				
-				if(block != 0) {
-					auto const newY{ ChunkCoord::blockToFrac(vec3i(blockPos.y+1)).x }; 
-					if(newY >= minY) {
-						minY = newY;
-						is = true;
-						break;
-					}
-				}
-			}
-		
-		if(is) {
-			newPlayerPos.y = minY;
-			isOnGround = true;
-			newForce *= 0.8;
-			newForce.y = 0;
-		}
-	}
-	*/
 	
 	if(dir.y != 0){
 		auto const startY{ misc::divFloor(positive_.y ? playerMax.y : playerMin.y, ChunkCoord::fracBlockDim)-negative.y };
@@ -1117,18 +1131,6 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	
 	player = ChunkCoord{ playerChunk, ChunkCoord::Fractional{playerPos} };
 	playerForce = force;
-}
-
-void test() {
-	ChunkCoord player{ vec3i(0), vec3d{-1.5, 15, -7.3} };
-	vec3d playerForce{0, -1, 1};
-	playerCoord() = player; loadChunks();
-	
-	std::cout << player.positionInChunk() << "(b)\n";
-	updateCollision(player, playerForce, isOnGround);
-	std::cout << player.positionInChunk() << ' ' << isOnGround << '\n';
-	
-	exit(0);
 }
 
 bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
@@ -1358,7 +1360,7 @@ static void update() {
 				* (ctrl  ? 1.0/speedModifier : 1);
     }
 	
-	if(jump && isOnGround) input+=vec3d{0,1,0}*16;
+	if(jump && isOnGround && !isFreeCam) input+=vec3d{0,1,0}*16;
 	
 	input *= deltaTime;
 	
@@ -1384,9 +1386,7 @@ static void update() {
     pmousePos = mousePos;
 }
 
-int main(void) {
-	//test();
-	
+int main(void) {			
     GLFWwindow* window;
 
     if (!glfwInit())
@@ -1444,18 +1444,16 @@ int main(void) {
 	
 	glUseProgram(mainProgram);
 	
-	GLuint vb;
-	glGenBuffers(1, &vb);
-	glBindBuffer(GL_ARRAY_BUFFER, vb);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	GLuint fontVB;
+	glGenBuffers(1, &fontVB);
+	GLuint fontVA;
+	glGenVertexArrays(1, &fontVA);
 	
-	GLuint va;
-	glGenVertexArrays(1, &va);
-	
-	glBindVertexArray(va);
-	glBindBuffer(GL_ARRAY_BUFFER, vb);
+	glBindVertexArray(fontVA);
+	glBindBuffer(GL_ARRAY_BUFFER, fontVB);
 
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), NULL);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0); 
@@ -1634,11 +1632,7 @@ int main(void) {
 					glUniform1i(isInChunk2_u, isInChunk);
 					glUniformMatrix4fv(db_model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
 					glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-					glDepthMask(GL_FALSE);
-					glDisable(GL_CULL_FACE); 
 					glDrawArrays(GL_TRIANGLES, 0, 36);
-					glDepthMask(GL_TRUE);
-					glEnable(GL_CULL_FACE); 
 					glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 					glUseProgram(mainProgram);
 				}
@@ -1648,7 +1642,7 @@ int main(void) {
 		
 		if(isFreeCam){
 			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
-			float const translation4[4][4] ={
+			float const translation4[4][4] = {
 					{ 1, 0, 0, playerRelativePos.x },
 					{ 0, 1, 0, playerRelativePos.y },
 					{ 0, 0, 1, playerRelativePos.z },
@@ -1674,8 +1668,62 @@ int main(void) {
 						
 			glDrawArrays(GL_TRIANGLES, 0,36);
 		}
+	
+		{ 
+			vec2f const textPos(10, 10);
+			    
+			std::stringstream ss{};
+			ss.precision(1);
+			ss << std::fixed << (1000000.0 / mc.mean()) << "FPS";
+			std::string const text{ ss.str() };
+	
+			auto const textCount{ std::min(text.size(), 10ull) };
+			
+			std::array<std::array<vec2f, 6*2>, 10> data;
+			
+			vec2f currentPoint( textPos.x / windowSize_d.x * 2 - 1, 1 - textPos.y / windowSize_d.y * 2 );
+			
+			auto const lineH = font.base();
+			float const scale = 5;
+			
+			for(uint64_t i{}; i != textCount; i++) {
+				auto const &fc{ font[text[i]] };
+				
+				data[i] = {
+					currentPoint + vec2f(0, 0 - lineH) / scale, vec2f{fc.x, 1-fc.y-fc.height},
+					currentPoint + vec2f(fc.width*aspect, 0 - lineH) / scale, vec2f{fc.x+fc.width,1-fc.y-fc.height},
+					currentPoint + vec2f(0, fc.height - lineH) / scale, vec2f{fc.x,1-fc.y},
+					
+					currentPoint + vec2f(0, fc.height - lineH) / scale, vec2f{fc.x,1-fc.y},
+					currentPoint + vec2f(fc.width*aspect, 0 - lineH) / scale, vec2f{fc.x+fc.width,1-fc.y-fc.height},
+					currentPoint + vec2f(fc.width*aspect, fc.height - lineH) / scale, vec2f{fc.x+fc.width,1-fc.y}
+				};
+				
+				currentPoint += vec2f(fc.xAdvance*aspect, 0) / scale;
+			}
+
+			glUseProgram(fontProgram);
+			
+			glBindVertexArray(fontVA);
+			glBindBuffer(GL_ARRAY_BUFFER, fontVB);
+			glEnableVertexAttribArray(0);
+			glEnableVertexAttribArray(1);
+			
+			glBufferData(GL_ARRAY_BUFFER, sizeof(data[0]) * textCount, &data[0], GL_DYNAMIC_DRAW);
+	
+			glDisable(GL_DEPTH_TEST);
+			glDepthMask(GL_FALSE); 
+			glDrawArrays(GL_TRIANGLES, 0, textCount * 3*2);
+			glDepthMask(GL_TRUE);
+			glEnable(GL_DEPTH_TEST);
 		
-		if(testInfo) std::cout << "FPS:" << (1000000.0 / mc.mean()) << '\n';
+			glEnableVertexAttribArray(0);
+			glEnableVertexAttribArray(1);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			glBindVertexArray(0);
+		}
+		
+		//if(testInfo) std::cout << "FPS:" << (1000000.0 / mc.mean()) << '\n';
 		
 		testInfo = false; 
 		glfwSwapBuffers(window);

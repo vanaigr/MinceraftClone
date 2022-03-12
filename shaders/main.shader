@@ -269,8 +269,8 @@ void main() {
 	}
 	else col = vec4(0,0,0,0);
 	
-	
-	const vec4 proj = projection * vec4(0, 0, (dot(forwardDir, rayDir) * t), 1);
+	const float zWorld = dot(forwardDir, rayDir) * t;
+	const vec4 proj = projection * vec4(0, 0, zWorld, 1);
 	const float z = (1.0 / (proj.z) - 1.0 / near) / (1.0 / far - 1.0 / near);
 
 	
@@ -278,8 +278,10 @@ void main() {
 		color = vec4(vec3(0.98), 1);
 		gl_FragDepth = 0;
 	}
-	else {
+	else if(zWorld <= far && intersection.is)
+	{
 		color = col;
 		gl_FragDepth = z;
 	}
+	else discard;
 }		

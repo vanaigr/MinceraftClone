@@ -81,25 +81,3 @@ inline int ImageLoad(char const* filename, Image* image) {
     return result;
 }
 
-template<GLsizei count>
-inline void loadGLImages(GLuint (&textures)[count], char const* (&paths)[count])
-{
-    glGenTextures(count, &textures[0]);
-    for (GLsizei i = 0; i < count; ++i) {
-        Image image;
-        ImageLoad(paths[i], &image);
-        //glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-        // Create Texture
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, textures[i]);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0,
-            GL_RGB, GL_UNSIGNED_BYTE, image.data);
-        glBindTexture(GL_TEXTURE_2D, 0);
-
-
-        //delete[] image.data;
-    }
-}

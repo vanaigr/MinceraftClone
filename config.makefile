@@ -35,7 +35,7 @@ build: $(EXECUTABLE)
 
 $(EXECUTABLE): $(SOURCES) $(OBJECT_FILES)
 	@echo building $@
-	@ $(CC) $(LIBS_PATH) $(LIBS) $(WIN_API_LIBS) $(OBJECT_FILES) -o "$@"
+	@ $(CC) $(LIBS_PATH) $(LIBS) $(WIN_API_LIBS) $(OBJECT_FILES) -Xlinker /NODEFAULTLIB:libcmt -o "$@"
 
 $(OBJECT_DIR)/%.o: $(SOURCE_DIR)/%.cpp
 	@echo compiling $<
