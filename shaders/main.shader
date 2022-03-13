@@ -271,7 +271,7 @@ void main() {
 	
 	const float zWorld = dot(forwardDir, rayDir) * t;
 	const vec4 proj = projection * vec4(0, 0, zWorld, 1);
-	const float z = (1.0 / (proj.z) - 1.0 / near) / (1.0 / far - 1.0 / near);
+	const float z = ( (1.0 / (proj.z) - 1.0 / (near)) / (1.0 / (far) - 1.0 / (near)) );
 
 	
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) {

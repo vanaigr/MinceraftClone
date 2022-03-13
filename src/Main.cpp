@@ -242,13 +242,14 @@ Chunks chunks{};
 
 void resizeBuffer(int32_t newGpuChunksCount) {
 	assert(newGpuChunksCount >= 0);
-	gpuChunksCount = newGpuChunksCount;
+	gpuChunksCount = std::max((uint64_t)newGpuChunksCount, chunks.used.size());
 	auto &it = chunks.gpuPresent();
 	for(auto &&el : it) {
 		el = false;
 	}
 	
 	static_assert(sizeof(chunks.chunksData()[0]) == 8192);
+	glDeleteBuffers(1, &chunkIndex_u);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * 8192, NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkIndex_u);
@@ -417,18 +418,16 @@ static void reloadShaders() {
 		R"(#version 300 es
 			precision mediump float;
 			
-			layout(location = 0) in vec2 pos_;
-			layout(location = 1) in vec2 uv_;
+			layout(location = 0) in vec2 pos_s;
+			layout(location = 1) in vec2 pos_e;
+			layout(location = 2) in vec2 uv_s;
+			layout(location = 3) in vec2 uv_e;
 			
 			out vec2 uv;
 			void main(void){
-				gl_Position = vec4(pos_, 0, 1); /*vec4(
-					2 * (gl_VertexID % 2) - 1,
-					2 * (gl_VertexID / 2) - 1,
-					0.0,
-					1.0
-				);*/
-				uv = uv_;
+				vec2 interp = vec2(gl_VertexID % 2, gl_VertexID / 2);
+				gl_Position = vec4(mix(pos_s, pos_e, interp), 0, 1);
+				uv = mix(uv_s, uv_e, interp);
 			}
 		)", GL_VERTEX_SHADER,"font vertex");
 		
@@ -441,9 +440,9 @@ static void reloadShaders() {
 			
 			out vec4 color;
 			void main() {
-				const vec4 col = texture2D(font, vec2(uv.x, uv.y));
-				color = vec4(vec3(0), 1-col.x*col.x);
-				//color = col;
+				const float col = texture2D(font, uv).r;
+				color = vec4(vec3(0), 1-col*col);
+				//color = vec4(col,col,col,1);
 			}
 		)",
 		GL_FRAGMENT_SHADER,
@@ -1446,16 +1445,25 @@ int main(void) {
 	
 	GLuint fontVB;
 	glGenBuffers(1, &fontVB);
+	
 	GLuint fontVA;
 	glGenVertexArrays(1, &fontVA);
-	
 	glBindVertexArray(fontVA);
-	glBindBuffer(GL_ARRAY_BUFFER, fontVB);
-
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), NULL);
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
-
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindBuffer(GL_ARRAY_BUFFER, fontVB);
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+		glEnableVertexAttribArray(2);
+		glEnableVertexAttribArray(3);
+	
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8*sizeof(float), NULL); //startPos
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8*sizeof(float), (void*)( 2*sizeof(float) )); //endPos
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8*sizeof(float), (void*)( 4*sizeof(float) )); //startUV
+		glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 8*sizeof(float), (void*)( 6*sizeof(float) )); //endUV
+	
+		glVertexAttribDivisor(0, 1);
+		glVertexAttribDivisor(1, 1);
+		glVertexAttribDivisor(2, 1);
+		glVertexAttribDivisor(3, 1);
 	glBindVertexArray(0); 
 	
 	
@@ -1527,30 +1535,8 @@ int main(void) {
 			{ toLoc[2][0], toLoc[2][1], toLoc[2][2], 0 },
 			{ 0          , 0          , 0          , 1 },
 		};
-		
-		struct ChunkSort {
-			double sqDistance;
-			int chunkIndex;
-		};
-		std::vector<ChunkSort> chunksSorted{};
-		chunksSorted.reserve(chunks.usedChunks().size());
-		for(auto const chunkIndex : chunks.usedChunks()) {
-			auto const chunkPos{ chunks.chunksPosition()[chunkIndex] };
-			vec3<double> const relativeChunkPos{ 
-				static_cast<decltype(cameraPosInChunk)>(chunkPos-playerChunk)*Chunks::chunkDim
-				+(Chunks::chunkDim/2.0f)
-				-cameraPosInChunk
-			};
-			chunksSorted.push_back({ relativeChunkPos.lengthSquare(), chunkIndex });
-		}
-		std::sort(chunksSorted.begin(), chunksSorted.end(), [](ChunkSort const c1, ChunkSort const c2) -> bool {
-			return c1.sqDistance < c2.sqDistance; //chunks located nearer are rendered first
-		});
-		
-		float projection[4][4];
-		viewport_current().projectionMatrix(&projection);
-		
-		for(auto const [_ignore_, chunkIndex] : chunksSorted) {
+			
+		for(auto const chunkIndex : chunks.used) {
 			Chunks::AABB const aabb{ chunks.chunksAABB[chunkIndex] };
 				
 			vec3i const b1{ aabb.start() };
@@ -1620,7 +1606,7 @@ int main(void) {
 				
 				if(isInChunk) {
 					glUniform1i(isInChunk_u, 1);
-					glDrawArrays(GL_TRIANGLES, 0, 6);
+					glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 					glUniform1i(isInChunk_u, 0);
 				}
 				else {
@@ -1674,12 +1660,12 @@ int main(void) {
 			    
 			std::stringstream ss{};
 			ss.precision(1);
-			ss << std::fixed << (1000000.0 / mc.mean()) << "FPS";
+			ss << std::fixed << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";
 			std::string const text{ ss.str() };
 	
-			auto const textCount{ std::min(text.size(), 10ull) };
+			auto const textCount{ std::min(text.size(), 15ull) };
 			
-			std::array<std::array<vec2f, 6*2>, 10> data;
+			std::array<std::array<vec2f, 4>, 15> data;
 			
 			vec2f currentPoint( textPos.x / windowSize_d.x * 2 - 1, 1 - textPos.y / windowSize_d.y * 2 );
 			
@@ -1690,13 +1676,12 @@ int main(void) {
 				auto const &fc{ font[text[i]] };
 				
 				data[i] = {
-					currentPoint + vec2f(0, 0 - lineH) / scale, vec2f{fc.x, 1-fc.y-fc.height},
-					currentPoint + vec2f(fc.width*aspect, 0 - lineH) / scale, vec2f{fc.x+fc.width,1-fc.y-fc.height},
-					currentPoint + vec2f(0, fc.height - lineH) / scale, vec2f{fc.x,1-fc.y},
-					
-					currentPoint + vec2f(0, fc.height - lineH) / scale, vec2f{fc.x,1-fc.y},
-					currentPoint + vec2f(fc.width*aspect, 0 - lineH) / scale, vec2f{fc.x+fc.width,1-fc.y-fc.height},
-					currentPoint + vec2f(fc.width*aspect, fc.height - lineH) / scale, vec2f{fc.x+fc.width,1-fc.y}
+					//pos
+					currentPoint + vec2f(0, 0 - lineH) / scale,
+					currentPoint + vec2f(fc.width*aspect, fc.height - lineH) / scale, 
+					//uv
+					vec2f{fc.x, 1-fc.y-fc.height},
+					vec2f{fc.x+fc.width,1-fc.y},
 				};
 				
 				currentPoint += vec2f(fc.xAdvance*aspect, 0) / scale;
@@ -1704,22 +1689,16 @@ int main(void) {
 
 			glUseProgram(fontProgram);
 			
-			glBindVertexArray(fontVA);
 			glBindBuffer(GL_ARRAY_BUFFER, fontVB);
-			glEnableVertexAttribArray(0);
-			glEnableVertexAttribArray(1);
-			
 			glBufferData(GL_ARRAY_BUFFER, sizeof(data[0]) * textCount, &data[0], GL_DYNAMIC_DRAW);
-	
-			glDisable(GL_DEPTH_TEST);
-			glDepthMask(GL_FALSE); 
-			glDrawArrays(GL_TRIANGLES, 0, textCount * 3*2);
-			glDepthMask(GL_TRUE);
-			glEnable(GL_DEPTH_TEST);
-		
-			glEnableVertexAttribArray(0);
-			glEnableVertexAttribArray(1);
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			
+			glBindVertexArray(fontVA);
+				glDisable(GL_DEPTH_TEST);
+				glDepthMask(GL_FALSE); 
+				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, textCount);
+				glDepthMask(GL_TRUE);
+				glEnable(GL_DEPTH_TEST);
 			glBindVertexArray(0);
 		}
 		
