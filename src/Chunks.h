@@ -11,7 +11,7 @@
 struct Chunks {
 public:
 	static constexpr int const chunkDimAsPow2 = 4;
-	static constexpr int const chunkDim = 1 << chunkDimAsPow2;
+	static constexpr int const chunkDim = 1 << chunkDimAsPow2; //used in vertex.shader
 	static constexpr int const chunkSize = chunkDim*chunkDim*chunkDim;
 	//static constexpr int const tmpChunkSize = chunkDim*chunkDim*chunkDim/(sizeof(uint16_t) * 8);
 	using ChunkData = std::array<uint16_t, chunkSize>;
@@ -29,9 +29,10 @@ public:
 			| (uint32_t(uint16_t(blockIndex(end))) << 16) 
 		} {}
 		
-		constexpr vec3i start() const { return indexBlock(int16_t(data&0xffff)); }
-		constexpr vec3i end() const { return indexBlock(int16_t(data>>16)); } //used in main vertex shader
-		constexpr vec3i onePastEnd() const { return end() + 1; } //used in main vertex shader
+		constexpr uint32_t getData() const { return data; } //used in vectex.shader
+		constexpr vec3i start() const { return indexBlock(int16_t(data&0xffff)); } //used in vectex.shader
+		constexpr vec3i end() const { return indexBlock(int16_t(data>>16)); } //used in main vertex shader //used in vectex.shader
+		constexpr vec3i onePastEnd() const { return end() + 1; } //used in main vertex shader //used in vectex.shader
 		constexpr bool empty() const { return (end() < start()).any(); };
 	};
 private:
@@ -109,7 +110,7 @@ public:
 		return position.x + position.y*Chunks::chunkDim + position.z*Chunks::chunkDim*Chunks::chunkDim;
 	}
 	
-	inline static constexpr vec3i indexBlock(int16_t index) {
+	inline static constexpr vec3i indexBlock(int16_t index) { //used in vectex.shader
 		return vec3i{ index % chunkDim, (index / chunkDim) % chunkDim, (index / chunkDim / chunkDim) };
 	}
 };

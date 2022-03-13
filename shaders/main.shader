@@ -17,8 +17,6 @@ in vec4 gl_FragCoord;
 out vec4 color;
 layout (depth_greater) out float gl_FragDepth;
 
-uint fragCount = 4;
-
 uniform float time;
 
 uniform sampler2D atlas;
@@ -28,10 +26,6 @@ uniform float mouseX;
 
 uniform mat4 projection; //from local space to screen
 
-in vec3 vertColor;
-
-uniform vec3 relativeChunkPos;
-
 uniform float near;
 uniform float far;
 
@@ -39,7 +33,8 @@ layout(binding = 1) restrict readonly buffer ChunksIndices {
      uint data[][16*16*16/2]; //indeces are shorts 	//8192
 };
 
-uniform uint chunk;
+in vec3 relativeChunkPos;
+flat in uint chunkIndex;
 
 struct Block {
 	uint id;
@@ -85,16 +80,8 @@ uint blockAt(const ivec3 i_v) {
 	const int index = i_v.x + i_v.y * 16 + i_v.z * 16 * 16;
 	const int packedIndex = index / 2;
 	const int offset = (index % 2) * 16;
-	const uint id = (data[chunk][packedIndex] >> offset) & 65535;
+	const uint id = (data[chunkIndex][packedIndex] >> offset) & 65535;
 	return id;
-}
-
-bool isIntersection(const ivec3 i_v) {
-	return blockAt(i_v) != 0;
-}
-
-bool isIntersection_s(const ivec3 i_v) {
-	return checkBoundaries(i_v) && isIntersection(i_v);
 }
 
 vec3 rgb2hsv(const vec3 c) {
@@ -273,7 +260,6 @@ void main() {
 	const vec4 proj = projection * vec4(0, 0, zWorld, 1);
 	const float z = ( (1.0 / (proj.z) - 1.0 / (near)) / (1.0 / (far) - 1.0 / (near)) );
 
-	
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) {
 		color = vec4(vec3(0.98), 1);
 		gl_FragDepth = 0;

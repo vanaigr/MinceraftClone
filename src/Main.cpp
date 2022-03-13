@@ -214,9 +214,7 @@ static GLuint isInChunk_u;
 static GLuint isInChunk2_u;
 static GLuint time_u;
 static GLuint mouseX_u, mouseY_u;
-static GLuint relativeChunkPos_u;
-static GLuint projection_u, db_projection_u, model_matrix_u, db_model_matrix_u;
-static GLuint chunk_u;
+static GLuint projection_u, db_projection_u, toLocal_matrix_u, db_model_matrix_u;
 
 static GLuint fontProgram;
 
@@ -307,8 +305,8 @@ static void reloadShaders() {
 		glUniform1f(glGetUniformLocation(mainProgram, "near"), playerViewport.near);
 		glUniform1f(glGetUniformLocation(mainProgram, "far"), playerViewport.far);
 		projection_u = glGetUniformLocation(mainProgram, "projection");
-		model_matrix_u = glGetUniformLocation(mainProgram, "model_matrix");
-		chunk_u = glGetUniformLocation(mainProgram, "chunk");
+		toLocal_matrix_u = glGetUniformLocation(mainProgram, "toLocal");
+		//chunk_u = glGetUniformLocation(mainProgram, "chunk");
 	
 		GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
 	
@@ -355,7 +353,7 @@ static void reloadShaders() {
 		glBufferData(GL_UNIFORM_BUFFER, 12, NULL, GL_DYNAMIC_DRAW);
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);*/
 		
-		relativeChunkPos_u = glGetUniformLocation(mainProgram, "relativeChunkPos");
+		//relativeChunkPos_u = glGetUniformLocation(mainProgram, "relativeChunkPos");
 		
 		glGenBuffers(1, &chunkIndex_u);
 		resizeBuffer(0);
@@ -666,9 +664,6 @@ public:
 		return arr[index];
 	}
 };
-
-//CircularArray<BlockCoord, 20> treeBlocks{};
-
 
 double heightAt(vec2i const flatChunk, vec2i const block) {
 	static siv::PerlinNoise perlin{ (uint32_t)rand() };
@@ -1443,13 +1438,41 @@ int main(void) {
 	
 	glUseProgram(mainProgram);
 	
+	
+	GLuint chunksVB;
+	static size_t chunksVBSize = 0;
+	glGenBuffers(1, &chunksVB);
+
+	GLuint chunksVA;
+	glGenVertexArrays(1, &chunksVA);
+	glBindVertexArray(chunksVA);
+		glBindBuffer(GL_ARRAY_BUFFER, chunksVB);
+		
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+		glEnableVertexAttribArray(2);
+
+		glVertexAttribPointer (0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float) + 2*sizeof(uint32_t), (void*)( 0*sizeof(float) )); //relativeChunkPos
+		glVertexAttribIPointer(1, 1,    GL_UNSIGNED_INT, 3*sizeof(float) + 2*sizeof(uint32_t), (void*)( 3*sizeof(float) )); //start|(end<<16) blocks pos
+		glVertexAttribIPointer(2, 1,    GL_UNSIGNED_INT, 3*sizeof(float) + 2*sizeof(uint32_t), (void*)( 3*sizeof(float)+sizeof(uint32_t) )); //chunkIndex
+
+		glVertexAttribDivisor(0, 1);
+		glVertexAttribDivisor(1, 1);
+		glVertexAttribDivisor(2, 1);
+	glBindVertexArray(0); 
+	
+	
 	GLuint fontVB;
 	glGenBuffers(1, &fontVB);
+	glBindBuffer(GL_ARRAY_BUFFER, fontVB);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(std::array<std::array<vec2f, 4>, 15>{}), NULL, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	
 	GLuint fontVA;
 	glGenVertexArrays(1, &fontVA);
 	glBindVertexArray(fontVA);
 		glBindBuffer(GL_ARRAY_BUFFER, fontVB);
+		
 		glEnableVertexAttribArray(0);
 		glEnableVertexAttribArray(1);
 		glEnableVertexAttribArray(2);
@@ -1535,23 +1558,34 @@ int main(void) {
 			{ toLoc[2][0], toLoc[2][1], toLoc[2][2], 0 },
 			{ 0          , 0          , 0          , 1 },
 		};
-			
+		glUniformMatrix4fv(toLocal_matrix_u, 1, GL_TRUE, &toLoc4[0][0]);
+	
+		struct __attribute__ ((packed)) ChunkInfo {
+			vec3f relativeChunkPos;
+			uint32_t positions;
+			uint32_t chunkIndex;
+		};
+				
+		static std::vector<ChunkInfo> chunksInfo{};
+		
+		chunksInfo.clear();
+		chunksInfo.reserve(chunks.used.size());
+		
 		for(auto const chunkIndex : chunks.used) {
 			Chunks::AABB const aabb{ chunks.chunksAABB[chunkIndex] };
 				
+			uint32_t const aabbData{ aabb.getData() };
 			vec3i const b1{ aabb.start() };
 			vec3i const b2{ aabb.onePastEnd() };
 			
 			if((b2 <= b1).any()) continue;
 				
 			auto const chunkPos{ chunks.chunksPosition()[chunkIndex] };
-			auto  &chunkData{ chunks.chunksData()[chunkIndex] };
 			vec3<int32_t> const relativeChunkPos_{ chunkPos-playerChunk };
 			vec3<float> const relativeChunkPos{ 
 				static_cast<decltype(cameraPosInChunk)>(relativeChunkPos_)*Chunks::chunkDim
 				-cameraPosInChunk
 			};
-			glUniform3f(relativeChunkPos_u, relativeChunkPos.x, relativeChunkPos.y, relativeChunkPos.z);
 
 			vec3d const relativeCameraPos{ cameraPosInChunk - vec3d(relativeChunkPos_*Chunks::chunkDim) };
 			
@@ -1560,71 +1594,96 @@ int main(void) {
 				nearestCameraPos.inX(vec3d(b1), vec3d(b2)).all()
 				|| nearestCameraPos.distance(relativeCameraPos) <= 5*currentViewport.near
 			};
-
-			glUniform1ui(chunk_u, chunkIndex);
-			{ 
+			
+			std::vector<bool>::reference gpuPresent = chunks.gpuPresent()[chunkIndex];
+			if(!gpuPresent && chunkIndex >= gpuChunksCount) resizeBuffer(chunkIndex+1); 
+				
+			{				
+				ChunkInfo const ci{ 
+					relativeChunkPos, 
+					aabbData, 
+					uint32_t(chunkIndex) 
+				};
+				
+				if(isInChunk) {
+					if(!gpuPresent) {
+						if(chunkIndex >= gpuChunksCount) {
+							resizeBuffer(chunkIndex+1);
+						}
+						gpuPresent = true;
+				
+						auto  &chunkData{ chunks.chunksData()[chunkIndex] };
+						static_assert(sizeof chunkData == (8192));
+						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
+						glBufferSubData(GL_SHADER_STORAGE_BUFFER, 8192 * chunkIndex, 8192, &chunkData);
+						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+					} 
+				
+					glBindBuffer(GL_ARRAY_BUFFER, chunksVB);
+					if(chunksVBSize < sizeof(ChunkInfo))
+						glBufferData   (GL_ARRAY_BUFFER,    sizeof(ChunkInfo), &ci, GL_DYNAMIC_DRAW);
+					else 
+						glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(ChunkInfo), &ci);
+					
+					glBindBuffer(GL_ARRAY_BUFFER, 0);
+		
+					glUniform1i(isInChunk_u, 1);
+					glBindVertexArray(chunksVA);
+						glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+					glBindVertexArray(0); 
+					glUniform1i(isInChunk_u, 0);
+					
+					continue;
+				}
+				
+				chunksInfo.push_back(ci);
+			}
+		}
+		
+		{
+			auto const chunksCount = chunksInfo.size();
+			glBindBuffer(GL_ARRAY_BUFFER, chunksVB);
+			if(chunksVBSize < sizeof(ChunkInfo) * chunksCount)
+				glBufferData   (GL_ARRAY_BUFFER,    sizeof(ChunkInfo) * chunksCount, chunksInfo.data(), GL_DYNAMIC_DRAW);
+			else
+				glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(ChunkInfo) * chunksCount, chunksInfo.data());
+			
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			
+			for(auto const &chunkInfo : chunksInfo) {
+				auto const chunkIndex{ chunkInfo.chunkIndex };
+				auto &chunkData{ chunks.chunksData()[chunkIndex] };
 				std::vector<bool>::reference gpuPresent = chunks.gpuPresent()[chunkIndex];
 				if(!gpuPresent) {
-					if(chunkIndex >= gpuChunksCount) {
-						resizeBuffer(chunkIndex+1);
+					if(chunkIndex >= uint32_t(gpuChunksCount)) {
+						std::cout << "Error: gpu buffer was not properly resized. size=" << gpuChunksCount << " expected=" << (chunkIndex+1);
+						exit(-1);
 					}
+				
 					gpuPresent = true;
-					
+						
 					static_assert(sizeof chunkData == (8192));
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
 					glBufferSubData(GL_SHADER_STORAGE_BUFFER, 8192 * chunkIndex, 8192, &chunkData);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 				} 
 			}
-				
-			{
-				float const translation4[4][4] ={
-					{ 1, 0, 0, relativeChunkPos.x },
-					{ 0, 1, 0, relativeChunkPos.y },
-					{ 0, 0, 1, relativeChunkPos.z },
-					{ 0, 0, 0, 1                  },
-				};
-				
-				auto const scale{ vec3f(b2 - b1) };
-				auto const lb{ vec3f(b1) };
-				
-				float const bounds[4][4] = {
-					{ scale.x, 0, 0, lb.x },
-					{ 0, scale.y, 0, lb.y },
-					{ 0, 0, scale.z, lb.z },
-					{ 0, 0, 0, 1 },
-				};
-		
-				float chunkToScale[4][4];
-				float chunkToLocal[4][4];
-				
-				misc::matMult(translation4, bounds, &chunkToScale);
-				misc::matMult(toLoc4, chunkToScale, &chunkToLocal);
-				
-				
-				glUniformMatrix4fv(model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
-				
-				if(isInChunk) {
-					glUniform1i(isInChunk_u, 1);
-					glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-					glUniform1i(isInChunk_u, 0);
-				}
-				else {
-					glDrawArrays(GL_TRIANGLES, 0, 36);
-				}
-				
-				if(debug) {
-					glUseProgram(debugProgram);
-					glUniform1i(isInChunk2_u, isInChunk);
-					glUniformMatrix4fv(db_model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
-					glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-					glDrawArrays(GL_TRIANGLES, 0, 36);
-					glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-					glUseProgram(mainProgram);
-				}
-			}
-		
+			
+			glBindVertexArray(chunksVA);
+			glDrawArraysInstanced(GL_TRIANGLES, 0, 36, chunksCount);
+			glBindVertexArray(0); 
+			
+			//if(debug) {
+			//	glUseProgram(debugProgram);
+			//	glUniform1i(isInChunk2_u, isInChunk);
+			//	glUniformMatrix4fv(db_model_matrix_u, 1, GL_TRUE, &chunkToLocal[0][0]);
+			//	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			//	glDrawArrays(GL_TRIANGLES, 0, 36);
+			//	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			//	glUseProgram(mainProgram);
+			//}
 		}
+				
 		
 		if(isFreeCam){
 			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
@@ -1690,7 +1749,7 @@ int main(void) {
 			glUseProgram(fontProgram);
 			
 			glBindBuffer(GL_ARRAY_BUFFER, fontVB);
-			glBufferData(GL_ARRAY_BUFFER, sizeof(data[0]) * textCount, &data[0], GL_DYNAMIC_DRAW);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(data[0]) * textCount, &data[0]);
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
 			
 			glBindVertexArray(fontVA);
