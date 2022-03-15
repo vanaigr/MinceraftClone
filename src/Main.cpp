@@ -71,7 +71,7 @@ static Viewport playerViewport{
 	aspect,
 	90.0 / 180.0 * misc::pi,
 	0.001,
-	200
+	400
 };
 
 static double const height{ 1.95 };
@@ -207,16 +207,26 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) 
 
 static const Font font{ ".\\assets\\font.txt" };
 
-static GLuint rightDir_u;
-static GLuint topDir_u;
-static GLuint near_u, far_u;
-static GLuint isInChunk_u;
-static GLuint isInChunk2_u;
-static GLuint time_u;
-static GLuint mouseX_u, mouseY_u;
-static GLuint projection_u, db_projection_u, toLocal_matrix_u, db_model_matrix_u;
+static size_t const texturesCount = 5;
+static GLuint textures[texturesCount];
+
+static GLuint chunksFB;
+static GLuint &chunksFBColor{ textures[2] }, &chunksFBDepthColor{ textures[3] }, &chunksFBDepth{ textures[4] };
+
+static GLuint mainProgram = 0;
+  static GLuint rightDir_u;
+  static GLuint topDir_u;
+  static GLuint near_u, far_u;
+  static GLuint isInChunk_u;
+  static GLuint isInChunk2_u;
+  static GLuint time_u;
+  static GLuint mouseX_u, mouseY_u;
+  static GLuint projection_u, db_projection_u, toLocal_matrix_u, db_model_matrix_u;
+
+static GLuint mapChunks_p;
 
 static GLuint fontProgram;
+
 
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
@@ -225,7 +235,7 @@ static GLuint bgProjection_u;
 static GLuint bgRightDir_u;
 static GLuint bgTopDir_u;
 
-static GLuint mainProgram = 0;
+
 static GLuint debugProgram = 0;
 static GLuint bgProgram = 0;
 static GLuint playerProgram = 0;
@@ -233,12 +243,10 @@ static GLuint playerProgram = 0;
 static GLuint pl_projection_u = 0;
 static GLuint pl_modelMatrix_u = 0;
 
-static GLuint textures[2];
-
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
-static int viewDistance = 3;
+static int viewDistance = 20;
 
 void resizeBuffer(int32_t newGpuChunksCount) {
 	assert(newGpuChunksCount >= 0);
@@ -263,10 +271,53 @@ static void reloadShaders() {
 		"assets/atlas.bmp",
 		"assets/font.bmp",
 	};
-	glDeleteTextures(2, &textures[0]);
-	glGenTextures(2, &textures[0]);
+	glDeleteTextures(texturesCount, &textures[0]);
+	glGenTextures(texturesCount, &textures[0]);
 	ImageLoad(paths[0], &images[0]);
 	ImageLoad(paths[1], &images[1]);
+	
+	{
+		//color
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, chunksFBColor);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, windowSize.x, windowSize.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		
+		//depth color
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_2D, chunksFBDepthColor);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, windowSize.x, windowSize.y, 0, GL_RED, GL_FLOAT, NULL);
+		
+		//depth
+		glActiveTexture(GL_TEXTURE4);
+		glBindTexture(GL_TEXTURE_2D, chunksFBDepth);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, windowSize.x, windowSize.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+		
+		glDeleteFramebuffers(1, &chunksFB);
+		glGenFramebuffers(1, &chunksFB);
+		glBindFramebuffer(GL_FRAMEBUFFER, chunksFB);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, chunksFBColor, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, chunksFBDepthColor, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, chunksFBDepth, 0);
+		{
+			GLenum status;
+			if ((status = glCheckFramebufferStatus(GL_FRAMEBUFFER)) != GL_FRAMEBUFFER_COMPLETE) {
+				fprintf(stderr, "chunks FB: error %u\n", status);
+			}
+		}
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
 	
 	{
 		glDeleteProgram(mainProgram);
@@ -361,7 +412,61 @@ static void reloadShaders() {
 		resizeBuffer(0);
 		}
 		
-		{
+	{
+		glDeleteProgram(mapChunks_p);
+		mapChunks_p = glCreateProgram();
+		ShaderLoader sl{};
+		
+		sl.addShaderFromCode(R"(#version 430
+				out vec4 gl_Position;
+				out vec2 uv;
+				
+				void main() {
+					const vec2 coords[] = {
+						vec2(0, 0),
+						vec2(1, 0),
+						vec2(0, 1),
+						vec2(1, 1)
+					};
+					
+					gl_Position = vec4(coords[gl_VertexID] * 2 - 1, 0, 1);
+					uv = coords[gl_VertexID];
+				}
+			)",
+			GL_VERTEX_SHADER,
+			"mapChunks vertex"
+		);
+		
+		sl.addShaderFromCode(R"(#version 430
+				uniform sampler2D colorSampler;
+				uniform sampler2D depthSampler;
+				
+				in vec2 uv;
+				
+				out vec4 color;
+				out float gl_FragDepth;
+				
+				void main() {
+					color = texture2D(colorSampler, uv);
+					gl_FragDepth = texture2D(depthSampler, uv).r;
+				}
+			)",
+			GL_FRAGMENT_SHADER,
+			"mapChunks fragment"
+		);
+		
+		sl.attachShaders(mapChunks_p);
+	
+		glLinkProgram(mapChunks_p);
+		glValidateProgram(mapChunks_p);
+		glUseProgram(mapChunks_p);
+		
+		glUniform1i(glGetUniformLocation(mapChunks_p, "colorSampler"), 2);
+		glUniform1i(glGetUniformLocation(mapChunks_p, "depthSampler"), 3);
+		
+	}
+		
+	{
 		glDeleteProgram(bgProgram);
 		bgProgram = glCreateProgram();
 		ShaderLoader bgsl{};
@@ -1417,8 +1522,6 @@ int main(void) {
 	
 	glEnable(GL_CULL_FACE); 
 	glCullFace(GL_BACK); 
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	
     fprintf(stdout, "Using GLEW %s\n", glewGetString(GLEW_VERSION));
 
@@ -1576,7 +1679,7 @@ int main(void) {
 		static vec3i lastPlayerChunk;
 		static vec3d lastCameraPosInChunk;
 		static Viewport lastViewport;
-		if(debugBtn1) {
+		if(debugBtn1 && false) {
 			if(keep == false) std::cout << "~" << debugBtn0 << "~\n";
 			keep = true;
 		}
@@ -1620,6 +1723,16 @@ int main(void) {
 			leftN, rightN, topN, botN
 		};
 		
+		glBindFramebuffer(GL_FRAMEBUFFER, chunksFB);
+		
+		GLenum drawBuffers[]={GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+		glDrawBuffers(2, drawBuffers);
+		
+		float const value = 1;
+		glClearTexImage(chunksFBDepthColor, 0, GL_RED, GL_FLOAT, &value);
+		
+		glClear(GL_DEPTH_BUFFER_BIT);
+
 		for(auto const chunkIndex : chunks.used) {
 			Chunks::AABB const aabb{ chunks.chunksAABB[chunkIndex] };
 				
@@ -1734,8 +1847,6 @@ int main(void) {
 			}
 		}
 		
-		std::cout << '\n';
-		
 		{
 			auto const chunksCount = chunksInfo.size();
 			glBindBuffer(GL_ARRAY_BUFFER, chunksVB);
@@ -1779,7 +1890,11 @@ int main(void) {
 			//	glUseProgram(mainProgram);
 			//}
 		}
-				
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		
+		glUseProgram(mapChunks_p);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		
 		if(isFreeCam){
 			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
@@ -1811,6 +1926,9 @@ int main(void) {
 		}
 	
 		{ 
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			
 			vec2f const textPos(10, 10);
 			    
 			std::stringstream ss{};
@@ -1855,6 +1973,8 @@ int main(void) {
 				glDepthMask(GL_TRUE);
 				glEnable(GL_DEPTH_TEST);
 			glBindVertexArray(0);
+			
+			glDisable(GL_BLEND);
 		}
 		
 		//if(testInfo) std::cout << "FPS:" << (1000000.0 / mc.mean()) << '\n';
