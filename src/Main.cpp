@@ -238,6 +238,8 @@ static GLuint textures[2];
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
+static int viewDistance = 3;
+
 void resizeBuffer(int32_t newGpuChunksCount) {
 	assert(newGpuChunksCount >= 0);
 	gpuChunksCount = std::max((uint64_t)newGpuChunksCount, chunks.used.size());
@@ -631,8 +633,6 @@ inline void apply(size_t size, T &t, L&& l) {
 	for(size_t i = 0; i < size; ++i) 
 		if(l(t[i], i) == true) break;
 }
-
-static int viewDistance = 3;
 
 template<typename T, int32_t maxSize, typename = std::enable_if<(maxSize>0)>>
 struct CircularArray {
@@ -1509,6 +1509,7 @@ int main(void) {
 		auto const position{ player.position()+viewportOffset() };
         auto const rightDir{ currentViewport.rightDir() };
         auto const topDir{ currentViewport.topDir() };
+        auto const forwardDir{ currentViewport.forwardDir() };
 		
 		//glClear(GL_COLOR_BUFFER_BIT);
 		glClear(GL_DEPTH_BUFFER_BIT);
@@ -1537,7 +1538,7 @@ int main(void) {
 		
 		
 		float toLoc[3][3];
-		double toGlob[3][3];
+		float toGlob[3][3];
 		currentViewport.localToGlobalSpace(&toGlob);
 		currentViewport.globalToLocalSpace(&toLoc);
 		vec3<int32_t> const playerChunk{ player.chunk() };
@@ -1571,6 +1572,54 @@ int main(void) {
 		chunksInfo.clear();
 		chunksInfo.reserve(chunks.used.size());
 		
+		static bool keep = true;
+		static vec3i lastPlayerChunk;
+		static vec3d lastCameraPosInChunk;
+		static Viewport lastViewport;
+		if(debugBtn1) {
+			if(keep == false) std::cout << "~" << debugBtn0 << "~\n";
+			keep = true;
+		}
+		else keep = false;
+		
+		if(!keep) {
+			lastPlayerChunk = playerChunk;
+			lastCameraPosInChunk = cameraPosInChunk;
+			lastViewport = currentViewport;
+		}
+		
+		//float toGlob2[3][3];
+		//lastViewport.localToGlobalSpace(&toGlob2);
+		float projection[4][4];
+		lastViewport.projectionMatrix(&projection);
+		
+		float const fov( lastViewport.fov );
+
+		vec3f const top( lastViewport.topDir() );
+		vec3f const right( lastViewport.rightDir() );
+		vec3f const forward( lastViewport.forwardDir() );
+		
+		auto const toGlobal = [&](vec2f const coord) -> vec3f {
+			return right * coord.x / projection[0][0] + top * coord.y / projection[1][1] + forward;
+		};
+	
+		vec3f const right_{ toGlobal(vec2f{+1,0}) };
+		vec3f const left_ { toGlobal(vec2f{-1,0}) };
+		vec3f const up_   { toGlobal(vec2f{0,+1}) };
+		vec3f const down_ { toGlobal(vec2f{0,-1}) };
+		
+		vec3f const leftN{ left_.cross(top) };
+		vec3f const rightN{ -right_.cross(top) };
+		vec3f const topN{ up_.cross(right) };
+		vec3f const botN{ -down_.cross(right) };
+		
+		vec3f const nearPos{ forward * lastViewport.near };
+		vec3f const farPos{ forward * lastViewport.far };
+		
+		vec3f const normals[] = {
+			leftN, rightN, topN, botN
+		};
+		
 		for(auto const chunkIndex : chunks.used) {
 			Chunks::AABB const aabb{ chunks.chunksAABB[chunkIndex] };
 				
@@ -1589,11 +1638,56 @@ int main(void) {
 
 			vec3d const relativeCameraPos{ cameraPosInChunk - vec3d(relativeChunkPos_*Chunks::chunkDim) };
 			
-			auto const nearestCameraPos { relativeCameraPos.clamp(vec3d(b1), vec3d(b2)) };
+			auto const nearest_CameraPos { relativeCameraPos.clamp(vec3d(b1), vec3d(b2)) };
 			bool const isInChunk{ 
-				nearestCameraPos.inX(vec3d(b1), vec3d(b2)).all()
-				|| nearestCameraPos.distance(relativeCameraPos) <= 5*currentViewport.near
+				nearest_CameraPos.inX(vec3d(b1), vec3d(b2)).all()
+				|| nearest_CameraPos.distance(relativeCameraPos) <= 5*currentViewport.near
 			};
+			
+			vec3<int32_t> const relativeChunkPos_2{ chunkPos-lastPlayerChunk };
+			vec3<float> const relativeChunkPos2{ 
+				static_cast<decltype(lastCameraPosInChunk)>(relativeChunkPos_2)*Chunks::chunkDim
+				-lastCameraPosInChunk
+			};
+			
+			auto const checkChunkuOutside = [&normals](
+				vec3f const forwardDir, 
+				vec3f const nearPos, vec3f const farPos, 
+				vec3f const b1, vec3f const b2
+			) -> bool {
+				vec3f verts[8];
+				{ //fill verts and test near/far
+					bool anyInside = false;
+					for(int i{0}; i < 8; ++i) {
+						verts[i] = vec3lerp(b1, b2, vec3f(i&1, (i>>1)&1, (i>>2)&1));
+						
+						if((verts[i]-nearPos).dot(forwardDir) >= 0 && (verts[i]-farPos).dot(-forwardDir) >= 0) {
+							anyInside = true;
+						}
+					}
+					if(!anyInside) return true;
+				}
+				{ //test sides
+					for(int i{}; i < int( sizeof(normals) / sizeof(normals[0]) ); i++) {
+						bool allVertsOutside{true};
+						for(int j{}; j < 8; j++) {
+							auto const pos{ verts[j] };
+							
+							if(pos.dot(normals[i]) >= 0) { allVertsOutside = false; break; }
+						}
+						if(allVertsOutside) return true;
+					}
+				}
+				
+				return false;
+			};
+			
+			if(!isInChunk && checkChunkuOutside(
+				forward,
+				nearPos, farPos, 
+				relativeChunkPos2 + vec3f(b1), relativeChunkPos2 + vec3f(b2)
+			)) continue;
+			
 			
 			std::vector<bool>::reference gpuPresent = chunks.gpuPresent()[chunkIndex];
 			if(!gpuPresent && chunkIndex >= gpuChunksCount) resizeBuffer(chunkIndex+1); 
@@ -1639,6 +1733,8 @@ int main(void) {
 				chunksInfo.push_back(ci);
 			}
 		}
+		
+		std::cout << '\n';
 		
 		{
 			auto const chunksCount = chunksInfo.size();

@@ -396,7 +396,7 @@ inline constexpr std::ostream& operator<<(std::ostream& stream, vec3<C>const& v)
 }
 
 template<typename El>
-inline constexpr vec3<El> vecMult(El const (&m1)[3][3], vec3<El> const &m2) {
+inline constexpr vec3<El> vecMult(El const (&m1)[3][3], vec3<El> const m2) {
 	static_assert(sizeof(m2) == sizeof(El[3][1]), "");
 	vec3<El> o;
 	misc::matMult<El, 3, 3>(m1, *(El(*)[3][1])(void*)&m2, (El(*)[3][1])(void*)&o);
