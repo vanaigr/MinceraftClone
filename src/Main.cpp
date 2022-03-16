@@ -847,7 +847,7 @@ void generateChunkData(Chunks::Chunk chunk) {
 	auto &aabb{ chunk.aabb() };
 	auto &neighbours{ chunk.neighbours() };
 	
-	for(int i{}; i < Chunks::Neighbours::DIR_COUNT; i++) {
+	for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
 		vec3i const offset{ Chunks::Neighbours::indexAsDir(i) };
 		if(offset == 0) continue;
 		int neighbourIndex = -1;
@@ -935,7 +935,8 @@ static void loadChunks() {
 		}, 
 		[&](int chunkIndex) -> void { //free chunk
 			auto const &neighbours{ chunks[chunkIndex].neighbours() };
-			for(int i{}; i < Chunks::Neighbours::DIR_COUNT; i++) {
+			for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
+				if(Chunks::Neighbours::isSelf(i)) continue;
 				auto const &optNeighbour{ neighbours[i] };
 				if(optNeighbour) {
 					auto const neighbourIndex{ optNeighbour.get() };
@@ -1773,42 +1774,9 @@ int main(void) {
 			vec3i const b1{ aabb.start() };
 			vec3i const b2{ aabb.onePastEnd() };
 			
-			auto const chunkPos{ chunks.chunksPos[chunkIndex] };
-			
-			if(chunkPos == 0 && testInfo) {
-				do {
-				auto const startChunk{ chunks[chunkIndex] };
-				std::cout << "1)" << 1 << ' ' << startChunk.position() << '\n';
-				
-				auto const c2{ startChunk.neighbours()[Chunks::Neighbours::NEG_X] };
-				std::cout << "2)" << c2.is() << ' ';
-				if(!c2.is()) break;
-				auto const chunk2{ chunks[c2.get()] };
-				std::cout << chunk2.position() << '\n';
-				
-				auto const c3{ chunk2.neighbours()[Chunks::Neighbours::NEG_Y] };
-				std::cout << "3)" << c3.is() << ' ';
-				if(!c3.is()) break;
-				auto const chunk3{ chunks[c3.get()] };
-				std::cout << chunk3.position() << '\n';
-				
-				auto const c4{ chunk3.neighbours()[Chunks::Neighbours::POS_X] };
-				std::cout << "4)" << c4.is() << ' ';
-				if(!c4.is()) break;
-				auto const chunk4{ chunks[c4.get()] };
-				std::cout << chunk4.position() << '\n';
-				
-				auto const c5{ chunk4.neighbours()[Chunks::Neighbours::POS_Y] };
-				std::cout << "5)" << c5.is() << ' ';
-				if(!c5.is()) break;
-				auto const chunk5{ chunks[c5.get()] };
-				std::cout << chunk5.position() << '\n';
-				
-				} while(false);
-			}
-			
 			if((b2 <= b1).any()) continue;
 				
+			auto const chunkPos{ chunks.chunksPos[chunkIndex] };
 			vec3<int32_t> const relativeChunkPos_{ chunkPos-playerChunk };
 			vec3<float> const relativeChunkPos{ 
 				static_cast<decltype(cameraPosInChunk)>(relativeChunkPos_)*Chunks::chunkDim

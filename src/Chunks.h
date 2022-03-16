@@ -57,26 +57,25 @@ public:
 	using vec2on = vec2<OptionalNeighbour>;
 	
 	struct Neighbours {
-		enum NeighbourDir : uint8_t {
-			NEG_X = 0, POS_X, NEG_Y, POS_Y, NEG_Z, POS_z, DIR_COUNT
-		};
-		
-		std::array<OptionalNeighbour, DIR_COUNT> n;
+		static constexpr int neighboursCount{ 27 };
+		std::array<OptionalNeighbour, neighboursCount> n;
 		
 		static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
-			/*static*/ constexpr vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0}, vec3i{0,-1,0},vec3i{0,1,0}, vec3i{0,0,-1},vec3i{0,0,1} };
-			assert(neighbourIndex >= 0 && neighbourIndex < 6);
-			return dirs[neighbourIndex];
+			return vec3i{
+				(neighbourIndex / 1) % 3,
+				(neighbourIndex / 3) % 3,
+				(neighbourIndex / 9) % 3
+			} - 1;
 		}
 		static constexpr uint8_t dirAsIndex(vec3i dir) {
-			vec3i mask( dir.notEqual(0) );
-			assert(mask.dot(1) == 1); //one and only one axis
-			
-			assert(indexAsDir( ((dir + 1)/2 + vec3i{0,2,4}).dot(mask) ) == dir);
-			return ((dir + 1)/2 + vec3i{0,2,4}).dot(mask);
+			return uint8_t( dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9 );
 		}
 		static constexpr uint8_t mirror(uint8_t index) {
 			return dirAsIndex( -indexAsDir(index) );
+		}
+		
+		static constexpr bool isSelf(uint8_t index) {
+			return indexAsDir(index) == 0;
 		}
 		
 		OptionalNeighbour &operator[](uint8_t index) { return n[index]; }
