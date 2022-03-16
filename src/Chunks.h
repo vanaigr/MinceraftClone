@@ -29,10 +29,10 @@ public:
 			| (uint32_t(uint16_t(blockIndex(end))) << 16) 
 		} {}
 		
-		constexpr uint32_t getData() const { return data; } //used in vectex.shader
-		constexpr vec3i start() const { return indexBlock(int16_t(data&0xffff)); } //used in vectex.shader
-		constexpr vec3i end() const { return indexBlock(int16_t(data>>16)); } //used in main vertex shader //used in vectex.shader
-		constexpr vec3i onePastEnd() const { return end() + 1; } //used in main vertex shader //used in vectex.shader
+		constexpr uint32_t getData() const { return data; } //used in vectex.shader, debug program
+		constexpr vec3i start() const { return indexBlock(int16_t(data&0xffff)); } //used in vectex.shader, debug program
+		constexpr vec3i end() const { return indexBlock(int16_t(data>>16)); } //used in main vertex shader //used in vectex.shader, debug program
+		constexpr vec3i onePastEnd() const { return end() + 1; } //used in main vertex shader //used in vectex.shader, debug program
 		constexpr bool empty() const { return (end() < start()).any(); };
 	};
 	

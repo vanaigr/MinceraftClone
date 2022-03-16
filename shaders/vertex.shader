@@ -58,7 +58,7 @@ void main() {
 			vec4(1,0,0,0),
 			vec4(0,1,0,0),
 			vec4(0,0,1,0),
-			vec4(relativeChunkPos, 1)
+			vec4(relativeChunkPos_, 1)
 		};			
 		
 		const mat4 model_matrix = toLocal * translation;

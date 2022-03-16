@@ -14,9 +14,8 @@ uniform vec3 rightDir, topDir;
 
 in vec4 gl_FragCoord;
 
+layout (depth_greater) out float gl_FragDepth;
 layout(location = 0) out vec4 color;
-layout(location = 1) out float depth;
-//layout (depth_greater) out float gl_FragDepth;
 
 uniform float time;
 
@@ -263,12 +262,11 @@ void main() {
 
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) {
 		color = vec4(vec3(0.98), 1);
-		depth = 0;
+		gl_FragDepth = 0;
 	}
-	else if(zWorld <= far && intersection.is)
-	{
+	else if(zWorld <= far && intersection.is) {
 		color = vec4(col.rgb, 1);
-		depth = z;
+		gl_FragDepth = z;
 	}
 	else discard;
 }		
