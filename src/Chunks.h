@@ -36,12 +36,12 @@ public:
 		constexpr bool empty() const { return (end() < start()).any(); };
 	};
 	
-	struct OptionalNeighbour {
-	// -(neighbouring chunkIndex) - 1	
+	struct OptionalChunkIndex {
+	// -(chunkIndex) - 1	
 	private: int n;
 	public:
-		OptionalNeighbour() = default;
-		OptionalNeighbour(int neighbour) : n{ -neighbour - 1 } {}
+		OptionalChunkIndex() = default;
+		OptionalChunkIndex(int chunkIndex) : n{ -chunkIndex - 1 } {}
 		explicit operator int() const { return get(); }
 		
 		operator bool() const { return is(); }
@@ -49,12 +49,12 @@ public:
 			return n != 0;
 		}
 		
-		int32_t get() const {
+		int32_t get() const { //return -1 if invalid
 			return int32_t(int64_t(n + 1) * -1); //-n - 1 is UB if n is integer min?
 		}
 	};
 	
-	using vec2on = vec2<OptionalNeighbour>;
+	using OptionalNeighbour = OptionalChunkIndex;
 	
 	struct Neighbours {
 		static constexpr int neighboursCount{ 27 };
@@ -101,8 +101,6 @@ public:
 		//OptionalNeighbour const *cend  () const { return n.cend  (); }
 	}; 
 	
-	
-	
 	struct Chunk {
 	private:
 		Chunks *chunks_;
@@ -125,6 +123,49 @@ public:
 			gs(data, chunksData)
 			gs(neighbours, chunksNeighbours)
 		#undef gs
+	};
+
+	struct Move_to_neighbour_Chunk {
+	private:
+	Chunks::Chunk chunk;
+	bool valid;
+	public:
+		Move_to_neighbour_Chunk() = default;
+		Move_to_neighbour_Chunk(Chunks::Chunk &src) : chunk{src}, valid{ true } {}
+			
+		Move_to_neighbour_Chunk(Chunks &chunks, vec3i const chunkCoord) {
+			int32_t chunkIndex = -1;
+				
+			for(auto const elChunkIndex : chunks.used)
+				if(chunks.chunksPos[elChunkIndex] == chunkCoord) { chunkIndex = elChunkIndex; break; }
+				
+			valid = chunkIndex != -1;
+			
+			if(valid) chunk = chunks[chunkIndex];
+		}
+		
+		OptionalChunkIndex optChunk() const {
+			if(valid) return OptionalChunkIndex{ chunk.chunkIndex() };
+			return {};
+		}
+		
+		OptionalChunkIndex moveToNeighbour(vec3i const neighbour) {
+			if(!valid) return {};
+			return offset(neighbour - chunk.position());
+		}
+			
+		OptionalChunkIndex offset(vec3i const dir) {
+			assert(Neighbours::checkDirValid(dir));
+			if(!valid) return {};
+			if(dir == 0) return { chunk.chunkIndex() };
+			auto const optChunkIndex{ chunk.neighbours()[dir] };
+			valid = optChunkIndex.is();
+			if(valid) chunk = chunk.chunks()[optChunkIndex.get()];
+			return optChunkIndex;
+		}
+		
+		bool is() const { return valid; }
+		Chunks::Chunk get() const { return chunk; };
 	};
 private:
 	std::vector<int> vacant{};
