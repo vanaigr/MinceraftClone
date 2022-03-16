@@ -246,17 +246,17 @@ static GLuint pl_modelMatrix_u = 0;
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
-static int viewDistance = 20;
+static int viewDistance = 3;
 
 void resizeBuffer(int32_t newGpuChunksCount) {
 	assert(newGpuChunksCount >= 0);
 	gpuChunksCount = std::max((uint64_t)newGpuChunksCount, chunks.used.size());
-	auto &it = chunks.gpuPresent();
+	auto &it = chunks.gpuPresent;
 	for(auto &&el : it) {
 		el = false;
 	}
 	
-	static_assert(sizeof(chunks.chunksData()[0]) == 8192);
+	static_assert(sizeof(chunks.chunksData[0]) == 8192);
 	glDeleteBuffers(1, &chunkIndex_u);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * 8192, NULL, GL_DYNAMIC_DRAW);
@@ -839,7 +839,29 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i start, vec3i end
 	aabb = Chunks::AABB(start, end);
 }
 
-void generateChunk(vec3i const pos, Chunks::ChunkData &data, Chunks::AABB &aabb) {
+void generateChunkData(Chunks::Chunk chunk) {
+	auto const &index{ chunk.chunkIndex() };
+	auto const &pos{ chunk.position() };
+	auto &chunks{ chunk.chunks() };
+	auto &data{ chunk.data() };
+	auto &aabb{ chunk.aabb() };
+	auto &neighbours{ chunk.neighbours() };
+	
+	for(int i{}; i < Chunks::Neighbours::DIR_COUNT; i++) {
+		vec3i const offset{ Chunks::Neighbours::indexAsDir(i) };
+		if(offset == 0) continue;
+		int neighbourIndex = -1;
+		auto const neighbourPos{ pos + offset };
+		for(auto const elChunkIndex : chunks.used)
+			if(chunks.chunksPos[elChunkIndex] == neighbourPos) { neighbourIndex = elChunkIndex; break; }
+		
+		if(neighbourIndex == -1) neighbours[i] = Chunks::OptionalNeighbour();
+		else {
+			neighbours[i] = Chunks::OptionalNeighbour(neighbourIndex);
+			chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = index;
+		}
+	}
+	
 	double heights[Chunks::chunkDim * Chunks::chunkDim];
 	for(int z = 0; z < Chunks::chunkDim; z++) 
 	for(int x = 0; x < Chunks::chunkDim; x++) {
@@ -857,7 +879,6 @@ void generateChunk(vec3i const pos, Chunks::ChunkData &data, Chunks::AABB &aabb)
 				//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
 				double const diff{ height - double(pos.y * Chunks::chunkDim + y) };
 				if(diff >= 0) {
-					//data[index] = 1;
 					uint16_t block = 0;
 					if(diff < 1) block = 1; //grass
 					else if(diff < 5) block = 2; //dirt
@@ -875,17 +896,17 @@ void generateChunk(vec3i const pos, Chunks::ChunkData &data, Chunks::AABB &aabb)
 	genTrees(pos, data, start, end, aabb);
 }
 
-void generateChunk(int32_t const chunkIndex) {
-	generateChunk(chunks.chunksPos[chunkIndex], chunks.chunksData()[chunkIndex], chunks.chunksAABB[chunkIndex]);
+void generateChunkData(int32_t const chunkIndex) {
+	generateChunkData( Chunks::Chunk{ chunks, chunkIndex } );
 }
 
 static int32_t genChunkAt(vec3i const position) {
 	int32_t const usedIndex{ chunks.reserve() };
-	auto const chunkIndex{ chunks.usedChunks()[usedIndex] };
+	auto const chunkIndex{ chunks.used[usedIndex] };
 					
-	chunks.chunksPosition()[chunkIndex] = position;
-	chunks.gpuPresent()[chunkIndex] = false;
-	generateChunk(chunkIndex);
+	chunks.chunksPos[chunkIndex] = position;
+	chunks.gpuPresent[chunkIndex] = false;
+	generateChunkData(chunkIndex);
 	
 	return usedIndex;
 }
@@ -902,16 +923,27 @@ static void loadChunks() {
 	
 	vec3<int32_t> b{viewDistance, viewDistance, viewDistance};
 	
-	chunks.filterUsed([&](int chunkIndex) -> bool { 
-		auto const relativeChunkPos = chunks.chunksPosition()[chunkIndex] - playerChunk;
-		if(relativeChunkPos.in(-b, b).all()) {
-			auto const index2 = relativeChunkPos + b;
-			chunksPresent[index2.x + index2.y * viewWidth  + index2.z * viewWidth * viewWidth] = 1;
-			
-			return true;
-		} 
-		return false;
-	});
+	chunks.filterUsed([&](int chunkIndex) -> bool { //keep
+			auto const relativeChunkPos = chunks.chunksPos[chunkIndex] - playerChunk;
+			if(relativeChunkPos.in(-b, b).all()) {
+				auto const index2 = relativeChunkPos + b;
+				chunksPresent[index2.x + index2.y * viewWidth  + index2.z * viewWidth * viewWidth] = 1;
+				
+				return true;
+			} 
+			return false;
+		}, 
+		[&](int chunkIndex) -> void { //free chunk
+			auto const &neighbours{ chunks[chunkIndex].neighbours() };
+			for(int i{}; i < Chunks::Neighbours::DIR_COUNT; i++) {
+				auto const &optNeighbour{ neighbours[i] };
+				if(optNeighbour) {
+					auto const neighbourIndex{ optNeighbour.get() };
+					chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = Chunks::OptionalNeighbour();
+				}
+			}
+		}
+	);
 
 	for(int i = 0; i < viewWidth; i ++) {
 		for(int j = 0; j < viewWidth; j ++) {
@@ -1074,8 +1106,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				int chunkIndex = -1;
 				
 				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.usedChunks())
-					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				else for(auto const elChunkIndex : chunks.used)
+					if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
 				
 				lastChunkIndex = chunkIndex;
 				lastChunkCoord = blockChunk; 
@@ -1087,7 +1119,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					return;
 				}
 				
-				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
 				uint16_t const &block{ chunkData[index] };
 				
@@ -1136,8 +1168,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				int chunkIndex = -1;
 				
 				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.usedChunks())
-					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				else for(auto const elChunkIndex : chunks.used)
+					if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
 				
 				lastChunkIndex = chunkIndex;
 				lastChunkCoord = blockChunk; 
@@ -1149,7 +1181,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					return;
 				}
 				
-				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
 				uint16_t const &block{ chunkData[index] };
 				
@@ -1194,8 +1226,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				int chunkIndex = -1;
 				
 				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.usedChunks())
-					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				else for(auto const elChunkIndex : chunks.used)
+					if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
 				
 				lastChunkIndex = chunkIndex;
 				lastChunkCoord = blockChunk; 
@@ -1207,7 +1239,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					return;
 				}
 				
-				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
 				uint16_t const &block{ chunkData[index] };
 				
@@ -1295,8 +1327,8 @@ static void update() {
 				int chunkIndex = -1;
 				
 				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.usedChunks())
-					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				else for(auto const elChunkIndex : chunks.used)
+					if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
 				
 				lastChunkIndex = chunkIndex;
 				lastChunkCoord = blockChunk; 
@@ -1308,16 +1340,16 @@ static void update() {
 					break;
 				}
 				
-				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
 				uint16_t const &block{ chunkData[index] };
 				
 				if(block != 0) {
-					auto &chunkData{ chunks.chunksData()[chunkIndex] };
+					auto &chunkData{ chunks.chunksData[chunkIndex] };
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					uint16_t &block{ chunkData[index] };
 					block = 0;
-					chunks.gpuPresent()[chunkIndex] = false;
+					chunks.gpuPresent[chunkIndex] = false;
 					isAction = true;
 					
 					auto &aabb{ chunks.chunksAABB[chunkIndex] };
@@ -1370,8 +1402,8 @@ static void update() {
 				int chunkIndex = -1;
 				
 				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.usedChunks())
-					if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+				else for(auto const elChunkIndex : chunks.used)
+					if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
 				
 				lastChunkIndex = chunkIndex;
 				lastChunkCoord = blockChunk; 
@@ -1383,7 +1415,7 @@ static void update() {
 					break;
 				}
 				
-				auto const chunkData{ chunks.chunksData()[chunkIndex] };
+				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(nextCoord.blockInChunk()) };
 				uint16_t const &block{ chunkData[index] };
 				
@@ -1395,8 +1427,8 @@ static void update() {
 					int chunkIndex = -1;
 			
 					if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-					else for(auto const elChunkIndex : chunks.usedChunks())
-						if(chunks.chunksPosition()[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
+					else for(auto const elChunkIndex : chunks.used)
+						if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
 					
 					if(chunkIndex == -1) { 
 						std::cout << "block pl(2): add chunk gen!" << coord << '\n'; 
@@ -1404,11 +1436,11 @@ static void update() {
 					}
 				
 					auto const index{ Chunks::blockIndex(blockCoord) };
-					uint16_t &block{ chunks.chunksData()[chunkIndex][index] };
+					uint16_t &block{ chunks.chunksData[chunkIndex][index] };
 					
 					if(checkCanPlaceBlock(blockChunk, blockCoord)) {
 						block = 1;
-						chunks.gpuPresent()[chunkIndex] = false;
+						chunks.gpuPresent[chunkIndex] = false;
 						isAction = true;
 						
 						auto &aabb{ chunks.chunksAABB[chunkIndex] };
@@ -1654,6 +1686,7 @@ int main(void) {
 			std::cout.precision(2);
 			std::cout << playerCoord().blockInChunk() << '\n';
 			std::cout << playerCoord().chunk() << '\n';
+			std::cout << "----------------------------\n";
 		}
 		
 		float const toLoc4[4][4] = {
@@ -1740,9 +1773,42 @@ int main(void) {
 			vec3i const b1{ aabb.start() };
 			vec3i const b2{ aabb.onePastEnd() };
 			
+			auto const chunkPos{ chunks.chunksPos[chunkIndex] };
+			
+			if(chunkPos == 0 && testInfo) {
+				do {
+				auto const startChunk{ chunks[chunkIndex] };
+				std::cout << "1)" << 1 << ' ' << startChunk.position() << '\n';
+				
+				auto const c2{ startChunk.neighbours()[Chunks::Neighbours::NEG_X] };
+				std::cout << "2)" << c2.is() << ' ';
+				if(!c2.is()) break;
+				auto const chunk2{ chunks[c2.get()] };
+				std::cout << chunk2.position() << '\n';
+				
+				auto const c3{ chunk2.neighbours()[Chunks::Neighbours::NEG_Y] };
+				std::cout << "3)" << c3.is() << ' ';
+				if(!c3.is()) break;
+				auto const chunk3{ chunks[c3.get()] };
+				std::cout << chunk3.position() << '\n';
+				
+				auto const c4{ chunk3.neighbours()[Chunks::Neighbours::POS_X] };
+				std::cout << "4)" << c4.is() << ' ';
+				if(!c4.is()) break;
+				auto const chunk4{ chunks[c4.get()] };
+				std::cout << chunk4.position() << '\n';
+				
+				auto const c5{ chunk4.neighbours()[Chunks::Neighbours::POS_Y] };
+				std::cout << "5)" << c5.is() << ' ';
+				if(!c5.is()) break;
+				auto const chunk5{ chunks[c5.get()] };
+				std::cout << chunk5.position() << '\n';
+				
+				} while(false);
+			}
+			
 			if((b2 <= b1).any()) continue;
 				
-			auto const chunkPos{ chunks.chunksPosition()[chunkIndex] };
 			vec3<int32_t> const relativeChunkPos_{ chunkPos-playerChunk };
 			vec3<float> const relativeChunkPos{ 
 				static_cast<decltype(cameraPosInChunk)>(relativeChunkPos_)*Chunks::chunkDim
@@ -1802,7 +1868,7 @@ int main(void) {
 			)) continue;
 			
 			
-			std::vector<bool>::reference gpuPresent = chunks.gpuPresent()[chunkIndex];
+			std::vector<bool>::reference gpuPresent = chunks.gpuPresent[chunkIndex];
 			if(!gpuPresent && chunkIndex >= gpuChunksCount) resizeBuffer(chunkIndex+1); 
 				
 			{				
@@ -1819,7 +1885,7 @@ int main(void) {
 						}
 						gpuPresent = true;
 				
-						auto  &chunkData{ chunks.chunksData()[chunkIndex] };
+						auto  &chunkData{ chunks.chunksData[chunkIndex] };
 						static_assert(sizeof chunkData == (8192));
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
 						glBufferSubData(GL_SHADER_STORAGE_BUFFER, 8192 * chunkIndex, 8192, &chunkData);
@@ -1859,8 +1925,8 @@ int main(void) {
 			
 			for(auto const &chunkInfo : chunksInfo) {
 				auto const chunkIndex{ chunkInfo.chunkIndex };
-				auto &chunkData{ chunks.chunksData()[chunkIndex] };
-				std::vector<bool>::reference gpuPresent = chunks.gpuPresent()[chunkIndex];
+				auto &chunkData{ chunks.chunksData[chunkIndex] };
+				std::vector<bool>::reference gpuPresent = chunks.gpuPresent[chunkIndex];
 				if(!gpuPresent) {
 					if(chunkIndex >= uint32_t(gpuChunksCount)) {
 						std::cout << "Error: gpu buffer was not properly resized. size=" << gpuChunksCount << " expected=" << (chunkIndex+1);

@@ -346,6 +346,10 @@ public:
 		return this->applied([&](C const &it, size_t const index) -> bool { return it == o[index]; });
 	}
 	
+	inline constexpr vec3<bool> notEqual(vec3<C> const o) const {
+		return this->applied([&](C const &it, size_t const index) -> bool { return it != o[index]; });
+	}
+	
 	inline constexpr vec3<C> abs() const {
 		return this->applied([](C const &it, size_t const index) -> C { return std::max({it, -it, C(0)}); });
 	}
