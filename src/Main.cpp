@@ -1080,8 +1080,36 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	};
 	updateBounds();
 	
-	vec3i lastChunkCoord{};
-	int32_t lastChunkIndex = -1;
+	vec3i lastChunkCoord{ playerChunk };
+	Chunks::Chunk lastChunk;
+	{
+		int32_t lastChunkIndex = -1;
+		
+		for(auto const elChunkIndex : chunks.used)
+			if(chunks.chunksPos[elChunkIndex] == lastChunkCoord) { lastChunkIndex = elChunkIndex; break; }
+		
+		if(lastChunkIndex == -1) { 
+			//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
+			//chunkIndex = chunks.usedChunks()[usedIndex];
+			std::cout << "collision: add chunk gen!" << lastChunkCoord << '\n'; 
+			return;
+		}
+		
+		lastChunk = chunks[lastChunkIndex];
+	}
+	
+	auto const updateChunkIndex = [&](vec3i const newChunkCoord) -> int {
+		auto const offset{ newChunkCoord - lastChunkCoord };
+		if(offset == 0) return lastChunk.chunkIndex();
+		
+		auto const optChunkIndex{ lastChunk.neighbours()[offset] };
+		if(!optChunkIndex.is()) return -1;
+		auto const chunkIndex{ optChunkIndex.get() };
+		
+		lastChunk = chunks[chunkIndex];
+		lastChunkCoord = lastChunk.position();
+		return chunkIndex;
+	};
 	
 	if(dir.y != 0){
 		auto const startY{ misc::divFloor(positive_.y ? playerMax.y : playerMin.y, ChunkCoord::fracBlockDim)-negative.y };
@@ -1104,21 +1132,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				int chunkIndex = -1;
-				
-				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.used)
-					if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
-				
-				lastChunkIndex = chunkIndex;
-				lastChunkCoord = blockChunk; 
-				
-				if(chunkIndex == -1) { 
-					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
-					//chunkIndex = chunks.usedChunks()[usedIndex];
-					std::cout << "collision y: add chunk gen!" << coord << '\n'; 
-					return;
-				}
+				auto const chunkIndex{ updateChunkIndex(blockChunk) };
+				if(chunkIndex == -1) std::cout << "collision y: add chunk gen!" << coord << '\n'; 
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
@@ -1166,21 +1181,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				int chunkIndex = -1;
-				
-				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.used)
-					if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
-				
-				lastChunkIndex = chunkIndex;
-				lastChunkCoord = blockChunk; 
-				
-				if(chunkIndex == -1) { 
-					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
-					//chunkIndex = chunks.usedChunks()[usedIndex];
-					std::cout << "collision y: add chunk gen!" << coord << '\n'; 
-					return;
-				}
+				auto const chunkIndex{ updateChunkIndex(blockChunk) };
+				if(chunkIndex == -1) std::cout << "collision x: add chunk gen!" << coord << '\n'; 
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
@@ -1224,21 +1226,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				int chunkIndex = -1;
-				
-				if(lastChunkCoord == blockChunk && lastChunkIndex != -1) chunkIndex = lastChunkIndex; //lastChunkIndex itself must not be -1 (-1 - chunk not generated yet)
-				else for(auto const elChunkIndex : chunks.used)
-					if(chunks.chunksPos[elChunkIndex] == blockChunk) { chunkIndex = elChunkIndex; break; }
-				
-				lastChunkIndex = chunkIndex;
-				lastChunkCoord = blockChunk; 
-				
-				if(chunkIndex == -1) { 
-					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
-					//chunkIndex = chunks.usedChunks()[usedIndex];
-					std::cout << "collision y: add chunk gen!" << coord << '\n'; 
-					return;
-				}
+				auto const chunkIndex{ updateChunkIndex(blockChunk) };
+				if(chunkIndex == -1) std::cout << "collision z: add chunk gen!" << coord << '\n'; 
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };

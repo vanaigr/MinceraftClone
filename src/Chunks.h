@@ -60,7 +60,16 @@ public:
 		static constexpr int neighboursCount{ 27 };
 		std::array<OptionalNeighbour, neighboursCount> n;
 		
+		static constexpr bool checkIndexValid(uint8_t const index) {
+			return index < neighboursCount;
+		}
+		
+		static constexpr bool checkDirValid(vec3i const dir) {
+			return dir.in(vec3i{-1}, vec3i{1}).all();
+		}
+		
 		static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
+			assert(checkIndexValid(neighbourIndex));
 			return vec3i{
 				(neighbourIndex / 1) % 3,
 				(neighbourIndex / 3) % 3,
@@ -68,6 +77,7 @@ public:
 			} - 1;
 		}
 		static constexpr uint8_t dirAsIndex(vec3i dir) {
+			assert(checkDirValid(dir));
 			return uint8_t( dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9 );
 		}
 		static constexpr uint8_t mirror(uint8_t index) {
@@ -80,6 +90,9 @@ public:
 		
 		OptionalNeighbour &operator[](uint8_t index) { return n[index]; }
 		OptionalNeighbour const &operator[](uint8_t index) const { return n[index]; }
+		
+		OptionalNeighbour &operator[](vec3i dir) { return n[dirAsIndex(dir)]; }
+		OptionalNeighbour const &operator[](vec3i dir) const { return n[dirAsIndex(dir)]; }
 		
 		//OptionalNeighbour *begin() { return n.begin(); }
 		//OptionalNeighbour *end  () { return n.end  (); }
