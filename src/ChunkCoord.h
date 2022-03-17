@@ -6,7 +6,8 @@
 
 struct ChunkCoord {	
 	static constexpr auto fracChunkDim = 1ll << 32;
-	static constexpr auto fracBlockDim = 1ll << (32 - Chunks::chunkDimAsPow2);
+	static constexpr auto fracBlockDimAsPow2 = (32 - Chunks::chunkDimAsPow2);
+	static constexpr auto fracBlockDim = 1ll << fracBlockDimAsPow2;
 	static_assert(fracBlockDim%2 == 0 && Chunks::chunkDimAsPow2 >= 0 && Chunks::chunkDimAsPow2 <= 32);
 	
 	static constexpr inline vec3l posToFrac(vec3d value) { return vec3l{(value*fracBlockDim).floor()}; }

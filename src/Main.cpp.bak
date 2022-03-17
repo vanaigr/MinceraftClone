@@ -111,8 +111,6 @@ enum class BlockAction {
 
 static double const blockActionCD{ 300.0 / 1000.0 };
 
-static int blockId = 1;
-
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     bool isPress = !(action == GLFW_RELEASE);
@@ -205,7 +203,6 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     size -= size * yoffset * 0.07;
-	blockId = 1+misc::mod(blockId-1 + int(yoffset), 5);
 }
 
 static const Font font{ ".\\assets\\font.txt" };
@@ -911,7 +908,7 @@ struct PosDir {
 		dir{ line_.normalized() },
 		stepLength{ vec3d{1.0} / dir.abs() },
 		lineLen{ line_.length() }
-	{} 
+	{}	  
 	
 	vec3l part_end() const { return chunkPart + ChunkCoord::posToFracTrunk(line); }
 	ChunkCoord end() const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_end()} }; }
@@ -1035,7 +1032,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockChunk = coord.chunk();
 				
 				auto const chunkIndex{ chunk.moveToNeighbour(blockChunk).get() };
-				if(chunkIndex == -1) { std::cout << "collision y: add chunk gen!" << coord << '\n'; return; }
+				if(chunkIndex == -1) std::cout << "collision y: add chunk gen!" << coord << '\n'; 
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
@@ -1084,7 +1081,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockChunk = coord.chunk();
 				
 				auto const chunkIndex{ chunk.moveToNeighbour(blockChunk).get() };
-				if(chunkIndex == -1) { std::cout << "collision x: add chunk gen!" << coord << '\n'; return; }
+				if(chunkIndex == -1) std::cout << "collision x: add chunk gen!" << coord << '\n'; 
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
@@ -1129,7 +1126,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockChunk = coord.chunk();
 				
 				auto const chunkIndex{ chunk.moveToNeighbour(blockChunk).get() };
-				if(chunkIndex == -1) { std::cout << "collision z: add chunk gen!" << coord << '\n'; return; }
+				if(chunkIndex == -1) std::cout << "collision z: add chunk gen!" << coord << '\n'; 
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
@@ -1306,9 +1303,8 @@ static void update() {
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					uint16_t &block{ chunks.chunksData[chunkIndex][index] };
 					
-					if(checkCanPlaceBlock(blockChunk, blockCoord) && block != 0) { std::cout << "!\n"; } 
-					if(checkCanPlaceBlock(blockChunk, blockCoord) && block == 0) {
-						block = blockId;//1;
+					if(checkCanPlaceBlock(blockChunk, blockCoord)) {
+						block = 1;
 						chunks.gpuPresent[chunkIndex] = false;
 						isAction = true;
 						
@@ -1320,7 +1316,7 @@ static void update() {
 						end   = end  .max(blockCoord);
 					
 						aabb = Chunks::AABB(start, end);
-					}
+						}
 					break;
 				}
 				else if(checkBlock.get_end() || i >= 100) break;
