@@ -1,35 +1,62 @@
-#version 420
+#version 430
 uniform mat4 projection;
 uniform mat4 toLocal;
 uniform bool isInChunk;
+uniform ivec3 playerChunk;
+uniform  vec3 playerInChunk;
 
 uniform float near;
 uniform float far;
 
-in layout(location = 0) vec3 relativeChunkPos_;
-in layout(location = 1) uint positions_;
-in layout(location = 2) uint chunkIndex_;
+in layout(location = 0) int chunkIndex_;
 
 out vec3 relativeChunkPos;
-flat out uint chunkIndex;
+flat out int chunkIndex;
+
+layout(binding = 3) restrict readonly buffer ChunksPoistions {
+    int positions[];
+} ps;
+
+layout(binding = 4) restrict readonly buffer ChunksBounds {
+    uint bounds[];
+} bs;
+
+ivec3 chunkPosition(const int chunkIndex) {
+	const uint index = chunkIndex * 3;
+	return ivec3(
+		ps.positions[index+0],
+		ps.positions[index+1],
+		ps.positions[index+2]
+	);
+}
+
+uint chunkBounds(const int chunkIndex) {
+	return bs.bounds[chunkIndex];
+}
 
 //copied from Chunks.h
-#define chunkDim 16u
+#define chunkDim 16
 
-vec3 indexBlock(const uint index) { //copied from Chunks.h
-	return vec3( index % chunkDim, (index / chunkDim) % chunkDim, (index / chunkDim / chunkDim) );
+vec3 indexBlock(const uint data) { //copied from Chunks.h
+	return vec3( data % chunkDim, (data / chunkDim) % chunkDim, (data / chunkDim / chunkDim) );
 }
 vec3 start(const uint data) { return indexBlock(data&65535u); } //copied from Chunks.h
 vec3 end(const uint data) { return indexBlock((data>>16)&65535u); } //copied from Chunks.h
 vec3 onePastEnd(const uint data) { return end(data) + 1; } //copied from Chunks.h
+
+vec3 relativeChunkPosition(const int chunkIndex) {
+	return vec3( (chunkPosition(chunkIndex) - playerChunk) * chunkDim ) - playerInChunk;
+}
 		
 void main() {
-	relativeChunkPos = relativeChunkPos_;
+	const vec3 relativePos = relativeChunkPosition(chunkIndex_);
+	relativeChunkPos = relativePos;
 	chunkIndex = chunkIndex_;
 	
 	if(!isInChunk) {
-		const vec3 startPos = start(positions_);
-		const vec3 endPos = onePastEnd(positions_);
+		const uint bounds = chunkBounds(chunkIndex_);
+		const vec3 startPos = start(bounds);
+		const vec3 endPos = onePastEnd(bounds);
 		int tri = gl_VertexID / 3;
 		int idx = gl_VertexID % 3;
 		int face = tri / 2;
@@ -58,7 +85,7 @@ void main() {
 			vec4(1,0,0,0),
 			vec4(0,1,0,0),
 			vec4(0,0,1,0),
-			vec4(relativeChunkPos_, 1)
+			vec4(relativePos, 1)
 		};			
 		
 		const mat4 model_matrix = toLocal * translation;

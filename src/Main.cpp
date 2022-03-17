@@ -222,6 +222,7 @@ static GLuint mainProgram = 0;
   static GLuint time_u;
   static GLuint mouseX_u, mouseY_u;
   static GLuint projection_u, toLocal_matrix_u;
+  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo;
 
 static GLuint mapChunks_p;
 
@@ -229,8 +230,10 @@ static GLuint fontProgram;
 
 static GLuint testProgram;
 	static GLuint tt_projection_u, tt_toLocal_u;
+	
 static GLuint debugProgram;
 	static GLuint db_projection_u, db_toLocal_u, db_isInChunk_u;
+	static GLuint db_playerChunk_u, db_playerInChunk_u;
 
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
@@ -261,9 +264,24 @@ void resizeBuffer(int32_t newGpuChunksCount) {
 	
 	static_assert(sizeof(chunks.chunksData[0]) == 8192);
 	glDeleteBuffers(1, &chunkIndex_u);
+	glGenBuffers(1, &chunkIndex_u);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * 8192, NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkIndex_u);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+	
+	glDeleteBuffers(1, &chunksPostions_ssbo);
+	glGenBuffers(1, &chunksPostions_ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksPostions_ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(vec3i), NULL, GL_DYNAMIC_DRAW);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, chunksPostions_ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	
+	glDeleteBuffers(1, &chunksBounds_ssbo);
+	glGenBuffers(1, &chunksBounds_ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(uint32_t), NULL, GL_DYNAMIC_DRAW);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, chunksBounds_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
@@ -312,6 +330,9 @@ static void reloadShaders() {
 		projection_u = glGetUniformLocation(mainProgram, "projection");
 		toLocal_matrix_u = glGetUniformLocation(mainProgram, "toLocal");
 		//chunk_u = glGetUniformLocation(mainProgram, "chunk");
+	
+		playerChunk_u = glGetUniformLocation(mainProgram, "playerChunk");
+		playerInChunk_u = glGetUniformLocation(mainProgram, "playerInChunk");
 	
 		Image image;
 		ImageLoad("assets/atlas.bmp", &image);
@@ -541,13 +562,35 @@ static void reloadShaders() {
 		//sl.addShaderFromProjectFileName("shaders/vertex.shader",GL_VERTEX_SHADER,"main vertex");
 		//https://gist.github.com/rikusalminen/9393151
 		//... usage: glDrawArrays(GL_TRIANGLES, 0, 36), disable all vertex arrays
-		dbsl.addShaderFromCode(R"(#version 420
+		dbsl.addShaderFromCode(R"(#version 430
 			uniform mat4 projection;
 			uniform mat4 toLocal;
 			
-			in layout(location = 0) vec3 relativeChunkPos_;
-			in layout(location = 1) uint positions_;
-			in layout(location = 2) uint chunkIndex_;
+			uniform ivec3 playerChunk;
+			uniform  vec3 playerInChunk;
+			
+			in layout(location = 0) uint chunkIndex_;
+			
+			layout(binding = 3) restrict readonly buffer ChunksPoistions {
+				int positions[];
+			} ps;
+
+			layout(binding = 4) restrict readonly buffer ChunksBounds {
+				uint bounds[];
+			} bs;
+			
+			ivec3 chunkPosition(const uint chunkIndex) {
+				const uint index = chunkIndex * 3;
+				return ivec3(
+					ps.positions[index+0],
+					ps.positions[index+1],
+					ps.positions[index+2]
+				);
+			}
+			
+			uint chunkBounds(const uint chunkIndex) {
+				return bs.bounds[chunkIndex];
+			}
 			
 			//copied from Chunks.h
 			#define chunkDim 16u
@@ -558,6 +601,10 @@ static void reloadShaders() {
 			vec3 start(const uint data) { return indexBlock(data&65535u); } //copied from Chunks.h
 			vec3 end(const uint data) { return indexBlock((data>>16)&65535u); } //copied from Chunks.h
 			vec3 onePastEnd(const uint data) { return end(data) + 1; } //copied from Chunks.h
+			
+			vec3 relativeChunkPosition(const uint chunkIndex) {
+				return vec3( (chunkPosition(chunkIndex) - playerChunk) * chunkDim ) - playerInChunk;
+			}
 			
 			void main()
 			{
@@ -583,6 +630,9 @@ static void reloadShaders() {
 				float mirror = -1 + 2 * top;
 				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
 				xyz = (xyz + 1) / 2;
+				
+				const vec3 relativeChunkPos_ = relativeChunkPosition(chunkIndex_);
+				const uint positions_ = chunkBounds(chunkIndex_);
 				
 				const mat4 translation = {
 					vec4(1,0,0,0),
@@ -622,6 +672,9 @@ static void reloadShaders() {
 		db_toLocal_u = glGetUniformLocation(debugProgram, "toLocal");
 		db_projection_u = glGetUniformLocation(debugProgram, "projection");
 		db_isInChunk_u = glGetUniformLocation(debugProgram, "isInChunk");
+		
+		db_playerChunk_u = glGetUniformLocation(debugProgram, "playerChunk");
+		db_playerInChunk_u = glGetUniformLocation(debugProgram, "playerInChunk");
 	}
 	
 	{
@@ -1539,16 +1592,10 @@ int main(void) {
 		glBindBuffer(GL_ARRAY_BUFFER, chunksVB);
 		
 		glEnableVertexAttribArray(0);
-		glEnableVertexAttribArray(1);
-		glEnableVertexAttribArray(2);
 
-		glVertexAttribPointer (0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float) + 2*sizeof(uint32_t), (void*)( 0*sizeof(float) )); //relativeChunkPos
-		glVertexAttribIPointer(1, 1,    GL_UNSIGNED_INT, 3*sizeof(float) + 2*sizeof(uint32_t), (void*)( 3*sizeof(float) )); //start|(end<<16) blocks pos
-		glVertexAttribIPointer(2, 1,    GL_UNSIGNED_INT, 3*sizeof(float) + 2*sizeof(uint32_t), (void*)( 3*sizeof(float)+sizeof(uint32_t) )); //chunkIndex
+		glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(uint32_t), (void*)( 0 )); //chunkIndex
 
 		glVertexAttribDivisor(0, 1);
-		glVertexAttribDivisor(1, 1);
-		glVertexAttribDivisor(2, 1);
 	glBindVertexArray(0); 
 	
 	
@@ -1649,7 +1696,7 @@ int main(void) {
 		float toGlob[3][3];
 		currentViewport.localToGlobalSpace(&toGlob);
 		currentViewport.globalToLocalSpace(&toLoc);
-		vec3<int32_t> const playerChunk{ player.chunk() };
+		vec3i const playerChunk{ player.chunk() };
 		auto const cameraPosInChunk{ player.positionInChunk()+viewportOffset() };
 		
 		if(testInfo) {
@@ -1672,8 +1719,6 @@ int main(void) {
 		glProgramUniformMatrix4fv(debugProgram, db_toLocal_u, 1, GL_TRUE, &toLoc4[0][0]);
 	
 		struct __attribute__ ((packed)) ChunkInfo {
-			vec3f relativeChunkPos;
-			uint32_t positions;
 			uint32_t chunkIndex;
 		};
 				
@@ -1727,7 +1772,13 @@ int main(void) {
 		vec3f const normals[] = {
 			leftN, rightN, topN, botN
 		};
-
+		
+		glUniform3i(playerChunk_u, playerChunk.x, playerChunk.y, playerChunk.z);
+		glUniform3f(playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
+		
+		glProgramUniform3i(debugProgram, db_playerChunk_u, playerChunk.x, playerChunk.y, playerChunk.z);
+		glProgramUniform3f(debugProgram, db_playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
+		
 		for(auto const chunkIndex : chunks.used) {
 			Chunks::AABB const aabb{ chunks.chunksAABB[chunkIndex] };
 				
@@ -1802,8 +1853,6 @@ int main(void) {
 				
 			{				
 				ChunkInfo const ci{ 
-					relativeChunkPos, 
-					aabbData, 
 					uint32_t(chunkIndex) 
 				};
 				
@@ -1814,10 +1863,19 @@ int main(void) {
 						}
 						gpuPresent = true;
 				
-						auto  &chunkData{ chunks.chunksData[chunkIndex] };
+						auto &chunkData{ chunks.chunksData[chunkIndex] };
+						vec3i const chunkPosition{ chunkPos };
 						static_assert(sizeof chunkData == (8192));
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
 						glBufferSubData(GL_SHADER_STORAGE_BUFFER, 8192 * chunkIndex, 8192, &chunkData);
+						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+						
+						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksPostions_ssbo); 
+						glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(vec3i) * chunkIndex, sizeof(vec3i), &chunkPosition);
+						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+						
+						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
+						glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t) * chunkIndex, sizeof(uint32_t), &aabbData);
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 					} 
 				
@@ -1879,12 +1937,23 @@ int main(void) {
 						std::cout << "Error: gpu buffer was not properly resized. size=" << gpuChunksCount << " expected=" << (chunkIndex+1);
 						exit(-1);
 					}
-				
+					vec3i const chunkPosition{ chunks[chunkIndex].position() };
+					uint32_t const aabbData{ chunks[chunkIndex].aabb().getData() };
+					
 					gpuPresent = true;
-						
+					
 					static_assert(sizeof chunkData == (8192));
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
 					glBufferSubData(GL_SHADER_STORAGE_BUFFER, 8192 * chunkIndex, 8192, &chunkData);
+					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+					
+					
+					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksPostions_ssbo); 
+					glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(vec3i) * chunkIndex, sizeof(vec3i), &chunkPosition);
+					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+					
+					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
+					glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t) * chunkIndex, sizeof(uint32_t), &aabbData);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 				} 
 			}

@@ -34,7 +34,7 @@ layout(binding = 1) restrict readonly buffer ChunksIndices {
 };
 
 in vec3 relativeChunkPos;
-flat in uint chunkIndex;
+flat in int chunkIndex;
 
 struct Block {
 	uint id;
@@ -43,7 +43,6 @@ struct Block {
 layout(binding = 2) restrict readonly buffer AtlasDescription {
     int positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot 
 };
-
 
 struct Ray {
     vec3 orig;
