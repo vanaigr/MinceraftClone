@@ -57,7 +57,7 @@ static bool debug{ false };
 static double deltaTime{ 16.0/1000.0 };
 static double const fixedDeltaTime{ 16.0/1000.0 };
 
-static double movementSpeed{ 6 };
+static double movementSpeed{ 8 };
 static bool jump{ false };
 
 static double const aspect{ windowSize_d.y / windowSize_d.x };
@@ -227,7 +227,9 @@ static GLuint mapChunks_p;
 
 static GLuint fontProgram;
 
-static GLuint debugProgram ;
+static GLuint testProgram;
+	static GLuint tt_projection_u, tt_toLocal_u;
+static GLuint debugProgram;
 	static GLuint db_projection_u, db_toLocal_u, db_isInChunk_u;
 
 static GLuint chunkIndex_u;
@@ -479,6 +481,59 @@ static void reloadShaders() {
 	}
 	
 	{
+		glDeleteProgram(testProgram);
+		testProgram = glCreateProgram();
+		ShaderLoader sl{};
+		
+		sl.addShaderFromCode(
+		R"(#version 420
+			precision mediump float;
+			uniform mat4 projection;
+			uniform mat4 toLocal;
+			
+			layout(location = 0) in vec3 relativePos;
+			layout(location = 1) in vec3 color_;
+			
+			out vec3 col;
+			void main(void){
+				//const mat4 translation = {
+				//	vec4(1,0,0,0),
+				//	vec4(0,1,0,0),
+				//	vec4(0,0,1,0),
+				//	vec4(relativePos, 1)
+				//};			
+		
+				const mat4 model_matrix = toLocal;// * translation;
+				
+				gl_Position = projection * (model_matrix * vec4(relativePos, 1.0));
+				col = color_;
+			}
+		)", GL_VERTEX_SHADER,"test vertex");
+		
+		sl.addShaderFromCode(
+		R"(#version 420			
+			out vec4 color;
+			
+			in vec3 col;
+			void main() {
+				color = vec4(col, 1);
+			}
+		)",
+		GL_FRAGMENT_SHADER,
+		"test shader");
+		
+		sl.attachShaders(testProgram);
+	
+		glLinkProgram(testProgram);
+		glValidateProgram(testProgram);
+	
+		sl.deleteShaders();
+		
+		tt_toLocal_u = glGetUniformLocation(testProgram, "toLocal");
+		tt_projection_u = glGetUniformLocation(testProgram, "projection");
+	}
+	
+	{
 		glDeleteProgram(debugProgram);
 		debugProgram = glCreateProgram();
 		ShaderLoader dbsl{};
@@ -662,6 +717,9 @@ static void reloadShaders() {
 	
 	glUseProgram(mainProgram);
 	glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
+	
+	glUseProgram(testProgram);
+	glUniformMatrix4fv(tt_projection_u, 1, GL_TRUE, &projection[0][0]);
 }
 
 template<typename T, typename L>
@@ -893,76 +951,114 @@ static void loadChunks() {
 }
 
 struct PosDir {
-	vec3d posInChunk;
-	vec3l chunkPart;
+	vec3l start;
+	vec3l end;
+	
+	vec3i direction;
 	vec3i chunk;
 	
-	vec3d line;
-	vec3d dir;
-	vec3d stepLength;
-	double lineLen;
-	
-	PosDir(ChunkCoord const coord, vec3d line_): 
-		posInChunk{ coord.positionInChunk() },
-		chunkPart{ coord.chunkPart__long() },
-		chunk{ coord.chunk() },
+	PosDir(ChunkCoord const coord, vec3l const line): 
+		start{ coord.chunkPart__long() },
+		end{ start + line },
 		
-		line{ line_ },
-		dir{ line_.normalized() },
-		stepLength{ vec3d{1.0} / dir.abs() },
-		lineLen{ line_.length() }
+		direction{ line.sign() },
+		chunk{ coord.chunk() }
 	{} 
 	
-	vec3l part_end() const { return chunkPart + ChunkCoord::posToFracTrunk(line); }
-	ChunkCoord end() const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_end()} }; }
+	constexpr int64_t atCoord(vec3i const inAxis_, int64_t coord, vec3i const outAxis_) const {
+		vec3l const inAxis( inAxis_ );
+		vec3l const outAxis( outAxis_ );
+		auto const ist = start.dot(inAxis);
+		auto const ind = end.dot(inAxis); 
+		auto const ost = start.dot(outAxis); 
+		auto const ond = end.dot(outAxis); 
+		return ist == ind ? ost : ( ost + (ond - ost)*(coord-ist) / (ind - ist) );		
+	};
 	
-	vec3l part_at(double const t) const { return chunkPart + ChunkCoord::posToFracTrunk(dir * t); }
-	ChunkCoord at(double const t) const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_at(t)} }; }
+	int difference(vec3l const p1, vec3l const p2) const {
+		vec3l const diff{p1 - p2};
+		return (diff * vec3l(direction)).sign().dot(1);
+	};
+	
+	constexpr vec3l part_at(vec3i inAxis, int64_t const coord) const { 
+		return vec3l{
+			atCoord(inAxis, coord, vec3i{1,0,0}),
+			atCoord(inAxis, coord, vec3i{0,1,0}),
+			atCoord(inAxis, coord, vec3i{0,0,1})
+		};
+	}
+	ChunkCoord at(vec3i inAxis, int64_t const coord) const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_at(inAxis, coord)} }; }
 };
 
 struct DDA {
 private:
 	//const
 	PosDir posDir;
-	vec3i firstCellRow;
-	vec3d firstCellDiff;
-	double maxLen;
 	
 	//mutable
-	vec3i curSteps;
+	vec3l current;
 	bool end;
 public:
 	DDA(PosDir const pd_) : 
 	    posDir{ pd_ },
-		firstCellRow{ vec3l((pd_.posInChunk + vec3d(pd_.dir.sign().max(vec3i{0}))).floor()) },
-		firstCellDiff{ ( pd_.posInChunk - vec3d(firstCellRow) ).abs() }, //distance to the frist border 
-		maxLen{ pd_.line.length() },
-		curSteps{ 0 },
+		current{ pd_.start },
 		end{ false }
 	{}
 	
-	std::tuple<double, vec3b, vec3i> next() {
-		vec3d const curLen{ (firstCellDiff + vec3d{curSteps}) * posDir.stepLength };
-		double minCurLen{ fmin(fmin(curLen.x, curLen.y), curLen.z) };
+	vec3b next() {
+		if(end) return {};
+
+		struct Candidate { vec3l coord; vec3b side; };
 		
-		if(minCurLen >= maxLen) { 
-			end = true;
-			minCurLen = maxLen; 
+		vec3l const nextC{ nextCoords(current, posDir.direction) };
+		
+		Candidate const candidates[] = {
+			Candidate{ posDir.part_at(vec3i{1,0,0}, nextC.x), vec3b{1,0,0} },
+			Candidate{ posDir.part_at(vec3i{0,1,0}, nextC.y), vec3b{0,1,0} },
+			Candidate{ posDir.part_at(vec3i{0,0,1}, nextC.z), vec3b{0,0,1} },
+			Candidate{ posDir.end, 0 }//index == 3
+		};
+		
+		int minI{ 3 };
+		Candidate minCand{ candidates[minI] };
+		
+		for(int i{}; i < 4; i++) {
+			auto const cand{ candidates[i] };
+			auto const diff{ posDir.difference(cand.coord, minCand.coord) };
+			if(posDir.difference(cand.coord, current) > 0 && diff <= 0) {
+				minI = i;
+				if(diff == 0) {
+					minCand = Candidate{ 
+						minCand.coord * vec3l(!vec3b(cand.side)) + cand.coord * vec3l(cand.side),
+						minCand.side || cand.side
+					};
+				}
+				else {
+					minCand = cand;
+				}
+			}
 		}
-		vec3b const minAxis{ curLen.equal(minCurLen) };
 		
-		vec3i const curSteps_{ curSteps };
-		curSteps += vec3i(minAxis);
+		end = minI == 3;
+		current = minCand.coord;
 		
-		return std::make_tuple( minCurLen, minAxis, curSteps_ );
+		return minCand.side;
 	}
+	
+	static constexpr vec3l nextCoords(vec3l const current, vec3i const dir) {
+		return current.applied([&](auto const coord, auto const i) -> int64_t {
+			//return ((coord / ChunkCoord::fracBlockDim) + std::max(dir[i], 0)) << ChunkCoord::fracBlockDimAsPow2;
+			
+			if(dir[i] >= 0) //round down
+				return ((coord >> ChunkCoord::fracBlockDimAsPow2) + 1) << ChunkCoord::fracBlockDimAsPow2;
+			else //round up
+				return (-((-coord) >> ChunkCoord::fracBlockDimAsPow2) - 1) << ChunkCoord::fracBlockDimAsPow2;
+		});
+	};
 	
 	#define G(name) auto get_##name() const { return name ; }
 	G(posDir)
-	G(firstCellRow)
-	G(firstCellDiff)
-	G(maxLen)
-	G(curSteps)
+	G(current)
 	G(end)
 	#undef G
 };
@@ -1061,7 +1157,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		
 		updateBounds();
 	}
-	
+
 	if(dir.x != 0){
 		auto const start{ misc::divFloor(positive_.x ? playerMax.x : playerMin.x, ChunkCoord::fracBlockDim)-negative.x };
 		auto const end{ misc::divFloor(maxPlayerPos.x+width_i/2*dir.x, ChunkCoord::fracBlockDim) };
@@ -1152,8 +1248,9 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		updateBounds();
 	}
 	
+	
 	player = ChunkCoord{ playerChunk, ChunkCoord::Fractional{playerPos} };
-	playerForce = force;
+	playerForce = force * (isOnGround ? vec3d{0.8,1,0.8} : vec3d{1});
 }
 
 bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
@@ -1187,28 +1284,24 @@ static void update() {
 		bool isAction = false;
 
 		ChunkCoord const viewport{ playerCoord_ + ChunkCoord::Fractional{ChunkCoord::posToFracTrunk(viewportOffset_)} };
-		PosDir const pd{ PosDir(viewport, viewport_current().forwardDir() * 7) };
-		vec3i const dirSign{ pd.dir.sign() };
+		PosDir const pd{ PosDir(viewport, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
+		vec3i const dirSign{ pd.direction };
 		DDA checkBlock{ pd };
 		
 		Chunks::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
 	
 		if(blockAction == BlockAction::BREAK) {
 			for(int i = 0;; i++) {
-				double at;
-				vec3b minAxis;
-				vec3b otherAxis;
-				vec3i curSteps;
-				std::tie(at, minAxis, curSteps) = checkBlock.next();
-				otherAxis = !minAxis;
+				vec3b const intersectionAxis{ checkBlock.next() };
+				vec3l const intersection{ checkBlock.get_current() };
 				
-				vec3i const coord_{ ChunkCoord::fracToBlock(pd.part_at(at)) };
+				if(intersectionAxis == 0) break;
+				
 				ChunkCoord const coord{ 
 					pd.chunk,
 					ChunkCoord::Block{ 
-						coord_ * vec3i(otherAxis) + 
-						(checkBlock.get_firstCellRow() + dirSign * curSteps) * vec3i(minAxis) + 
-						pd.dir.sign().min(0) * vec3i{minAxis} 
+						  ChunkCoord::fracToBlock(intersection)
+						+ pd.direction.min(0) * vec3i(intersectionAxis)
 					} 
 				};
 				
@@ -1260,28 +1353,21 @@ static void update() {
 		}
 		else {
 			for(int i = 0;; i++) {
-			
-				double at;
-				vec3b minAxis;
-				vec3b otherAxis;
-				vec3i curSteps;
-				std::tie(at, minAxis, curSteps) = checkBlock.next();
-				otherAxis = !minAxis;
+				vec3b const intersectionAxis{ checkBlock.next() };
+				vec3l const intersection{ checkBlock.get_current() };
 				
-				vec3i const coord_{ ChunkCoord::fracToBlock(pd.part_at(at)) };
+				if(intersectionAxis == 0) break;
+				
 				ChunkCoord const coord{ 
 					pd.chunk,
 					ChunkCoord::Block{ 
-						coord_ * vec3i(otherAxis) + 
-						(checkBlock.get_firstCellRow() + dirSign * curSteps) * vec3i(minAxis) + 
-						pd.dir.sign().min(0) * vec3i{minAxis} 
+						  ChunkCoord::fracToBlock(intersection)
+						+ pd.direction.min(0) * vec3i{intersectionAxis}
 					} 
 				};
 				
-				ChunkCoord const nextCoord{ pd.at(at) + ChunkCoord::Block{ pd.dir.sign().min(0) * vec3i{minAxis} } };
-				
-				vec3i const blockCoord = nextCoord.blockInChunk();
-				vec3i const blockChunk = nextCoord.chunk();
+				vec3i const blockCoord = coord.blockInChunk();
+				vec3i const blockChunk = coord.chunk();
 				
 				int chunkIndex{ chunk.moveToNeighbour(blockChunk).get() }; 
 				
@@ -1293,11 +1379,11 @@ static void update() {
 				}
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
-				auto const index{ Chunks::blockIndex(nextCoord.blockInChunk()) };
+				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
 				uint16_t const &block{ chunkData[index] };
 				
 				if(block != 0) {
-					ChunkCoord const bc{ coord - ChunkCoord::Block{ dirSign * vec3i{minAxis} } };
+					ChunkCoord const bc{ coord - ChunkCoord::Block{ dirSign * vec3i(intersectionAxis) } };
 					vec3i const blockCoord = bc.blockInChunk();
 					vec3i const blockChunk = bc.chunk();
 			
@@ -1491,6 +1577,24 @@ int main(void) {
 		glVertexAttribDivisor(1, 1);
 		glVertexAttribDivisor(2, 1);
 		glVertexAttribDivisor(3, 1);
+	glBindVertexArray(0); 
+	
+	
+	GLuint testVB;
+	glGenBuffers(1, &testVB);
+	
+	GLuint testVA;
+	glGenVertexArrays(1, &testVA);
+	glBindVertexArray(testVA);
+		glBindBuffer(GL_ARRAY_BUFFER, testVB);
+		
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+	
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), NULL); //relativePos
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)( 3*sizeof(float) )); //relativePos
+		
+		
 	glBindVertexArray(0); 
 	
 	
@@ -1835,6 +1939,20 @@ int main(void) {
 						
 			glDrawArrays(GL_TRIANGLES, 0,36);
 		}
+		
+		/*{
+			glUseProgram(testProgram);
+			glUniformMatrix4fv(tt_toLocal_u, 1, GL_TRUE, &toLoc4[0][0]);
+			
+			glBindBuffer(GL_ARRAY_BUFFER, testVB);
+			glBufferData(GL_ARRAY_BUFFER, size * 2*sizeof(vec3f), &[0], GL_DYNAMIC_DRAW);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			
+			glPointSize(10);
+			glBindVertexArray(testVA);
+			glDrawArrays(GL_POINTS, 0, relativePositions.size());
+			glBindVertexArray(0);
+		}*/
 	
 		{ 
 			glEnable(GL_BLEND);

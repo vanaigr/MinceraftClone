@@ -254,6 +254,22 @@ public:
 	inline constexpr C &operator[](size_t const index) {
 		return *(&x + index);
 	}
+	
+	inline constexpr vec3<C> operator|(const vec3<C> o) const {
+		return vec3<C>{ x | o.x, y | o.y, z | o.z };
+	}
+	
+	inline constexpr vec3<C> operator||(const vec3<C> o) const {
+		return vec3<C>{ x || o.x, y || o.y, z || o.z };
+	}
+	
+	inline constexpr vec3<C> operator&(const vec3<C> o) const {
+		return vec3<C>{ x & o.x, y & o.y, z & o.z };
+	}
+	
+	inline constexpr vec3<C> operator&&(const vec3<C> o) const {
+		return vec3<C>{ x && o.x, y && o.y, z && o.z };
+	}
 
 	template<typename C2>
 	inline constexpr vec3<C2> convertedTo() const {
