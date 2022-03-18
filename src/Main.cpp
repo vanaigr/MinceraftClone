@@ -222,7 +222,7 @@ static GLuint mainProgram = 0;
   static GLuint time_u;
   static GLuint mouseX_u, mouseY_u;
   static GLuint projection_u, toLocal_matrix_u;
-  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo;
+  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo, chunksNeighbours_ssbo;
 
 static GLuint mapChunks_p;
 
@@ -254,34 +254,31 @@ Chunks chunks{};
 
 static int viewDistance = 3;
 
-void resizeBuffer(int32_t newGpuChunksCount) {
-	assert(newGpuChunksCount >= 0);
-	gpuChunksCount = std::max((uint64_t)newGpuChunksCount, chunks.used.size());
+void resizeBuffer() {
+	//assert(newGpuChunksCount >= 0);
+	gpuChunksCount = chunks.used.size();
 	auto &it = chunks.gpuPresent;
-	for(auto &&el : it) {
-		el = false;
-	}
+	
+	it.assign(it.size(), false);
 	
 	static_assert(sizeof(chunks.chunksData[0]) == 8192);
-	glDeleteBuffers(1, &chunkIndex_u);
-	glGenBuffers(1, &chunkIndex_u);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * 8192, NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkIndex_u);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
-	glDeleteBuffers(1, &chunksPostions_ssbo);
-	glGenBuffers(1, &chunksPostions_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksPostions_ssbo);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(vec3i), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, chunksPostions_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-	
-	glDeleteBuffers(1, &chunksBounds_ssbo);
-	glGenBuffers(1, &chunksBounds_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(uint32_t), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, chunksBounds_ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * 27 * sizeof(int32_t), NULL, GL_DYNAMIC_DRAW);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, chunksNeighbours_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
@@ -383,8 +380,17 @@ static void reloadShaders() {
 		
 		//relativeChunkPos_u = glGetUniformLocation(mainProgram, "relativeChunkPos");
 		
+		glDeleteBuffers(1, &chunkIndex_u);
 		glGenBuffers(1, &chunkIndex_u);
-		resizeBuffer(0);
+		glDeleteBuffers(1, &chunksPostions_ssbo);
+		glGenBuffers(1, &chunksPostions_ssbo);
+		
+		glDeleteBuffers(1, &chunksBounds_ssbo);
+		glGenBuffers(1, &chunksBounds_ssbo);
+		glDeleteBuffers(1, &chunksNeighbours_ssbo);
+		glGenBuffers(1, &chunksNeighbours_ssbo);
+
+		//resizeBuffer(0);
 	}
 		
 
@@ -891,7 +897,7 @@ void generateChunkData(Chunks::Chunk chunk) {
 	
 	for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
 		vec3i const offset{ Chunks::Neighbours::indexAsDir(i) };
-		if(offset == 0) continue;
+		if(Chunks::Neighbours::isSelf(i)) { neighbours[i] = Chunks::OptionalNeighbour(index); continue; }
 		int neighbourIndex = -1;
 		auto const neighbourPos{ pos + offset };
 		for(auto const elChunkIndex : chunks.used)
@@ -901,6 +907,7 @@ void generateChunkData(Chunks::Chunk chunk) {
 		else {
 			neighbours[i] = Chunks::OptionalNeighbour(neighbourIndex);
 			chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = index;
+			chunks[neighbourIndex].gpuPresent() = false;
 		}
 	}
 	
@@ -983,6 +990,7 @@ static void loadChunks() {
 				if(optNeighbour) {
 					auto const neighbourIndex{ optNeighbour.get() };
 					chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = Chunks::OptionalNeighbour();
+					chunks[neighbourIndex].gpuPresent() = false;
 				}
 			}
 		}
@@ -1183,7 +1191,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				auto const chunkIndex{ chunk.moveToNeighbour(blockChunk).get() };
+				auto const chunkIndex{ chunk.move(blockChunk, 0).get() };
 				if(chunkIndex == -1) { std::cout << "collision y: add chunk gen!" << coord << '\n'; return; }
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
@@ -1232,7 +1240,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				auto const chunkIndex{ chunk.moveToNeighbour(blockChunk).get() };
+				auto const chunkIndex{ chunk.move(blockChunk, 1).get() };
 				if(chunkIndex == -1) { std::cout << "collision x: add chunk gen!" << coord << '\n'; return; }
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
@@ -1277,7 +1285,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				auto const chunkIndex{ chunk.moveToNeighbour(blockChunk).get() };
+				auto const chunkIndex{ chunk.move(blockChunk, 2).get() };
 				if(chunkIndex == -1) { std::cout << "collision z: add chunk gen!" << coord << '\n'; return; }
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
@@ -1361,7 +1369,7 @@ static void update() {
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				int chunkIndex{ chunk.moveToNeighbour(blockChunk).get() };
+				int chunkIndex{ chunk.move(blockChunk, 10).get() };
 				
 				if(chunkIndex == -1) { 
 					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
@@ -1422,7 +1430,7 @@ static void update() {
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				int chunkIndex{ chunk.moveToNeighbour(blockChunk).get() }; 
+				int chunkIndex{ chunk.move(blockChunk, 15).get() }; 
 				
 				if(chunkIndex == -1) { 
 					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
@@ -1440,7 +1448,7 @@ static void update() {
 					vec3i const blockCoord = bc.blockInChunk();
 					vec3i const blockChunk = bc.chunk();
 			
-					int chunkIndex{ chunk.moveToNeighbour(blockChunk).get() };
+					int chunkIndex{ chunk.move(blockChunk, 5).get() };
 				
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					uint16_t &block{ chunks.chunksData[chunkIndex][index] };
@@ -1696,8 +1704,10 @@ int main(void) {
 		float toGlob[3][3];
 		currentViewport.localToGlobalSpace(&toGlob);
 		currentViewport.globalToLocalSpace(&toLoc);
-		vec3i const playerChunk{ player.chunk() };
-		auto const cameraPosInChunk{ player.positionInChunk()+viewportOffset() };
+		//vec3i const playerChunk{ player.chunk() };
+		ChunkCoord const cameraCoord{ player + viewportOffset() };
+		auto const cameraChunk{ cameraCoord.chunk() };
+		auto const cameraPosInChunk{ cameraCoord.positionInChunk() };
 		
 		if(testInfo) {
 			std::cout << position << '\n';
@@ -1719,7 +1729,7 @@ int main(void) {
 		glProgramUniformMatrix4fv(debugProgram, db_toLocal_u, 1, GL_TRUE, &toLoc4[0][0]);
 	
 		struct __attribute__ ((packed)) ChunkInfo {
-			uint32_t chunkIndex;
+			int32_t chunkIndex;
 		};
 				
 		static std::vector<ChunkInfo> chunksInfo{};
@@ -1738,7 +1748,7 @@ int main(void) {
 		else keep = false;
 		
 		if(!keep) {
-			lastPlayerChunk = playerChunk;
+			lastPlayerChunk = cameraChunk;
 			lastCameraPosInChunk = cameraPosInChunk;
 			lastViewport = currentViewport;
 		}
@@ -1773,10 +1783,10 @@ int main(void) {
 			leftN, rightN, topN, botN
 		};
 		
-		glUniform3i(playerChunk_u, playerChunk.x, playerChunk.y, playerChunk.z);
+		glUniform3i(playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
 		glUniform3f(playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
 		
-		glProgramUniform3i(debugProgram, db_playerChunk_u, playerChunk.x, playerChunk.y, playerChunk.z);
+		glProgramUniform3i(debugProgram, db_playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
 		glProgramUniform3f(debugProgram, db_playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
 		
 		for(auto const chunkIndex : chunks.used) {
@@ -1786,10 +1796,10 @@ int main(void) {
 			vec3i const b1{ aabb.start() };
 			vec3i const b2{ aabb.onePastEnd() };
 			
-			if((b2 <= b1).any()) continue;
+			//if((b2 <= b1).any()) continue;
 				
 			auto const chunkPos{ chunks.chunksPos[chunkIndex] };
-			vec3<int32_t> const relativeChunkPos_{ chunkPos-playerChunk };
+			vec3<int32_t> const relativeChunkPos_{ chunkPos-cameraChunk };
 			vec3<float> const relativeChunkPos{ 
 				static_cast<decltype(cameraPosInChunk)>(relativeChunkPos_)*Chunks::chunkDim
 				-cameraPosInChunk
@@ -1841,78 +1851,20 @@ int main(void) {
 				return false;
 			};
 			
-			if(!isInChunk && checkChunkuOutside(
-				forward,
-				nearPos, farPos, 
-				relativeChunkPos2 + vec3f(b1), relativeChunkPos2 + vec3f(b2)
-			)) continue;
+			//if(!isInChunk && checkChunkuOutside(
+			//	forward,
+			//	nearPos, farPos, 
+			//	relativeChunkPos2 + vec3f(b1), relativeChunkPos2 + vec3f(b2)
+			//)) continue;
 			
 			
 			std::vector<bool>::reference gpuPresent = chunks.gpuPresent[chunkIndex];
-			if(!gpuPresent && chunkIndex >= gpuChunksCount) resizeBuffer(chunkIndex+1); 
+			if(!gpuPresent && chunkIndex >= gpuChunksCount) resizeBuffer(); 
 				
 			{				
 				ChunkInfo const ci{ 
-					uint32_t(chunkIndex) 
+					chunkIndex
 				};
-				
-				if(isInChunk) {
-					if(!gpuPresent) {
-						if(chunkIndex >= gpuChunksCount) {
-							resizeBuffer(chunkIndex+1);
-						}
-						gpuPresent = true;
-				
-						auto &chunkData{ chunks.chunksData[chunkIndex] };
-						vec3i const chunkPosition{ chunkPos };
-						static_assert(sizeof chunkData == (8192));
-						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
-						glBufferSubData(GL_SHADER_STORAGE_BUFFER, 8192 * chunkIndex, 8192, &chunkData);
-						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-						
-						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksPostions_ssbo); 
-						glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(vec3i) * chunkIndex, sizeof(vec3i), &chunkPosition);
-						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-						
-						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
-						glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t) * chunkIndex, sizeof(uint32_t), &aabbData);
-						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-					} 
-				
-					glBindBuffer(GL_ARRAY_BUFFER, chunksVB);
-					if(chunksVBSize < sizeof(ChunkInfo))
-						glBufferData   (GL_ARRAY_BUFFER,    sizeof(ChunkInfo), &ci, GL_DYNAMIC_DRAW);
-					else 
-						glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(ChunkInfo), &ci);
-					
-					glBindBuffer(GL_ARRAY_BUFFER, 0);
-		
-					glUniform1i(isInChunk_u, 1);
-					glBindVertexArray(chunksVA);
-						glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-					glBindVertexArray(0); 
-					glUniform1i(isInChunk_u, 0);
-					
-					if(debug) {
-						glUseProgram(debugProgram);
-						glUniform1i(db_isInChunk_u, 1);
-						
-						glDisable(GL_CULL_FACE);
-						glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-						
-						glBindVertexArray(chunksVA);
-						glDrawArrays(GL_TRIANGLES, 0, 36);
-						glBindVertexArray(0); 
-						
-						glEnable(GL_CULL_FACE);
-						glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-						
-						glUniform1i(db_isInChunk_u, 0);
-						glUseProgram(mainProgram);
-					}
-					
-					continue;
-				}
 				
 				chunksInfo.push_back(ci);
 			}
@@ -1920,25 +1872,26 @@ int main(void) {
 		
 		{
 			auto const chunksCount = chunksInfo.size();
-			glBindBuffer(GL_ARRAY_BUFFER, chunksVB);
-			if(chunksVBSize < sizeof(ChunkInfo) * chunksCount)
-				glBufferData   (GL_ARRAY_BUFFER,    sizeof(ChunkInfo) * chunksCount, chunksInfo.data(), GL_DYNAMIC_DRAW);
-			else
-				glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(ChunkInfo) * chunksCount, chunksInfo.data());
 			
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			
+			ChunkInfo const  *zeroChunk = NULL;
 			
 			for(auto const &chunkInfo : chunksInfo) {
 				auto const chunkIndex{ chunkInfo.chunkIndex };
 				auto &chunkData{ chunks.chunksData[chunkIndex] };
 				std::vector<bool>::reference gpuPresent = chunks.gpuPresent[chunkIndex];
+				
+				vec3i const chunkPosition{ chunks[chunkIndex].position() };
+				if(chunkPosition == cameraChunk) zeroChunk = &chunkInfo;
+				
 				if(!gpuPresent) {
-					if(chunkIndex >= uint32_t(gpuChunksCount)) {
+					if(chunkIndex >= gpuChunksCount) {
 						std::cout << "Error: gpu buffer was not properly resized. size=" << gpuChunksCount << " expected=" << (chunkIndex+1);
 						exit(-1);
 					}
-					vec3i const chunkPosition{ chunks[chunkIndex].position() };
 					uint32_t const aabbData{ chunks[chunkIndex].aabb().getData() };
+					auto const &neighbours{ chunks[chunkIndex].neighbours() };
 					
 					gpuPresent = true;
 					
@@ -1955,12 +1908,32 @@ int main(void) {
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
 					glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t) * chunkIndex, sizeof(uint32_t), &aabbData);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+					
+					static_assert(sizeof(neighbours) == sizeof(int32_t) * 27);
+					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
+					glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(int32_t) * 27 * chunkIndex, 27 * sizeof(uint32_t), &neighbours);
+					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 				} 
 			}
 			
-			glBindVertexArray(chunksVA);
-			glDrawArraysInstanced(GL_TRIANGLES, 0, 36, chunksCount);
-			glBindVertexArray(0); 
+			if(zeroChunk != NULL) {
+				glBindBuffer(GL_ARRAY_BUFFER, chunksVB);
+				if(chunksVBSize < sizeof(ChunkInfo) * chunksCount)
+					glBufferData   (GL_ARRAY_BUFFER,    sizeof(ChunkInfo) * 1, zeroChunk, GL_DYNAMIC_DRAW);
+				else                                                        
+					glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(ChunkInfo) * 1, zeroChunk);
+				
+				//glBindVertexArray(chunksVA);
+				//glDrawArraysInstanced(GL_TRIANGLES, 0, 36, chunksCount);
+				//	glDrawArrays(GL_TRIANGLES, 0, 36);
+				//glBindVertexArray(0); 
+				
+				glUniform1i(isInChunk_u, 1);
+				glBindVertexArray(chunksVA);
+					glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+				glBindVertexArray(0); 
+				glUniform1i(isInChunk_u, 0);
+			}
 			
 			if(debug) {
 				glUseProgram(debugProgram);
@@ -1979,6 +1952,40 @@ int main(void) {
 				glUseProgram(mainProgram);
 			}
 		}
+		
+		/*if(testInfo) {
+			Chunks::Move_to_neighbour_Chunk c{ chunks, playerChunk };
+			
+			std::cout << "chunks: ";
+			auto c1 = c.optChunk();
+			if(c1) {
+				std::cout << chunks[c1.get()].position() << '\n';
+				
+				c1 = c.offset(vec3i{-1,0,0}, 20);
+				
+				if(c1) {
+					std::cout << chunks[c1.get()].position() << '\n';
+				
+					c1 = c.offset(vec3i{0,0,-1}, 21);
+					
+					if(c1) {
+						std::cout << chunks[c1.get()].position() << '\n';
+				
+						c1 = c.offset(vec3i{1,0,0}, 22);
+						
+						if(c1) {
+							std::cout << chunks[c1.get()].position() << '\n';
+				
+							c1 = c.offset(vec3i{0,0,1}, 23);
+							
+							if(c1) {
+								std::cout << chunks[c1.get()].position() << '\n';
+							}
+						}
+					}
+				}
+			}	
+		}*/
 		
 		if(isFreeCam){
 			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };

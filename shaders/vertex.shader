@@ -10,8 +10,7 @@ uniform float far;
 
 in layout(location = 0) int chunkIndex_;
 
-out vec3 relativeChunkPos;
-flat out int chunkIndex;
+flat out int startChunkIndex;
 
 layout(binding = 3) restrict readonly buffer ChunksPoistions {
     int positions[];
@@ -50,8 +49,7 @@ vec3 relativeChunkPosition(const int chunkIndex) {
 		
 void main() {
 	const vec3 relativePos = relativeChunkPosition(chunkIndex_);
-	relativeChunkPos = relativePos;
-	chunkIndex = chunkIndex_;
+	startChunkIndex = chunkIndex_;
 	
 	if(!isInChunk) {
 		const uint bounds = chunkBounds(chunkIndex_);

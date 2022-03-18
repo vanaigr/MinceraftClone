@@ -33,8 +33,7 @@ layout(binding = 1) restrict readonly buffer ChunksIndices {
      uint data[][16*16*16/2]; //indeces are shorts 	//8192
 };
 
-in vec3 relativeChunkPos;
-flat in int chunkIndex;
+flat in int startChunkIndex;
 
 struct Block {
 	uint id;
@@ -48,6 +47,67 @@ struct Ray {
     vec3 orig;
     vec3 dir;
 };
+
+layout(binding = 5) restrict readonly buffer ChunksNeighbours {
+    int neighbours[];
+} ns;
+
+//copied from Chunks.h
+	ivec3 indexAsNeighbourDir(const int neighbourIndex) {
+		return ivec3(
+			(neighbourIndex / 1) % 3,
+			(neighbourIndex / 3) % 3,
+			(neighbourIndex / 9) % 3
+		) - 1;
+	}
+	int dirAsNeighbourIndex(const ivec3 dir) {
+		return dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9;
+	}
+	int mirrorNeighbourDir(const int index) {
+		return dirAsNeighbourIndex( -indexAsNeighbourDir(index) );
+	}
+	
+	bool isNeighbourSelf(const int index) {
+		return indexAsNeighbourDir(index) == 0;
+	}
+	
+//void chunkNeighbours(const int chunkIndex, out int neighbours_out[27]) {
+//	const int index = chunkIndex * 27;
+//	for(int i = 0; i < 27; i ++) {
+//		neighbours_out[index] = ns.neighbours[index + i];
+//	}
+//}
+
+int chunkNeighbourIndex(const int chunkIndex, const ivec3 dir) {
+	const int index = chunkIndex * 27;
+	const int offset = dirAsNeighbourIndex(dir);
+	return -(ns.neighbours[index + offset] + 1);
+}
+
+
+uniform ivec3 playerChunk;
+uniform  vec3 playerInChunk;
+
+//copied from Chunks.h
+#define chunkDim 16
+	
+layout(binding = 3) restrict readonly buffer ChunksPoistions {
+    int positions[];
+} ps;
+
+ivec3 chunkPosition(const int chunkIndex) {
+	const uint index = chunkIndex * 3;
+	return ivec3(
+		ps.positions[index+0],
+		ps.positions[index+1],
+		ps.positions[index+2]
+	);
+}
+
+vec3 relativeChunkPosition(const int chunkIndex) {
+	return vec3( (chunkPosition(chunkIndex) - playerChunk) * chunkDim ) - playerInChunk;
+}
+
 
 vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
     vec2 uv = vec2(
@@ -69,13 +129,18 @@ vec2 atlasAt(const uint id, const ivec3 side) {
 	return vec2( pos&bit16, (pos>>16)&bit16 );
 }
 
-bool checkBoundaries(const ivec3 i) {
-	#define ch16(i) (i >= 0 && i < 16)
-		return ch16(i.x) && ch16(i.y) && ch16(i.z);
+ivec3 testBounds(const ivec3 i) {
+	#define test(i) ( int(i >= 0) - int(i < chunkDim) )
+		return ivec3(test(i.x), test(i.y), test(i.z));
 	#undef ch16
 }
 
-uint blockAt(const ivec3 i_v) {
+bool checkBoundaries(const ivec3 i) {
+	return all(equal( testBounds(i), ivec3(0) ));
+}
+
+
+uint blockAt(const int chunkIndex, const ivec3 i_v) {
 	const int index = i_v.x + i_v.y * 16 + i_v.z * 16 * 16;
 	const int packedIndex = index / 2;
 	const int offset = (index % 2) * 16;
@@ -139,7 +204,7 @@ Optional_BlockIntersection emptyOptional_BlockIntersection() {
 	return a;
 }
 
-Optional_BlockIntersection isInters(const Ray ray) {
+Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) { 
 	const vec3 dir = ray.dir;
 	const ivec3 dir_ = ivec3(sign(dir));
 	const ivec3 positive_ = max(+dir_, ivec3(0,0,0));
@@ -170,6 +235,9 @@ Optional_BlockIntersection isInters(const Ray ray) {
 	
 	const ivec3 farBoundaries = positive_ * 17 - 1;
 	
+	int curChunkIndex = chunkIndex;
+	ivec3 relativeToChunk = ivec3(0);
+	
 	int i = 0;
 	
 	for(; i < 100; i++) {
@@ -179,47 +247,77 @@ Optional_BlockIntersection isInters(const Ray ray) {
 		const ivec3 minAxis_i = ivec3(minAxis_b);
 		
 		const  ivec3 otherAxis_i = ivec3(not(minAxis_b));
-		const vec3 curCoordF = at(ray, minCurLen);
-		const ivec3 curCoord = ivec3(floor(curCoordF));
+		const vec3 curCoordF_ = at(ray, minCurLen);
+		const ivec3 curCoord_ = ivec3(floor(curCoordF_));
 		
-		const ivec3 cellAt =  
+		const ivec3 cellAt_ =  
 				+   minAxis_i * (firstCellRow + curSteps*dir_)
-				+ otherAxis_i * curCoord;
-	
-		if(all(lessThanEqual((cellAt - farBoundaries) * dir_, ivec3(0,0,0)))) {
-			const ivec3 checks = ivec3( (equal(curCoordF, curCoord) || minAxis_b) );
+				+ otherAxis_i * curCoord_;
+				
+		//ivec3 cellAt = cellAt_ - relativeToChunk * chunkDim;
+		vec3  curCoordF = curCoordF_ - relativeToChunk * chunkDim;
+	    ivec3 curCoord = curCoord_ - relativeToChunk * chunkDim;
+		
+		const bvec3 inBounds = lessThanEqual((cellAt_ - relativeToChunk * chunkDim - farBoundaries) * dir_, ivec3(0,0,0));
+		if( !all(inBounds) ) {
+			const ivec3 neighbourDir = ivec3(!inBounds) * dir_;
+			const int candChunkIndex = chunkNeighbourIndex(curChunkIndex, neighbourDir);
+			if(candChunkIndex < 0) return emptyOptional_BlockIntersection();
 			
-			for(int x = checks.x; x >= 0; x --) {
-				for(int y = checks.y; y >= 0; y --) {
-					for(int z = checks.z; z >= 0; z --) {
-						const ivec3 ca = cellAt - ivec3(x, y, z) * dir_;
+			curChunkIndex = candChunkIndex;
+			relativeToChunk += neighbourDir;
+			
+			//cellAt = cellAt_ - relativeToChunk * chunkDim;
+			curCoordF = curCoordF_ - relativeToChunk * chunkDim;
+			curCoord =  curCoord_ - relativeToChunk * chunkDim;	
+		}
+		
+		const ivec3 checks = ivec3( (equal(curCoordF, curCoord) || minAxis_b) );
+		
+		for(int x = checks.x; x >= 0; x --) {
+			for(int y = checks.y; y >= 0; y --) {
+				for(int z = checks.z; z >= 0; z --) {
+					const ivec3 ca = cellAt_ - ivec3(x, y, z) * dir_;
+					
+					int curChunkIndex_ = curChunkIndex;
+					ivec3 relativeToChunk_ = relativeToChunk;
+					ivec3 ca_ = ca - relativeToChunk_ * chunkDim;
+					
+					const ivec3 outDir = testBounds(ca_);
+					if( !all(equal(outDir, ivec3(0))) ) {
+						const int candChunkIndex = chunkNeighbourIndex(curChunkIndex, outDir);
+						if(candChunkIndex < 0) continue;
 						
-						if(!checkBoundaries(ca)) continue;
-						const uint blockId = blockAt(ca);	
-						if(blockId != 0) { 
-							const vec3 blockCoord = curCoordF - curCoord;
-							vec2 uv = vec2(
-								dot(minAxis_f, blockCoord.zxx),
-								dot(minAxis_f, blockCoord.yzy)
+						curChunkIndex_ = candChunkIndex;
+						relativeToChunk_ += outDir;
+						
+						ca_ = ca - relativeToChunk_ * chunkDim;
+					}
+					
+					const uint blockId = blockAt(curChunkIndex_, ca_);	
+					if(blockId != 0) { 
+						const vec3 blockCoord = curCoordF - curCoord;
+						vec2 uv = vec2(
+							dot(minAxis_f, blockCoord.zxx),
+							dot(minAxis_f, blockCoord.yzy)
+						);
+						ivec3 side = -minAxis_i*dir_;
+						
+						if(blockId != 5 || blockId == 5 && int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 == 0)
+							return Optional_BlockIntersection(
+								true,    
+								BlockIntersection(
+									ca_,
+									side,
+									uv,
+									minCurLen,
+									blockId
+								)
 							);
-							ivec3 side = -minAxis_i*dir_;
-							
-							if(blockId != 5 || blockId == 5 && int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 == 0)
-								return Optional_BlockIntersection(
-									true,    
-									BlockIntersection(
-										ca,
-										side,
-										uv,
-										minCurLen,
-										blockId
-									)
-								);
-						}
-					}	
-				}
+					}
+				}	
 			}
-		} else break;
+		}
 		
 		curSteps += minAxis_i;
 		curLen += minAxis_f * stepLength;
@@ -235,9 +333,11 @@ void main() {
     const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;
     const vec3 rayDir = normalize(rayDir_);
 	
+	const vec3 relativeChunkPos = relativeChunkPosition(startChunkIndex);
+	
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
 	
-	const Optional_BlockIntersection intersection = isInters(ray);
+	const Optional_BlockIntersection intersection = isInters(ray, startChunkIndex);
 	float t = 1.0/0.0;
 	vec4 col;
 	if(intersection.is) {

@@ -68,28 +68,29 @@ public:
 			return dir.in(vec3i{-1}, vec3i{1}).all();
 		}
 		
-		static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
-			assert(checkIndexValid(neighbourIndex));
-			return vec3i{
-				(neighbourIndex / 1) % 3,
-				(neighbourIndex / 3) % 3,
-				(neighbourIndex / 9) % 3
-			} - 1;
-		}
-		static constexpr uint8_t dirAsIndex(vec3i dir) {
-			assert(checkDirValid(dir));
-			return uint8_t( dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9 );
-		}
-		static constexpr uint8_t mirror(uint8_t index) {
-			return dirAsIndex( -indexAsDir(index) );
-		}
+		//used in main.shader
+			static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
+				assert(checkIndexValid(neighbourIndex));
+				return vec3i{
+					(neighbourIndex / 1) % 3,
+					(neighbourIndex / 3) % 3,
+					(neighbourIndex / 9) % 3
+				} - 1;
+			}
+			static constexpr uint8_t dirAsIndex(vec3i dir) {
+				assert(checkDirValid(dir));
+				return uint8_t( dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9 );
+			}
+			static constexpr uint8_t mirror(uint8_t index) {
+				return dirAsIndex( -indexAsDir(index) );
+			}
+			
+			static constexpr bool isSelf(uint8_t index) {
+				return indexAsDir(index) == 0;
+			}
 		
-		static constexpr bool isSelf(uint8_t index) {
-			return indexAsDir(index) == 0;
-		}
-		
-		OptionalNeighbour &operator[](uint8_t index) { return n[index]; }
-		OptionalNeighbour const &operator[](uint8_t index) const { return n[index]; }
+		OptionalNeighbour &operator[](uint8_t index) { assert(checkIndexValid(index)); return n[index]; }
+		OptionalNeighbour const &operator[](uint8_t index) const { assert(checkIndexValid(index)); return n[index]; }
 		
 		OptionalNeighbour &operator[](vec3i dir) { return n[dirAsIndex(dir)]; }
 		OptionalNeighbour const &operator[](vec3i dir) const { return n[dirAsIndex(dir)]; }
@@ -149,13 +150,23 @@ public:
 			return {};
 		}
 		
-		OptionalChunkIndex moveToNeighbour(vec3i const neighbour) {
+		OptionalChunkIndex move(vec3i const otherChunk, int index) {
+			if(valid && Neighbours::checkDirValid(otherChunk - chunk.position())) return offset(otherChunk - chunk.position(), index);
+			*this = Move_to_neighbour_Chunk(chunk.chunks(), otherChunk);
+			return optChunk();
+		}
+		
+		OptionalChunkIndex moveToNeighbour(vec3i const neighbour, int index) {
 			if(!valid) return {};
-			return offset(neighbour - chunk.position());
+			return offset(neighbour - chunk.position(), index);
 		}
 			
-		OptionalChunkIndex offset(vec3i const dir) {
-			assert(Neighbours::checkDirValid(dir));
+		OptionalChunkIndex offset(vec3i const dir, int index) {
+			if(!Neighbours::checkDirValid(dir)) {
+				std::cerr << "dir " << index << " is invalid:" << dir << '\n';
+				assert(false);
+				exit(-1);
+			}
 			if(!valid) return {};
 			if(dir == 0) return { chunk.chunkIndex() };
 			auto const optChunkIndex{ chunk.neighbours()[dir] };
