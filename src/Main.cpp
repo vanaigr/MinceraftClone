@@ -271,6 +271,7 @@ void resizeBuffer() {
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(vec3i), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, chunksPostions_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(uint32_t), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, chunksBounds_ssbo);
@@ -893,7 +894,8 @@ void generateChunkData(Chunks::Chunk chunk) {
 	auto &chunks{ chunk.chunks() };
 	auto &data{ chunk.data() };
 	auto &aabb{ chunk.aabb() };
-	auto &neighbours{ chunk.neighbours() };
+	auto &neighbours_{ chunk.neighbours() };
+	Chunks::Neighbours neighbours{};
 	
 	for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
 		vec3i const offset{ Chunks::Neighbours::indexAsDir(i) };
@@ -910,6 +912,8 @@ void generateChunkData(Chunks::Chunk chunk) {
 			chunks[neighbourIndex].gpuPresent() = false;
 		}
 	}
+	
+	neighbours_ = neighbours;
 	
 	double heights[Chunks::chunkDim * Chunks::chunkDim];
 	for(int z = 0; z < Chunks::chunkDim; z++) 
@@ -1663,6 +1667,7 @@ int main(void) {
 	MeanCounter<150> mc{};
 	int _i_ = 50;
 	
+
     while (!glfwWindowShouldClose(window))
     {
 		auto startFrame = std::chrono::steady_clock::now();
