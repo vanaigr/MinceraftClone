@@ -892,13 +892,16 @@ void generateChunkData(Chunks::Chunk chunk) {
 	for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
 		vec3i const offset{ Chunks::Neighbours::indexAsDir(i) };
 		if(offset == 0) continue;
-		int neighbourIndex = -1;
+		//int neighbourIndex = -1;
 		auto const neighbourPos{ pos + offset };
-		for(auto const elChunkIndex : chunks.used)
-			if(chunks.chunksPos[elChunkIndex] == neighbourPos) { neighbourIndex = elChunkIndex; break; }
+		//for(auto const elChunkIndex : chunks.used)
+			//if(chunks.chunksPos[elChunkIndex] == neighbourPos) { neighbourIndex = elChunkIndex; break; }
 		
-		if(neighbourIndex == -1) neighbours[i] = Chunks::OptionalNeighbour();
+		auto const neighbourIndexP{ chunks.chunksIndex_position.find(neighbourPos) };
+		
+		if(neighbourIndexP == chunks.chunksIndex_position.end()) neighbours[i] = Chunks::OptionalNeighbour();
 		else {
+			int neighbourIndex = neighbourIndexP->second;
 			neighbours[i] = Chunks::OptionalNeighbour(neighbourIndex);
 			chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = index;
 		}
@@ -947,6 +950,7 @@ static int32_t genChunkAt(vec3i const position) {
 	auto const chunkIndex{ chunks.used[usedIndex] };
 					
 	chunks.chunksPos[chunkIndex] = position;
+	chunks.chunksIndex_position[position] = chunkIndex;
 	chunks.gpuPresent[chunkIndex] = false;
 	generateChunkData(chunkIndex);
 	
@@ -976,10 +980,11 @@ static void loadChunks() {
 			return false;
 		}, 
 		[&](int chunkIndex) -> void { //free chunk
+			chunks.chunksIndex_position.erase( chunks[chunkIndex].position() );
 			auto const &neighbours{ chunks[chunkIndex].neighbours() };
 			for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
-				if(Chunks::Neighbours::isSelf(i)) continue;
 				auto const &optNeighbour{ neighbours[i] };
+				if(Chunks::Neighbours::isSelf(i)) continue;
 				if(optNeighbour) {
 					auto const neighbourIndex{ optNeighbour.get() };
 					chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = Chunks::OptionalNeighbour();

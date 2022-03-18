@@ -1,9 +1,10 @@
 #pragma once
 
 #include<vector>
+#include<unordered_map>
 #include<stdint.h>
 #include<array>
-#include <tuple>
+#include<tuple>
 #include<utility>
 
 #include"Vector.h"
@@ -134,14 +135,16 @@ public:
 		Move_to_neighbour_Chunk(Chunks::Chunk &src) : chunk{src}, valid{ true } {}
 			
 		Move_to_neighbour_Chunk(Chunks &chunks, vec3i const chunkCoord) {
-			int32_t chunkIndex = -1;
+			//int32_t chunkIndex = -1;
 				
-			for(auto const elChunkIndex : chunks.used)
-				if(chunks.chunksPos[elChunkIndex] == chunkCoord) { chunkIndex = elChunkIndex; break; }
-				
-			valid = chunkIndex != -1;
+			//for(auto const elChunkIndex : chunks.used)
+			//	if(chunks.chunksPos[elChunkIndex] == chunkCoord) { chunkIndex = elChunkIndex; break; }
+		
+			auto const chunkIndexP{ chunks.chunksIndex_position.find(chunkCoord) };
 			
-			if(valid) chunk = chunks[chunkIndex];
+			valid = chunkIndexP != chunks.chunksIndex_position.end();
+			
+			if(valid) chunk = chunks[chunkIndexP->second];
 		}
 		
 		OptionalChunkIndex optChunk() const {
@@ -170,13 +173,20 @@ public:
 private:
 	std::vector<int> vacant{};
 	std::vector<int> used_{};
+	
+	struct PosHash { 
+		constexpr inline std::size_t operator()(vec3i const &it) const noexcept { 
+			return  (std::hash<int32_t>{}(it.x) ^ (std::hash<int32_t>{}(it.x) << 1)) ^ (std::hash<int32_t>{}(it.z) << 1);
+		} 
+	};
 public:
-	std::vector<int> used{};
 	std::vector<vec3i> chunksPos{};
+	std::vector<int> used{};
 	std::vector<AABB> chunksAABB{};
 	std::vector<bool> gpuPresent{};
 	std::vector<ChunkData> chunksData{};
 	std::vector<Neighbours> chunksNeighbours{};
+	std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
 	
 	//returns used[] position 
 	//all the chunk data is not initialised
