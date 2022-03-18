@@ -252,7 +252,7 @@ static GLuint pl_modelMatrix_u = 0;
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
-static int viewDistance = 3;
+static int viewDistance = 20;
 
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
@@ -900,13 +900,13 @@ void generateChunkData(Chunks::Chunk chunk) {
 	for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
 		vec3i const offset{ Chunks::Neighbours::indexAsDir(i) };
 		if(Chunks::Neighbours::isSelf(i)) { neighbours[i] = Chunks::OptionalNeighbour(index); continue; }
-		int neighbourIndex = -1;
+
 		auto const neighbourPos{ pos + offset };
-		for(auto const elChunkIndex : chunks.used)
-			if(chunks.chunksPos[elChunkIndex] == neighbourPos) { neighbourIndex = elChunkIndex; break; }
+		auto const neighbourIndexP{ chunks.chunksIndex_position.find(neighbourPos) };
 		
-		if(neighbourIndex == -1) neighbours[i] = Chunks::OptionalNeighbour();
+		if(neighbourIndexP == chunks.chunksIndex_position.end()) neighbours[i] = Chunks::OptionalNeighbour();
 		else {
+			int neighbourIndex = neighbourIndexP->second;
 			neighbours[i] = Chunks::OptionalNeighbour(neighbourIndex);
 			chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = index;
 			chunks[neighbourIndex].gpuPresent() = false;
@@ -958,6 +958,7 @@ static int32_t genChunkAt(vec3i const position) {
 	auto const chunkIndex{ chunks.used[usedIndex] };
 					
 	chunks.chunksPos[chunkIndex] = position;
+	chunks.chunksIndex_position[position] = chunkIndex;
 	chunks.gpuPresent[chunkIndex] = false;
 	generateChunkData(chunkIndex);
 	
@@ -987,10 +988,11 @@ static void loadChunks() {
 			return false;
 		}, 
 		[&](int chunkIndex) -> void { //free chunk
+			chunks.chunksIndex_position.erase( chunks[chunkIndex].position() );
 			auto const &neighbours{ chunks[chunkIndex].neighbours() };
 			for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
-				if(Chunks::Neighbours::isSelf(i)) continue;
 				auto const &optNeighbour{ neighbours[i] };
+				if(Chunks::Neighbours::isSelf(i)) continue;
 				if(optNeighbour) {
 					auto const neighbourIndex{ optNeighbour.get() };
 					chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = Chunks::OptionalNeighbour();
