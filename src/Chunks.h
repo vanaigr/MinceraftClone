@@ -122,6 +122,7 @@ public:
 			gs(position, chunksPos)
 			gs(aabb, chunksAABB)
 			gs(gpuPresent, gpuPresent) //is this safe? (gpuPresent returns rvalue reference)
+			gs(modified, modified) //is this safe? (gpuPresent returns rvalue reference)
 			gs(data, chunksData)
 			gs(neighbours, chunksNeighbours)
 		#undef gs
@@ -195,6 +196,7 @@ public:
 	std::vector<int> used{};
 	std::vector<AABB> chunksAABB{};
 	std::vector<bool> gpuPresent{};
+	std::vector<bool> modified{};
 	std::vector<ChunkData> chunksData{};
 	std::vector<Neighbours> chunksNeighbours{};
 	std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
@@ -214,6 +216,7 @@ public:
 			chunksPos.resize(index+1);
 			chunksAABB.resize(index+1);
 			gpuPresent.resize(index+1);
+			modified.resize(index+1);
 			chunksData.resize(index+1);
 			chunksNeighbours.resize(index+1);
 		}

@@ -29,6 +29,7 @@
 #include<limits>
 #include<tuple>
 #include<sstream>
+#include<fstream>
 
 //#define FULLSCREEN
 
@@ -113,15 +114,19 @@ static double const blockActionCD{ 300.0 / 1000.0 };
 
 static int blockId = 1;
 
+static void quit();
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     bool isPress = !(action == GLFW_RELEASE);
-	if(key == GLFW_KEY_ESCAPE && !isPress) {
+	if(key == GLFW_KEY_GRAVE_ACCENT && !isPress) {
 		mouseCentered = !mouseCentered;
 		if(mouseCentered) {
 			glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		}
 		else glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+	}
+	if(key == GLFW_KEY_ESCAPE && !isPress) {
+		quit();
 	}
 	if(key == GLFW_KEY_W)
 		movementDir.z = 1 * isPress;
@@ -848,7 +853,7 @@ vec3i getTreeBlock(vec2i const flatChunk) {
 	return vec3i{ it.x, int32_t(std::floor(height))+1, it.y };
 }
 
-void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i start, vec3i end, Chunks::AABB &aabb) {	
+void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i &start, vec3i &end) {	
 	for(int32_t cx{-1}; cx <= 1; cx ++) {
 		for(int32_t cz{-1}; cz <= 1; cz ++) {
 			vec3i const chunkOffset{ cx, -chunk.y, cz };
@@ -884,8 +889,31 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i start, vec3i end
 			}
 		}
 	}
+}
+
+std::string chunkFilename(Chunks::Chunk const &chunk) {
+	auto const &pos{ chunk.position() };
+	std::stringstream ss{};
+	ss << "./save/" << pos << ".cnk";
+	return ss.str();
+}
+
+void writeChunk(Chunks::Chunk &chunk) {
+	auto const &data{ chunk.data() };
 	
-	aabb = Chunks::AABB(start, end);
+	std::ofstream chunkFileOut{ chunkFilename(chunk), std::ios::binary };
+	
+	for(int x{}; x < Chunks::chunkDim; x++) 
+	for(int y{}; y < Chunks::chunkDim; y++) 
+	for(int z{}; z < Chunks::chunkDim; z++) {
+		vec3i const blockCoord{x,y,z};
+		uint16_t const &block = data[Chunks::blockIndex(blockCoord)];
+		
+		uint8_t const blk[] = { (unsigned char)((block >> 0) & 0xff), (unsigned char)((block >> 8) & 0xff) };
+		chunkFileOut.write(reinterpret_cast<char const *>(&blk[0]), 2);
+	}
+	
+	chunk.modified() = false;
 }
 
 void generateChunkData(Chunks::Chunk chunk) {
@@ -915,38 +943,74 @@ void generateChunkData(Chunks::Chunk chunk) {
 	
 	neighbours_ = neighbours;
 	
-	double heights[Chunks::chunkDim * Chunks::chunkDim];
-	for(int z = 0; z < Chunks::chunkDim; z++) 
-	for(int x = 0; x < Chunks::chunkDim; x++) {
-		heights[z* Chunks::chunkDim + x] = heightAt(vec2i{pos.x,pos.z}, vec2i{x,z});
-	}
+	auto const filename{ chunkFilename(chunk) };
+			
+	std::ifstream chunkFileIn{ filename, std::ios::binary };
+	
 	vec3i start{15};
 	vec3i end  {0 };
-	for(int y = 0; y < Chunks::chunkDim; ++y) 
-		for(int z = 0; z < Chunks::chunkDim; ++z)
-			for(int x = 0; x < Chunks::chunkDim; ++x) {
-				vec3i const blockCoord{ x, y, z };
-				//auto const height{ heightAt(vec2i{pos.x,pos.z}, vec2i{x,z}) };
-				auto const height{ heights[z * Chunks::chunkDim + x] };
-				auto const index{ Chunks::blockIndex(blockCoord) };
-				//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
-				double const diff{ height - double(pos.y * Chunks::chunkDim + y) };
-				if(diff >= 0) {
-					uint16_t block = 0;
-					if(diff < 1) block = 1; //grass
-					else if(diff < 5) block = 2; //dirt
-					else block = 6; //stone
-					data[index] = block;
-					
-					start = start.min(blockCoord);
-					end   = end  .max(blockCoord);
-				}
-				else {
-					data[index] = 0;
-				}
-			}
 		
-	genTrees(pos, data, start, end, aabb);
+	if(chunkFileIn.fail()) {
+		chunkFileIn.close();
+		
+		double heights[Chunks::chunkDim * Chunks::chunkDim];
+		for(int z = 0; z < Chunks::chunkDim; z++) 
+		for(int x = 0; x < Chunks::chunkDim; x++) {
+			heights[z* Chunks::chunkDim + x] = heightAt(vec2i{pos.x,pos.z}, vec2i{x,z});
+		}
+
+		for(int y = 0; y < Chunks::chunkDim; ++y) 
+			for(int z = 0; z < Chunks::chunkDim; ++z)
+				for(int x = 0; x < Chunks::chunkDim; ++x) {
+					vec3i const blockCoord{ x, y, z };
+					//auto const height{ heightAt(vec2i{pos.x,pos.z}, vec2i{x,z}) };
+					auto const height{ heights[z * Chunks::chunkDim + x] };
+					auto const index{ Chunks::blockIndex(blockCoord) };
+					//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
+					double const diff{ height - double(pos.y * Chunks::chunkDim + y) };
+					if(diff >= 0) {
+						uint16_t block = 0;
+						if(diff < 1) block = 1; //grass
+						else if(diff < 5) block = 2; //dirt
+						else block = 6; //stone
+						data[index] = block;
+						
+						start = start.min(blockCoord);
+						end   = end  .max(blockCoord);
+					}
+					else {
+						data[index] = 0;
+					}
+				}
+			
+		genTrees(pos, data, *&start, *&end);
+		
+		writeChunk(chunk);
+		chunk.modified() = true;
+	}
+	else {
+		for(int x{}; x < Chunks::chunkDim; x++) 
+		for(int y{}; y < Chunks::chunkDim; y++) 
+		for(int z{}; z < Chunks::chunkDim; z++) 
+		{
+			vec3i const blockCoord{x,y,z};
+			//uint16_t &block = data[Chunks::blockIndex(blockCoord)];
+			uint8_t blk[2];
+			
+			chunkFileIn.read( reinterpret_cast<char *>(&blk[0]), 2 );
+			
+			uint16_t const block( blk[0] | (uint16_t(blk[1]) << 8) );
+			
+			data[Chunks::blockIndex(blockCoord)] = block;
+			if(block != 0) {
+				start = start.min(blockCoord);
+				end   = end  .max(blockCoord);
+			}
+		}
+		chunk.modified() = false;
+	}
+	
+	aabb = Chunks::AABB(start, end);
 }
 
 void generateChunkData(int32_t const chunkIndex) {
@@ -988,8 +1052,12 @@ static void loadChunks() {
 			return false;
 		}, 
 		[&](int chunkIndex) -> void { //free chunk
-			chunks.chunksIndex_position.erase( chunks[chunkIndex].position() );
-			auto const &neighbours{ chunks[chunkIndex].neighbours() };
+			auto chunk{ chunks[chunkIndex] };
+			chunks.chunksIndex_position.erase( chunk.position() );
+			if(chunk.modified()) {
+				writeChunk(chunk);
+			}
+			auto const &neighbours{ chunk.neighbours() };
 			for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
 				auto const &optNeighbour{ neighbours[i] };
 				if(Chunks::Neighbours::isSelf(i)) continue;
@@ -1394,6 +1462,7 @@ static void update() {
 					uint16_t &block{ chunkData[index] };
 					block = 0;
 					chunks.gpuPresent[chunkIndex] = false;
+					chunks.modified[chunkIndex] = true;
 					isAction = true;
 					
 					auto &aabb{ chunks.chunksAABB[chunkIndex] };
@@ -1463,6 +1532,7 @@ static void update() {
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block == 0) {
 						block = blockId;//1;
 						chunks.gpuPresent[chunkIndex] = false;
+						chunks.modified[chunkIndex] = true;
 						isAction = true;
 						
 						auto &aabb{ chunks.chunksAABB[chunkIndex] };
@@ -1539,9 +1609,9 @@ static void update() {
     pmousePos = mousePos;
 }
 
+GLFWwindow* window;
+	
 int main(void) {			
-    GLFWwindow* window;
-
     if (!glfwInit())
         return -1;
 
@@ -2119,4 +2189,16 @@ int main(void) {
     glfwTerminate();
 	
     return 0;
+}
+
+static void quit() {
+	for(auto const chunkIndex : chunks.used) {
+		auto chunk{ chunks[chunkIndex] };
+		
+		if(chunk.modified()) {
+			writeChunk(chunk);
+		}
+	}
+	
+	glfwSetWindowShouldClose(window, GL_TRUE);
 }
