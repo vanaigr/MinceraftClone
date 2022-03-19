@@ -3,3 +3,4 @@ obj
 *.exe
 config.makefile
 Test
+/save

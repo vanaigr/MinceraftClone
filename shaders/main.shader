@@ -401,7 +401,7 @@ void main() {
 	
 	const Optional_BlockIntersection intersection = isInters(ray, startChunkIndex);
 	float t = 1.0/0.0;
-	vec4 col;
+	vec3 col;
 	if(intersection.is) {
 		const BlockIntersection i = intersection.it;
 		t = i.t;
@@ -410,7 +410,7 @@ void main() {
 		const int intersectionChunkIndex = i.chunkIndex;
 		
 		const vec2 offset = atlasAt(blockId, i.side);
-		col = vec4(sampleAtlas(offset, uv), 1 );
+		col = sampleAtlas(offset, uv);
 		
 		const Ray shadowRay = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(startChunkIndex)) * chunkDim + 0*normalize(vec3(1,3,2)) * 0.0001, normalize(vec3(1,3,2)) );
 		
@@ -419,9 +419,9 @@ void main() {
 		const float shading = shadowInters.is ? 0.4 : 1;
 		//const float shading = map(dot(normalize(vec3(1)), normalize(vec3(i.side))), -1, 1, 0.6, 0.9);
 		
-		col = vec4(col.xyz * shading, col.w);
+		col = col.xyz * shading;
 	}
-	else col = vec4(0,0,0,0);
+	else col = vec3(0,0,0);
 	
 	const float zWorld = dot(forwardDir, rayDir) * t;
 	const vec4 proj = projection * vec4(0, 0, zWorld, 1);
@@ -432,7 +432,7 @@ void main() {
 		gl_FragDepth = 0;
 	}
 	else if(zWorld <= far && intersection.is) {
-		color = vec4(col.rgb, 1);
+		color = vec4(col, 1);
 		gl_FragDepth = z;
 	}
 	else discard;

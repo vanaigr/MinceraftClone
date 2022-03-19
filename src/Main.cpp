@@ -205,7 +205,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     size -= size * yoffset * 0.07;
-	blockId = 1+misc::mod(blockId-1 + int(yoffset), 5);
+	blockId = 1+misc::mod(blockId-1 + int(yoffset), 6);
 }
 
 static const Font font{ ".\\assets\\font.txt" };
@@ -252,7 +252,7 @@ static GLuint pl_modelMatrix_u = 0;
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
-static int viewDistance = 3;
+static int viewDistance = 5;
 
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
@@ -339,7 +339,7 @@ static void reloadShaders() {
 		glBindTexture(GL_TEXTURE_2D, atlas_t);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data);
         //glBindTexture(GL_TEXTURE_2D, 0);
 		
 		GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
@@ -391,7 +391,7 @@ static void reloadShaders() {
 		glDeleteBuffers(1, &chunksNeighbours_ssbo);
 		glGenBuffers(1, &chunksNeighbours_ssbo);
 
-		//resizeBuffer(0);
+		resizeBuffer();
 	}
 		
 
@@ -1576,6 +1576,7 @@ int main(void) {
 	
 	glEnable(GL_CULL_FACE); 
 	glCullFace(GL_BACK); 
+	//glEnable(GL_FRAMEBUFFER_SRGB); 
 	
     fprintf(stdout, "Using GLEW %s\n", glewGetString(GLEW_VERSION));
 
@@ -1796,6 +1797,8 @@ int main(void) {
 		glProgramUniform3i(debugProgram, db_playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
 		glProgramUniform3f(debugProgram, db_playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
 		
+		glEnable(GL_FRAMEBUFFER_SRGB); 
+		
 		for(auto const chunkIndex : chunks.used) {
 			Chunks::AABB const aabb{ chunks.chunksAABB[chunkIndex] };
 				
@@ -1993,6 +1996,8 @@ int main(void) {
 				}
 			}	
 		}*/
+		
+		glDisable(GL_FRAMEBUFFER_SRGB); 
 		
 		if(isFreeCam){
 			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
