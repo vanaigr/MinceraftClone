@@ -207,8 +207,10 @@ void swap(inout float v1, inout float v2) {
 struct BlockIntersection {
 	ivec3 index;
 	ivec3 side;
+	vec3 at;
 	vec2 uv;
 	float t;
+	int chunkIndex;
 	uint id;
 };
 
@@ -231,9 +233,9 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 	
 	const vec3 stepLength = 1 / abs(dir);
 	
-	const  vec3 firstCellRow_f = vec3(positive_) * ceil(ray.orig) + vec3(negative_) * floor(ray.orig - 1);//floor(ray.orig + dir_);
+	const  vec3 firstCellRow_f = vec3(positive_) * (floor(ray.orig)+1) + vec3(negative_) * (floor(ray.orig)-1);
 	const ivec3 firstCellRow   = ivec3(firstCellRow_f); 
-	const  vec3 firstCellDiff  = abs(ray.orig-firstCellRow_f - negative_); //distance to the frist border
+	const  vec3 firstCellDiff  = abs(ray.orig-firstCellRow_f - negative_); //distance to the frist block side
 	
 	
 	ivec3 curSteps = ivec3(0);
@@ -251,7 +253,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 		const vec3 relativeOrig = ray.orig - relativeToChunk * chunkDim;
 
 		if(!empty) {
-			farBoundaries = positive_ * ( endPos - (startPos - 1) ) + startPos - 1;
+			farBoundaries = positive_ * (endPos - startPos) + startPos;
 			
 			const vec3 border0Dist  = -min(relativeOrig - startPos, vec3(0,0,0)) * dir_;
 			const vec3 border16Dist = -max(relativeOrig - endPos, vec3(0,0,0)) * dir_;
@@ -263,31 +265,27 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 			const float minLen = max(max(minLen_vec.x, minLen_vec.y), minLen_vec.z); //minimal length for all rays to get inside of chunk bounds
 			const bvec3 outside = lessThan(minLen_vec, vec3(minLen));
 				
-			const ivec3 candCurSteps = 
+			curSteps = 
 				ivec3(not(outside)) * ivec3(minSteps_vec) +
 				ivec3(   (outside)) * ivec3(max(ceil(minLen * abs(dir) - firstCellDiff),0));
 				
-			const vec3 candCurLen = stepLength * candCurSteps + stepLength * firstCellDiff;
+			curLen = stepLength * curSteps + stepLength * firstCellDiff;
 			
 			const vec3 testAt =  
-				+ vec3(not(outside)) * (firstCellRow + candCurSteps*dir_)
+				+ vec3(not(outside)) * (firstCellRow + curSteps*dir_)
 				+ vec3(   (outside)) * at(ray, minLen);
 			
 			{
-				curSteps = candCurSteps;
-				curLen = candCurLen;
-				
 				bool next = false;
 				
-				int i = 0;
-	
-				for(; i < 100; i++) {
+				for(int i = 0; i < 100; i++) {
 					const float minCurLen = min(min(curLen.x, curLen.y), curLen.z);
 					const bvec3 minAxis_b = equal(curLen, vec3(1,1,1) * minCurLen);
 					const  vec3 minAxis_f = vec3(minAxis_b);
 					const ivec3 minAxis_i = ivec3(minAxis_b);
 					
 					const  ivec3 otherAxis_i = ivec3(not(minAxis_b));
+					const   vec3 otherAxis_f =  vec3(not(minAxis_b));
 					const vec3 curCoordF = at(ray, minCurLen);
 					const ivec3 curCoord = ivec3(floor(curCoordF));
 					
@@ -340,8 +338,11 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 											BlockIntersection(
 												ca_,
 												side,
+												minAxis_f * (firstCellRow + curSteps*dir_ + ivec3(minAxis_b) * negative_)
+												+ otherAxis_f * curCoordF,
 												uv,
 												minCurLen,
+												curChunkIndex,
 												blockId
 											)
 										);
@@ -355,7 +356,6 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 				}
 				
 				if(!next) break;
-				//else break;
 			}
 		}
 		
@@ -405,13 +405,19 @@ void main() {
 	if(intersection.is) {
 		const BlockIntersection i = intersection.it;
 		t = i.t;
-		const vec2 uv = ((i.uv-0.5f) * 0.9999f)+0.5f;
+		const vec2 uv = clamp(i.uv, 0, 1);
 		const uint blockId = i.id;
+		const int intersectionChunkIndex = i.chunkIndex;
 		
 		const vec2 offset = atlasAt(blockId, i.side);
 		col = vec4(sampleAtlas(offset, uv), 1 );
+		
+		const Ray shadowRay = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(startChunkIndex)) * chunkDim + 0*normalize(vec3(1,3,2)) * 0.0001, normalize(vec3(1,3,2)) );
+		
+		const Optional_BlockIntersection shadowInters = isInters(shadowRay, intersectionChunkIndex);
 
-		const float shading = map(dot(normalize(vec3(1)), normalize(vec3(i.side))), -1, 1, 0.6, 0.9);
+		const float shading = shadowInters.is ? 0.4 : 1;
+		//const float shading = map(dot(normalize(vec3(1)), normalize(vec3(i.side))), -1, 1, 0.6, 0.9);
 		
 		col = vec4(col.xyz * shading, col.w);
 	}

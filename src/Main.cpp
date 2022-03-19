@@ -252,7 +252,7 @@ static GLuint pl_modelMatrix_u = 0;
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
-static int viewDistance = 20;
+static int viewDistance = 3;
 
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
