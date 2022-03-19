@@ -58,7 +58,7 @@ public:
 	using OptionalNeighbour = OptionalChunkIndex;
 	
 	struct Neighbours {
-		static constexpr int neighboursCount{ 27 };
+		static constexpr int neighboursCount{ 6 };
 		std::array<OptionalNeighbour, neighboursCount> n;
 		
 		static constexpr bool checkIndexValid(uint8_t const index) {
@@ -66,28 +66,37 @@ public:
 		}
 		
 		static constexpr bool checkDirValid(vec3i const dir) {
-			return dir.in(vec3i{-1}, vec3i{1}).all();
+			return vec3i(dir.notEqual(0)).dot(1) == 1;
 		}
 		
 		//used in main.shader
 			static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
 				assert(checkIndexValid(neighbourIndex));
-				return vec3i{
-					(neighbourIndex / 1) % 3,
-					(neighbourIndex / 3) % 3,
-					(neighbourIndex / 9) % 3
-				} - 1;
+				vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
+				return dirs[neighbourIndex];
+				//return vec3i{
+				//	(neighbourIndex / 1) % 3,
+				//	(neighbourIndex / 3) % 3,
+				//	(neighbourIndex / 9) % 3
+				//} - 1;
 			}
 			static constexpr uint8_t dirAsIndex(vec3i dir) {
 				assert(checkDirValid(dir));
-				return uint8_t( dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9 );
+				auto const result{ (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) };
+				if(indexAsDir(result) != dir) {
+					std::cerr << "err: " << dir << ' ' << result << '\n';
+					assert(false);
+				}
+				return result; 
+				//return uint8_t( dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9 );
 			}
 			static constexpr uint8_t mirror(uint8_t index) {
 				return dirAsIndex( -indexAsDir(index) );
 			}
 			
 			static constexpr bool isSelf(uint8_t index) {
-				return indexAsDir(index) == 0;
+				return false;
+				//return indexAsDir(index) == 0;
 			}
 		
 		OptionalNeighbour &operator[](uint8_t index) { assert(checkIndexValid(index)); return n[index]; }

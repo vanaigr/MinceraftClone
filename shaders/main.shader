@@ -29,6 +29,8 @@ uniform mat4 projection; //from local space to screen
 uniform float near;
 uniform float far;
 
+uniform int startChunkIndex;
+
 //copied from Chunks.h
 #define chunkDim 16
 
@@ -36,7 +38,7 @@ layout(binding = 1) restrict readonly buffer ChunksIndices {
      uint data[][16*16*16/2]; //indeces are shorts 	//8192
 };
 
-flat in int startChunkIndex;
+
 
 struct Block {
 	uint id;
@@ -70,20 +72,41 @@ bool emptyBounds(const ivec3 start, const ivec3 onePastEnd) {
 }
 
 
+#define neighboursCount 6
 layout(binding = 5) restrict readonly buffer ChunksNeighbours {
     int neighbours[];
 } ns;
 
+//static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
+//				assert(checkIndexValid(neighbourIndex));
+//				vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
+//				return dirs[neighbourIndex];
+//				//return vec3i{
+//				//	(neighbourIndex / 1) % 3,
+//				//	(neighbourIndex / 3) % 3,
+//				//	(neighbourIndex / 9) % 3
+//				//} - 1;
+//			}
+//			static constexpr uint8_t dirAsIndex(vec3i dir) {
+//				assert(checkDirValid(dir));
+//				assert(indexAsDir((dir.x+1)/2*dir.x + (dir.y+1)/2*dir.y*2 + (dir.z+1)/2*dir.z*4) == dir);
+//				return (dir.x+1)/2*dir.x + (dir.y+1)/2*dir.y*2 + (dir.z+1)/2*dir.z*4; 
+//				//return uint8_t( dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9 );
+//			}
+
 //copied from Chunks.h
 	ivec3 indexAsNeighbourDir(const int neighbourIndex) {
-		return ivec3(
-			(neighbourIndex / 1) % 3,
-			(neighbourIndex / 3) % 3,
-			(neighbourIndex / 9) % 3
-		) - 1;
+		const ivec3 dirs[] = { ivec3(-1,0,0),ivec3(1,0,0),ivec3(0,-1,0),ivec3(0,1,0),ivec3(0,0,-1),ivec3(0,0,1) };
+		return dirs[neighbourIndex];
+		//return ivec3(
+		//	(neighbourIndex / 1) % 3,
+		//	(neighbourIndex / 3) % 3,
+		//	(neighbourIndex / 9) % 3
+		//) - 1;
 	}
 	int dirAsNeighbourIndex(const ivec3 dir) {
-		return dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9;
+		//return dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9;
+		return (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) ;
 	}
 	int mirrorNeighbourDir(const int index) {
 		return dirAsNeighbourIndex( -indexAsNeighbourDir(index) );
@@ -100,10 +123,18 @@ layout(binding = 5) restrict readonly buffer ChunksNeighbours {
 //	}
 //}
 
-int chunkNeighbourIndex(const int chunkIndex, const ivec3 dir) {
-	const int index = chunkIndex * 27;
+int chunkDirectNeighbourIndex(const int chunkIndex, const ivec3 dir) {
+	const int index = chunkIndex * neighboursCount;
 	const int offset = dirAsNeighbourIndex(dir);
 	return -(ns.neighbours[index + offset] + 1);
+}
+
+int chunkNeighbourIndex(const int chunkIndex, const ivec3 dir) {
+	int outChunkIndex = chunkIndex;
+	if(dir.x != 0) outChunkIndex = chunkDirectNeighbourIndex(outChunkIndex, ivec3(dir.x,0,0));
+	if(dir.y != 0) outChunkIndex = chunkDirectNeighbourIndex(outChunkIndex, ivec3(0,dir.y,0));
+	if(dir.z != 0) outChunkIndex = chunkDirectNeighbourIndex(outChunkIndex, ivec3(0,0,dir.z));
+	return outChunkIndex;
 }
 
 
