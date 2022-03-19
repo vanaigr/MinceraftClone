@@ -215,9 +215,11 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) 
 
 static const Font font{ ".\\assets\\font.txt" };
 
-static size_t const texturesCount = 2;
+static size_t const texturesCount = 4;
 static GLuint textures[texturesCount];
-static GLuint &atlas_t = textures[0], &font_t = textures[1];
+static GLuint &atlas_t = textures[0], &font_t = textures[1], &framebufferColor_t = textures[2], &framebufferDepth_t = textures[3];
+
+static GLuint framebuffer;
 
 static GLuint mainProgram = 0;
   static GLuint rightDir_u;
@@ -243,12 +245,6 @@ static GLuint debugProgram;
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
 
-static GLuint bgProjection_u;
-static GLuint bgRightDir_u;
-static GLuint bgTopDir_u;
-
-
-static GLuint bgProgram = 0;
 static GLuint playerProgram = 0;
 
 static GLuint pl_projection_u = 0;
@@ -293,6 +289,39 @@ static void reloadShaders() {
 	glGenTextures(texturesCount, &textures[0]);
 	
 	{
+		//color
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, framebufferColor_t);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, windowSize.x, windowSize.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+		//depth
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_2D, framebufferDepth_t);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, windowSize.x, windowSize.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+		
+		glDeleteFramebuffers(1, &framebuffer);
+		glGenFramebuffers(1, &framebuffer);
+		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+		  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, framebufferColor_t, 0);
+		  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, framebufferDepth_t, 0);
+		  
+		  GLenum status;
+		  if ((status = glCheckFramebufferStatus(GL_FRAMEBUFFER)) != GL_FRAMEBUFFER_COMPLETE) {
+		  	fprintf(stderr, "framebuffer: error %u", status);
+		  }
+		
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
+	
+	{
 		glDeleteProgram(mainProgram);
 		mainProgram = glCreateProgram();
 		ShaderLoader sl{};
@@ -335,6 +364,9 @@ static void reloadShaders() {
 		playerChunk_u = glGetUniformLocation(mainProgram, "playerChunk");
 		playerInChunk_u = glGetUniformLocation(mainProgram, "playerInChunk");
 		startChunkIndex_u = glGetUniformLocation(mainProgram, "startChunkIndex");
+		
+		glUniform1i(glGetUniformLocation(mainProgram, "worldColor"), 2);
+		glUniform1i(glGetUniformLocation(mainProgram, "worldDepth"), 3);
 	
 		Image image;
 		ImageLoad("assets/atlas.bmp", &image);
@@ -397,58 +429,6 @@ static void reloadShaders() {
 		glGenBuffers(1, &chunksNeighbours_ssbo);
 
 		resizeBuffer();
-	}
-		
-
-	{
-		glDeleteProgram(bgProgram);
-		bgProgram = glCreateProgram();
-		ShaderLoader bgsl{};
-		bgsl.addScreenSizeTriangleStripVertexShader("bg vertex");
-		bgsl.addShaderFromCode(R"(#version 430
-			in vec4 gl_FragCoord;
-			
-			layout(location = 0) out vec4 color;
-			layout(location = 1) out float depth;
-			
-			uniform mat4 projection; //from local space to screen
-			uniform uvec2 windowSize;
-			
-			uniform vec3 rightDir, topDir;
-			
-			vec3 background(const vec3 dir) {
-				const float t = 0.5 * (dir.y + 1.0);
-				return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
-			}
-			void main() {
-				const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
-		
-				const vec3 forwardDir = cross(topDir, rightDir);
-				const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;
-				const vec3 rayDir = normalize(rayDir_);
-	
-				color = vec4(background(rayDir), 1.0);
-				depth = gl_FragCoord.z;
-			}
-		
-			)",
-			GL_FRAGMENT_SHADER,
-			"bg fragment"
-		);
-		
-		bgsl.attachShaders(bgProgram);
-	
-		glLinkProgram(bgProgram);
-		glValidateProgram(bgProgram);
-		glUseProgram(bgProgram);
-		
-	
-		bgsl.deleteShaders();
-		
-		glUniform2ui(glGetUniformLocation(bgProgram, "windowSize"), windowSize.x, windowSize.y);
-		bgProjection_u = glGetUniformLocation(bgProgram, "projection");
-		bgRightDir_u = glGetUniformLocation(bgProgram, "rightDir");
-		bgTopDir_u = glGetUniformLocation(bgProgram, "topDir");
 	}
 	
 	{
@@ -773,9 +753,6 @@ static void reloadShaders() {
 	
 	glUseProgram(playerProgram);
 	glUniformMatrix4fv(pl_projection_u, 1, GL_TRUE, &projection[0][0]);
-	
-	glUseProgram(bgProgram);
-	glUniformMatrix4fv(bgProjection_u, 1, GL_TRUE, &projection[0][0]);
 	 
 	glUseProgram(debugProgram);
 	glUniformMatrix4fv(db_projection_u, 1, GL_TRUE, &projection[0][0]);	
@@ -1733,16 +1710,60 @@ int main(void) {
         auto const topDir{ currentViewport.topDir() };
         auto const forwardDir{ currentViewport.forwardDir() };
 		
+		float toLoc[3][3];
+		float toGlob[3][3];
+		currentViewport.localToGlobalSpace(&toGlob);
+		currentViewport.globalToLocalSpace(&toLoc);
+		ChunkCoord const cameraCoord{ player + viewportOffset() };
+		auto const cameraChunk{ cameraCoord.chunk() };
+		auto const cameraPosInChunk{ cameraCoord.positionInChunk() };
+		
+		float const toLoc4[4][4] = {
+			{ toLoc[0][0], toLoc[0][1], toLoc[0][2], 0 },
+			{ toLoc[1][0], toLoc[1][1], toLoc[1][2], 0 },
+			{ toLoc[2][0], toLoc[2][1], toLoc[2][2], 0 },
+			{ 0          , 0          , 0          , 1 },
+		};
+		
 		//glClear(GL_COLOR_BUFFER_BIT);
+		
+		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+		glEnable(GL_DEPTH_TEST); 
 		glClear(GL_DEPTH_BUFFER_BIT);
 		
-		glUseProgram(bgProgram);
-		glUniform3f(bgRightDir_u, rightDir.x, rightDir.y, rightDir.z);
-        glUniform3f(bgTopDir_u, topDir.x, topDir.y, topDir.z);
+		if(isFreeCam){
+			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
+			float const translation4[4][4] = {
+					{ 1, 0, 0, playerRelativePos.x },
+					{ 0, 1, 0, playerRelativePos.y },
+					{ 0, 0, 1, playerRelativePos.z },
+					{ 0, 0, 0, 1                   },
+			};
+			float const model[4][4] ={
+				{ (float)width, 0, 0, (float)-width/2 },
+				{ 0, (float)height, 0, (float)0 },
+				{ 0, 0, (float)width, (float)-width/2 },
+				{ 0, 0, 0, 1  },
+			};
+						
+			float posToScale[4][4];
+			float playerToLocal[4][4];
+			
+			
+			misc::matMult(translation4, model, &posToScale);
+			misc::matMult(toLoc4, posToScale, &playerToLocal);
+			
+			glUseProgram(playerProgram);
+			
+			glUniformMatrix4fv(pl_modelMatrix_u, 1, GL_TRUE, &playerToLocal[0][0]);
+						
+			glDrawArrays(GL_TRIANGLES, 0,36);
+		}
 		
-		glDepthMask(GL_FALSE);
-		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
-		glDepthMask(GL_TRUE);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glEnable(GL_FRAMEBUFFER_SRGB); 
+		glDisable(GL_DEPTH_TEST); 
+		
 		
 		glUseProgram(mainProgram);
 		
@@ -1758,16 +1779,6 @@ int main(void) {
             )
         );
 		
-		
-		float toLoc[3][3];
-		float toGlob[3][3];
-		currentViewport.localToGlobalSpace(&toGlob);
-		currentViewport.globalToLocalSpace(&toLoc);
-		//vec3i const playerChunk{ player.chunk() };
-		ChunkCoord const cameraCoord{ player + viewportOffset() };
-		auto const cameraChunk{ cameraCoord.chunk() };
-		auto const cameraPosInChunk{ cameraCoord.positionInChunk() };
-		
 		if(testInfo) {
 			std::cout << position << '\n';
 			std::cout.precision(17);
@@ -1778,12 +1789,6 @@ int main(void) {
 			std::cout << "----------------------------\n";
 		}
 		
-		float const toLoc4[4][4] = {
-			{ toLoc[0][0], toLoc[0][1], toLoc[0][2], 0 },
-			{ toLoc[1][0], toLoc[1][1], toLoc[1][2], 0 },
-			{ toLoc[2][0], toLoc[2][1], toLoc[2][2], 0 },
-			{ 0          , 0          , 0          , 1 },
-		};
 		glUniformMatrix4fv(toLocal_matrix_u, 1, GL_TRUE, &toLoc4[0][0]);
 		glProgramUniformMatrix4fv(debugProgram, db_toLocal_u, 1, GL_TRUE, &toLoc4[0][0]);
 		
@@ -1793,17 +1798,15 @@ int main(void) {
 		glProgramUniform3i(debugProgram, db_playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
 		glProgramUniform3f(debugProgram, db_playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
 		
-		glEnable(GL_FRAMEBUFFER_SRGB); 
-		
 		Chunks::Move_to_neighbour_Chunk const playerChunkCand{ chunks, cameraChunk };
 		if(playerChunkCand.is()) {
 			int playerChunkIndex = playerChunkCand.get().chunkIndex();
 			glUniform1i(startChunkIndex_u, playerChunkIndex);
 			
+			int i = 0;
 			for(auto const chunkIndex : chunks.used) {
 				auto &chunkData{ chunks.chunksData[chunkIndex] };
 				std::vector<bool>::reference gpuPresent = chunks.gpuPresent[chunkIndex];
-				
 				
 				if(!gpuPresent) {
 					if(chunkIndex >= gpuChunksCount) {
@@ -1846,35 +1849,6 @@ int main(void) {
 		}
 		
 		glDisable(GL_FRAMEBUFFER_SRGB); 
-		
-		if(isFreeCam){
-			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
-			float const translation4[4][4] = {
-					{ 1, 0, 0, playerRelativePos.x },
-					{ 0, 1, 0, playerRelativePos.y },
-					{ 0, 0, 1, playerRelativePos.z },
-					{ 0, 0, 0, 1                   },
-			};
-			float const model[4][4] ={
-				{ (float)width, 0, 0, (float)-width/2 },
-				{ 0, (float)height, 0, (float)0 },
-				{ 0, 0, (float)width, (float)-width/2 },
-				{ 0, 0, 0, 1  },
-			};
-						
-			float posToScale[4][4];
-			float playerToLocal[4][4];
-			
-			
-			misc::matMult(translation4, model, &posToScale);
-			misc::matMult(toLoc4, posToScale, &playerToLocal);
-			
-			glUseProgram(playerProgram);
-			
-			glUniformMatrix4fv(pl_modelMatrix_u, 1, GL_TRUE, &playerToLocal[0][0]);
-						
-			glDrawArrays(GL_TRIANGLES, 0,36);
-		}
 		
 		/*{
 			glUseProgram(testProgram);

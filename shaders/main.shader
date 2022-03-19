@@ -31,6 +31,9 @@ uniform float far;
 
 uniform int startChunkIndex;
 
+uniform sampler2D worldColor;
+uniform sampler2D worldDepth;
+
 //copied from Chunks.h
 #define chunkDim 16
 
@@ -77,35 +80,12 @@ layout(binding = 5) restrict readonly buffer ChunksNeighbours {
     int neighbours[];
 } ns;
 
-//static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
-//				assert(checkIndexValid(neighbourIndex));
-//				vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
-//				return dirs[neighbourIndex];
-//				//return vec3i{
-//				//	(neighbourIndex / 1) % 3,
-//				//	(neighbourIndex / 3) % 3,
-//				//	(neighbourIndex / 9) % 3
-//				//} - 1;
-//			}
-//			static constexpr uint8_t dirAsIndex(vec3i dir) {
-//				assert(checkDirValid(dir));
-//				assert(indexAsDir((dir.x+1)/2*dir.x + (dir.y+1)/2*dir.y*2 + (dir.z+1)/2*dir.z*4) == dir);
-//				return (dir.x+1)/2*dir.x + (dir.y+1)/2*dir.y*2 + (dir.z+1)/2*dir.z*4; 
-//				//return uint8_t( dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9 );
-//			}
-
 //copied from Chunks.h
 	ivec3 indexAsNeighbourDir(const int neighbourIndex) {
 		const ivec3 dirs[] = { ivec3(-1,0,0),ivec3(1,0,0),ivec3(0,-1,0),ivec3(0,1,0),ivec3(0,0,-1),ivec3(0,0,1) };
 		return dirs[neighbourIndex];
-		//return ivec3(
-		//	(neighbourIndex / 1) % 3,
-		//	(neighbourIndex / 3) % 3,
-		//	(neighbourIndex / 9) % 3
-		//) - 1;
 	}
 	int dirAsNeighbourIndex(const ivec3 dir) {
-		//return dir.x+1 + (dir.y+1)*3 + (dir.z+1)*9;
 		return (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) ;
 	}
 	int mirrorNeighbourDir(const int index) {
@@ -115,13 +95,6 @@ layout(binding = 5) restrict readonly buffer ChunksNeighbours {
 	bool isNeighbourSelf(const int index) {
 		return indexAsNeighbourDir(index) == 0;
 	}
-	
-//void chunkNeighbours(const int chunkIndex, out int neighbours_out[27]) {
-//	const int index = chunkIndex * 27;
-//	for(int i = 0; i < 27; i ++) {
-//		neighbours_out[index] = ns.neighbours[index + i];
-//	}
-//}
 
 int chunkDirectNeighbourIndex(const int chunkIndex, const ivec3 dir) {
 	const int index = chunkIndex * neighboursCount;
@@ -385,14 +358,29 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 									if(blockId == 7) {
 										if(glass.is) { glass.it.glassDir = ray.dir; continue; }
 										
+										const vec3 glassOffset = vec3( 
+											sin(blockCoord.x*9)/2, 
+											sin(blockCoord.z*9)/8, 
+											sin(blockCoord.y*6 + blockCoord.x*4)/8
+										) / 100;
+										
+										const vec3 glassBlockCoord = blockCoord - glassOffset;
+										
+										vec2 glassUv = vec2(
+											dot(minAxis_f, glassBlockCoord.zxx),
+											dot(minAxis_f, glassBlockCoord.yzy)
+										);
 										const vec2 offset = atlasAt(blockId, side);
-										const vec3 color = sampleAtlas(offset, uv);
+										const vec3 color = sampleAtlas(offset, clamp(glassUv, 0.0001, 0.9999));
+	
+										const vec3 incoming = ray.dir - glassOffset * vec3(1-checks);
+										const vec3 refracted = refract(normalize(incoming), normalize(vec3(side)), 1.2);
 										
 										glass = Optional_BlockIntersection(
 											true,    
 											BlockIntersection(
 												backside,
-												refract(ray.dir, normalize(vec3(side)), 1.2),
+												normalize(refracted),
 												color,
 												minAxis_f * (firstCellRow + curSteps*dir_ + ivec3(minAxis_b) * negative_)
 												+ otherAxis_f * curCoordF,
@@ -456,20 +444,20 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 		
 		const ivec3 neighbourDir = ivec3(!outside) * dir_;
 		const int candChunkIndex = chunkNeighbourIndex(curChunkIndex, neighbourDir);
-		if(candChunkIndex < 0) return emptyOptional_BlockIntersection();
+		if(candChunkIndex < 0) break;
 		
 		curChunkIndex = candChunkIndex;
 		relativeToChunk += neighbourDir;
 		
 	}
 
-
 	return emptyOptional_BlockIntersection();
 }
 
 vec3 background(const vec3 dir) {
 	const float t = 0.5 * (dir.y + 1.0);
-	return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
+	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
+	return pow(res, vec3(2.2));
 }
 
 struct Trace {
@@ -486,6 +474,7 @@ Trace trace(Ray ray, int chunkIndex) {
 	
 	bool shadow = false;
 	vec3 origColor;
+	
 	for(int i = 0; i < 100; i ++) {
 		const Optional_BlockIntersection intersection = isInters(ray, chunkIndex);
 		
@@ -496,8 +485,11 @@ Trace trace(Ray ray, int chunkIndex) {
 			
 			const int intersectionChunkIndex = i.chunkIndex;
 			col = i.color;
+			
+			//if(true) return Trace(col.xyz , t);
 
 			if(blockId == 7) {
+				
 				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + i.glassDir * 0.001, i.glassDir );
 				chunkIndex = intersectionChunkIndex;
 				glass = true;
@@ -509,16 +501,11 @@ Trace trace(Ray ray, int chunkIndex) {
 					return Trace(origColor.xyz * 0.4 * mix(vec3(1), glassColor, vec3(glass)), t);
 				}
 				else {
+					//if(true) return Trace(col.xyz * mix(vec3(1), glassColor, vec3(glass)), t);
 					ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + 0*normalize(vec3(1,3,2)) * 0.0001, normalize(vec3(1,3,2)) );
 					chunkIndex = intersectionChunkIndex;
-					//const Optional_BlockIntersection shadowInters = isInters(shadowRay, intersectionChunkIndex);
-			
-					//const float shading = shadowInters.is ? 0.4 : 1;
-					//col = col.xyz * shading * mix(vec3(1), glassColor, vec3(glass));
-					
 					shadow = true;
 					origColor = col;
-					//return Trace(col, t);
 				}
 			}
 		}
@@ -531,10 +518,11 @@ Trace trace(Ray ray, int chunkIndex) {
 		else break;
 	}
 	
-	return Trace(vec3(0), 1.0 / 0.0);
+	return Trace(background(ray.dir), far);
 }
 
 void main() {
+	const vec2 uv = gl_FragCoord.xy / windowSize.xy;
     const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
 	
 	const vec3 forwardDir = cross(topDir, rightDir);
@@ -542,48 +530,27 @@ void main() {
     const vec3 rayDir = normalize(rayDir_);
 	
 	const vec3 relativeChunkPos = relativeChunkPosition(startChunkIndex);
-	
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
+	
+	
+	const vec3 modelColor = texture2D(worldColor, uv).rgb;
+	const float modelDepth = texture2D(worldDepth, uv).r;
+	
+	const float modelZ = 1.0 / (modelDepth * (1.0 / far - 1.0 / near) + 1.0 / near);
+	const float modelProj = (modelZ - projection[3].z) / projection[2].z;
+	const float modelDist = modelProj / dot(forwardDir, rayDir);
+	
+	float modelDistCorrected = modelDepth == 1 ? far : modelDist;
+	
 	
 	const Trace trc = trace(ray, startChunkIndex);
 	
-	const vec3 col = trc.color;
-	const float t = trc.depth;
 	
-	//const Optional_BlockIntersection intersection = isInters(ray, startChunkIndex);
-	//float t = 1.0/0.0;
-	//vec3 col;
-	//if(intersection.is) {
-	//	const BlockIntersection i = intersection.it;
-	//	t = i.t;
-	//	const uint blockId = i.id;
-	//	
-	//	const int intersectionChunkIndex = i.chunkIndex;
-	//	col = i.color;
-	//	if(blockId == 7) {
-	//		
-	//	}
-	//	else {
-	//		const Ray shadowRay = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(startChunkIndex)) * chunkDim + 0*normalize(vec3(1,3,2)) * 0.0001, normalize(vec3(1,3,2)) );
-	//		const Optional_BlockIntersection shadowInters = isInters(shadowRay, intersectionChunkIndex);
-	//
-	//		const float shading = shadowInters.is ? 0.4 : 1;
-	//		col = col.xyz * shading;
-	//	}
-	//}
-	//else col = vec3(0,0,0);
+	vec3 col = trc.color;
+	const float t = clamp(trc.depth, near, far);
+	if(t > modelDistCorrected) col = modelColor;
 	
-	const float zWorld = dot(forwardDir, rayDir) * t;
-	const vec4 proj = projection * vec4(0, 0, zWorld, 1);
-	const float z = ( (1.0 / (proj.z) - 1.0 / (near)) / (1.0 / (far) - 1.0 / (near)) );
 
-	if(length(gl_FragCoord.xy - windowSize / 2) < 3) {
-		color = vec4(vec3(0.98), 1);
-		gl_FragDepth = 0;
-	}
-	else if(zWorld <= far) {
-		color = vec4(col, 1);
-		gl_FragDepth = z;
-	}
-	else discard;
+	if(length(gl_FragCoord.xy - windowSize / 2) < 3) color = vec4(vec3(0.98), 1);
+	else color = vec4(col, 1);
 }		
