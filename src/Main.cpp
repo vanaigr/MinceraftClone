@@ -210,7 +210,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     size -= size * yoffset * 0.07;
-	blockId = 1+misc::mod(blockId-1 + int(yoffset), 6);
+	blockId = 1+misc::mod(blockId-1 + int(yoffset), 7);
 }
 
 static const Font font{ ".\\assets\\font.txt" };
@@ -362,6 +362,7 @@ static void reloadShaders() {
 				c(5, 0), c(6, 0), c(6, 0), //wood
 				c(7, 0), c(7, 0), c(7, 0), //leaves
 				c(8, 0), c(8, 0), c(8, 0), //stone
+				c(9, 0), c(9, 0), c(9, 0), //glass
 			};
 			glGenBuffers(1, &blockSides_u);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, blockSides_u);
@@ -899,6 +900,7 @@ std::string chunkFilename(Chunks::Chunk const &chunk) {
 }
 
 void writeChunk(Chunks::Chunk &chunk) {
+	return;
 	auto const &data{ chunk.data() };
 	
 	std::ofstream chunkFileOut{ chunkFilename(chunk), std::ios::binary };
@@ -943,15 +945,16 @@ void generateChunkData(Chunks::Chunk chunk) {
 	
 	neighbours_ = neighbours;
 	
-	auto const filename{ chunkFilename(chunk) };
+	//auto const filename{ chunkFilename(chunk) };
 			
-	std::ifstream chunkFileIn{ filename, std::ios::binary };
+	//std::ifstream chunkFileIn{ filename, std::ios::binary };
 	
 	vec3i start{15};
 	vec3i end  {0 };
 		
-	if(chunkFileIn.fail()) {
-		chunkFileIn.close();
+	//if(chunkFileIn.fail()) 
+	{
+		//chunkFileIn.close();
 		
 		double heights[Chunks::chunkDim * Chunks::chunkDim];
 		for(int z = 0; z < Chunks::chunkDim; z++) 
@@ -985,10 +988,10 @@ void generateChunkData(Chunks::Chunk chunk) {
 			
 		genTrees(pos, data, *&start, *&end);
 		
-		writeChunk(chunk);
+		//writeChunk(chunk);
 		chunk.modified() = true;
 	}
-	else {
+	/*else {
 		for(int x{}; x < Chunks::chunkDim; x++) 
 		for(int y{}; y < Chunks::chunkDim; y++) 
 		for(int z{}; z < Chunks::chunkDim; z++) 
@@ -1008,7 +1011,7 @@ void generateChunkData(Chunks::Chunk chunk) {
 			}
 		}
 		chunk.modified() = false;
-	}
+	}*/
 	
 	aabb = Chunks::AABB(start, end);
 }

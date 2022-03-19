@@ -205,10 +205,13 @@ void swap(inout float v1, inout float v2) {
 }
 
 struct BlockIntersection {
-	ivec3 index;
-	ivec3 side;
+	//ivec3 index;
+	//ivec3 side;
+	bool backside;
+	vec3 glassDir;
+	vec3 color;
 	vec3 at;
-	vec2 uv;
+	//vec2 uv;
 	float t;
 	int chunkIndex;
 	uint id;
@@ -224,6 +227,16 @@ Optional_BlockIntersection emptyOptional_BlockIntersection() {
 	Optional_BlockIntersection a;
 	return a;
 }
+
+vec3 refract(const vec3 incoming, const vec3 normal, const float ior)  { 
+    float cosi = clamp(-1, 1, dot(incoming, normal));
+    float etai = 1, etat = ior; 
+    vec3 n = normal; 
+    if (cosi < 0) { cosi = -cosi; } else { float tmp = etai; etai = etat; etat = tmp; n= -normal; } 
+    const float eta = etai / etat; 
+    const float k = 1 - eta * eta * (1 - cosi * cosi); 
+    return k < 0 ? vec3(0) : eta * incoming + (eta * cosi - sqrt(k)) * n; 
+} 
 
 Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) { 	
 	const vec3 dir = ray.dir;
@@ -302,6 +315,8 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 					
 					const ivec3 checks = ivec3( (equal(curCoordF, curCoord) || minAxis_b) );
 					
+					Optional_BlockIntersection glass = emptyOptional_BlockIntersection();
+					
 					for(int x = checks.x; x >= 0; x --) {
 						for(int y = checks.y; y >= 0; y --) {
 							for(int z = checks.z; z >= 0; z --) {
@@ -330,26 +345,59 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 										dot(minAxis_f, blockCoord.zxx),
 										dot(minAxis_f, blockCoord.yzy)
 									);
-									ivec3 side = -minAxis_i*dir_;
+									const ivec3 side = minAxis_i * (ivec3(x, y, z) * 2 - 1) * dir_;
+									const bool backside = dot(vec3(side), ray.dir) > 0;
 									
-									if(blockId != 5 || blockId == 5 && int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 == 0)
-										return Optional_BlockIntersection(
+									if(blockId == 5) {
+										if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue;
+									}
+									if(blockId == 7) {
+										if(glass.is) { glass.it.glassDir = ray.dir; continue; }
+										
+										const vec2 offset = atlasAt(blockId, side);
+										const vec3 color = sampleAtlas(offset, uv);
+										
+										glass = Optional_BlockIntersection(
 											true,    
 											BlockIntersection(
-												ca_,
-												side,
+												backside,
+												refract(ray.dir, normalize(vec3(side)), 1.2),
+												color,
 												minAxis_f * (firstCellRow + curSteps*dir_ + ivec3(minAxis_b) * negative_)
 												+ otherAxis_f * curCoordF,
-												uv,
 												minCurLen,
 												curChunkIndex,
 												blockId
 											)
 										);
+										continue;
+									}
+									
+									const vec2 offset = atlasAt(blockId, side);
+									const vec3 color = sampleAtlas(offset, uv) * mix(vec3(1), glass.it.color, vec3(glass.is));
+									
+									return Optional_BlockIntersection(
+										true,    
+										BlockIntersection(
+											//ca_,
+											//side,
+											backside,
+											vec3(0),
+											color,
+											minAxis_f * (firstCellRow + curSteps*dir_ + ivec3(minAxis_b) * negative_)
+											+ otherAxis_f * curCoordF,
+											//uv,
+											minCurLen,
+											curChunkIndex,
+											blockId
+										)
+									 );
 								}
 							}	
 						}
 					}
+					
+					if(glass.is) return glass;
 					
 					curSteps += minAxis_i;
 					curLen += minAxis_f * stepLength;
@@ -388,6 +436,73 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 	return emptyOptional_BlockIntersection();
 }
 
+vec3 background(const vec3 dir) {
+	const float t = 0.5 * (dir.y + 1.0);
+	return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
+}
+
+struct Trace {
+	vec3 color;
+	float depth;
+};
+
+Trace trace(Ray ray, int chunkIndex) {
+	vec3 col;
+	float t;
+	
+	bool glass = false;
+	vec3 glassColor = vec3(1);
+	
+	bool shadow = false;
+	vec3 origColor;
+	for(int i = 0; i < 100; i ++) {
+		const Optional_BlockIntersection intersection = isInters(ray, chunkIndex);
+		
+		if(intersection.is) {
+			const BlockIntersection i = intersection.it;
+			if(!glass && !shadow) t = i.t;
+			const uint blockId = i.id;
+			
+			const int intersectionChunkIndex = i.chunkIndex;
+			col = i.color;
+
+			if(blockId == 7) {
+				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + i.glassDir * 0.001, i.glassDir );
+				chunkIndex = intersectionChunkIndex;
+				glass = true;
+				
+				glassColor = glassColor * i.color;
+			}
+			else {
+				if(shadow) {
+					return Trace(origColor.xyz * 0.4 * mix(vec3(1), glassColor, vec3(glass)), t);
+				}
+				else {
+					ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + 0*normalize(vec3(1,3,2)) * 0.0001, normalize(vec3(1,3,2)) );
+					chunkIndex = intersectionChunkIndex;
+					//const Optional_BlockIntersection shadowInters = isInters(shadowRay, intersectionChunkIndex);
+			
+					//const float shading = shadowInters.is ? 0.4 : 1;
+					//col = col.xyz * shading * mix(vec3(1), glassColor, vec3(glass));
+					
+					shadow = true;
+					origColor = col;
+					//return Trace(col, t);
+				}
+			}
+		}
+		else if(shadow) {
+			return Trace(origColor.xyz * mix(vec3(1), glassColor, vec3(glass)), t);
+		}
+		else if(glass) {
+			return Trace(background(ray.dir) * mix(vec3(1), glassColor, vec3(glass)), t);
+		}
+		else break;
+	}
+	
+	return Trace(vec3(0), 1.0 / 0.0);
+}
+
 void main() {
     const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
 	
@@ -399,29 +514,33 @@ void main() {
 	
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
 	
-	const Optional_BlockIntersection intersection = isInters(ray, startChunkIndex);
-	float t = 1.0/0.0;
-	vec3 col;
-	if(intersection.is) {
-		const BlockIntersection i = intersection.it;
-		t = i.t;
-		const vec2 uv = clamp(i.uv, 0, 1);
-		const uint blockId = i.id;
-		const int intersectionChunkIndex = i.chunkIndex;
-		
-		const vec2 offset = atlasAt(blockId, i.side);
-		col = sampleAtlas(offset, uv);
-		
-		const Ray shadowRay = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(startChunkIndex)) * chunkDim + 0*normalize(vec3(1,3,2)) * 0.0001, normalize(vec3(1,3,2)) );
-		
-		const Optional_BlockIntersection shadowInters = isInters(shadowRay, intersectionChunkIndex);
-
-		const float shading = shadowInters.is ? 0.4 : 1;
-		//const float shading = map(dot(normalize(vec3(1)), normalize(vec3(i.side))), -1, 1, 0.6, 0.9);
-		
-		col = col.xyz * shading;
-	}
-	else col = vec3(0,0,0);
+	const Trace trc = trace(ray, startChunkIndex);
+	
+	const vec3 col = trc.color;
+	const float t = trc.depth;
+	
+	//const Optional_BlockIntersection intersection = isInters(ray, startChunkIndex);
+	//float t = 1.0/0.0;
+	//vec3 col;
+	//if(intersection.is) {
+	//	const BlockIntersection i = intersection.it;
+	//	t = i.t;
+	//	const uint blockId = i.id;
+	//	
+	//	const int intersectionChunkIndex = i.chunkIndex;
+	//	col = i.color;
+	//	if(blockId == 7) {
+	//		
+	//	}
+	//	else {
+	//		const Ray shadowRay = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(startChunkIndex)) * chunkDim + 0*normalize(vec3(1,3,2)) * 0.0001, normalize(vec3(1,3,2)) );
+	//		const Optional_BlockIntersection shadowInters = isInters(shadowRay, intersectionChunkIndex);
+	//
+	//		const float shading = shadowInters.is ? 0.4 : 1;
+	//		col = col.xyz * shading;
+	//	}
+	//}
+	//else col = vec3(0,0,0);
 	
 	const float zWorld = dot(forwardDir, rayDir) * t;
 	const vec4 proj = projection * vec4(0, 0, zWorld, 1);
@@ -431,7 +550,7 @@ void main() {
 		color = vec4(vec3(0.98), 1);
 		gl_FragDepth = 0;
 	}
-	else if(zWorld <= far && intersection.is) {
+	else if(zWorld <= far) {
 		color = vec4(col, 1);
 		gl_FragDepth = z;
 	}
