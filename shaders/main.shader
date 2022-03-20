@@ -142,10 +142,6 @@ vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
 }
 
 vec2 atlasAt(const uint id, const ivec3 side) {
-	const int positions_[] = {
-		0, 0, 0,
-		0, 1, 2
-	};
 	const int offset = int(side.y == 1) + int(side.y == -1) * 2;
 	const int index = (int(id) * 3 + offset);
 	const int pos = positions[index];
@@ -240,7 +236,7 @@ vec3 refract(const vec3 incoming, const vec3 normal, const float ior)  {
     const float eta = etai / etat; 
     const float k = 1 - eta * eta * (1 - cosi * cosi); 
     return k < 0 ? vec3(0) : eta * incoming + (eta * cosi - sqrt(k)) * n; 
-} 
+}
 
 Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const float maxDist) { 	
 	const vec3 dir = ray.dir;
@@ -255,16 +251,8 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 	const  vec3 firstCellDiff  = abs(ray.orig-firstCellRow_f); //distance to the frist block side
 	
 	
-	ivec3 curSteps = ivec3(0);
-	vec3 curLen = vec3(0);
 	int curChunkIndex = chunkIndex;
 	ivec3 relativeToChunk = ivec3(0);
-	ivec3 farBoundaries;
-	
-	float allSkipMinLen = 1.0/0.0;
-	bool allSkip = false;
-	
-	float minLength = 0;
 	
 	for(int t = 0; t < 100; t ++) {
 		const uint bounds = chunkBounds(curChunkIndex);
@@ -275,7 +263,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 		const vec3 relativeOrig = ray.orig - relativeToChunk * chunkDim;
 
 		if(!empty) {
-			farBoundaries = positive_ * (endPos - startPos+1) + startPos-1;
+			const ivec3 farBoundaries = positive_ * (endPos - startPos+1) + startPos-1;
 			
 			const vec3 border0Dist  = -min(relativeOrig - startPos, vec3(0,0,0)) * dir_;
 			const vec3 border16Dist = -max(relativeOrig - endPos, vec3(0,0,0)) * dir_;
@@ -287,11 +275,11 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 			const float minLen = max(max(minLen_vec.x, minLen_vec.y), minLen_vec.z); //minimal length for all rays to get inside of chunk bounds
 			const bvec3 outside = lessThan(minLen_vec, vec3(minLen));
 				
-			curSteps = 
+			ivec3 curSteps = 
 				ivec3(not(outside)) * ivec3(minSteps_vec) +
 				ivec3(   (outside)) * ivec3(max(ceil(minLen * abs(dir) - firstCellDiff),0));
 				
-			curLen = stepLength * curSteps + stepLength * firstCellDiff;
+			vec3 curLen = stepLength * curSteps + stepLength * firstCellDiff;
 			
 			const vec3 testAt =  
 				+ vec3(not(outside)) * (firstCellRow - negative_ + curSteps*dir_)
@@ -311,25 +299,27 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 					const  ivec3 otherAxis_i = ivec3(not(minAxis_b));
 					const   vec3 otherAxis_f =  vec3(not(minAxis_b));
 					const vec3 curCoordF = at(ray, minCurLen);
-					const ivec3 curCoord = ivec3(floor(curCoordF));
 					
-					const ivec3 cellAt =  
-							+   minAxis_i * (firstCellRow - negative_ + curSteps*dir_)
-							+ otherAxis_i * curCoord;
+			
+					const vec3 coordAt = 
+							+   minAxis_f * (firstCellRow - negative_ + curSteps*dir_)
+							+ otherAxis_f * curCoordF;
+					const ivec3 cellAt = ivec3(floor(coordAt));
 							
 					if(minCurLen > maxDist) return emptyOptional_BlockIntersection();
 							
-					const bvec3 inBounds = lessThanEqual((cellAt - relativeToChunk * chunkDim - farBoundaries) * dir_, ivec3(0,0,0));
+					const bvec3 inBounds = lessThanEqual((cellAt - relativeToChunk * chunkDim - minAxis_f * negative_ - farBoundaries) * dir_, ivec3(0,0,0));
+			
 					if( !all(inBounds) ) {
 						next = true;
 						break;
 					}
 					
-					const ivec3 checks = ivec3( (equal(curCoordF, curCoord) || minAxis_b) );
+					const ivec3 curCoord = ivec3(floor(curCoordF));
+					const ivec3 checks = ivec3( (equal(curCoordF, floor(curCoord)) || minAxis_b) );
 					
 					Optional_BlockIntersection glass = emptyOptional_BlockIntersection();
 					
-					allSkip = true;
 					for(int x = checks.x; x >= 0; x --) {
 						for(int y = checks.y; y >= 0; y --) {
 							for(int z = checks.z; z >= 0; z --) {
@@ -353,8 +343,6 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 								const uint blockId = blockAt(curChunkIndex_, ca_);	
 								
 								if(blockId != 0) { 
-									allSkip = false;
-									
 									const vec3 blockCoord = curCoordF - curCoord;
 									vec2 uv = vec2(
 										dot(minAxis_f, blockCoord.zxx),
@@ -383,7 +371,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 										);
 										const vec2 offset = atlasAt(blockId, side);
 										const vec3 color = sampleAtlas(offset, clamp(glassUv, 0.0001, 0.9999));
-	
+				
 										const vec3 incoming = ray.dir - glassOffset * vec3(1-checks);
 										const vec3 refracted = refract(normalize(incoming), normalize(vec3(side)), 1.2);
 										
@@ -391,7 +379,6 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 											true,    
 											BlockIntersection(
 												side,
-												//backside,
 												normalize(refracted),
 												color,
 												minAxis_f * (firstCellRow + curSteps*dir_ )
@@ -410,25 +397,20 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 									return Optional_BlockIntersection(
 										true,    
 										BlockIntersection(
-											//ca_,
 											side,
-											//backside,
 											vec3(0),
 											color,
-											minAxis_f * (firstCellRow + curSteps*dir_ + ivec3(minAxis_b) * negative_)
+											minAxis_f * (firstCellRow + curSteps*dir_)
 											+ otherAxis_f * curCoordF,
-											//uv,
 											minCurLen,
 											curChunkIndex,
 											blockId
 										)
-									 );
+									);
 								}
 							}	
 						}
 					}
-					
-					if(allSkip) allSkipMinLen = min(allSkipMinLen, minCurLen);
 					
 					if(glass.is) return glass;
 					
@@ -450,19 +432,12 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 		const float minLen = min(min(minLen_vec.x, minLen_vec.y), minLen_vec.z); //minimal length for any ray to get outside of chunk bounds
 		const bvec3 outside = greaterThan(minLen_vec, vec3(minLen));
 		
-		curSteps = 
-				ivec3(not(outside)) * ivec3(minSteps_vec) +
-				ivec3(   (outside)) * ivec3(max(ceil(minLen * abs(dir) - firstCellDiff),0));
-		
-		curLen = stepLength * curSteps + stepLength * firstCellDiff;
-		
 		const ivec3 neighbourDir = ivec3(!outside) * dir_;
 		const int candChunkIndex = chunkNeighbourIndex(curChunkIndex, neighbourDir);
 		if(candChunkIndex < 0) break;
 		
 		curChunkIndex = candChunkIndex;
-		relativeToChunk += neighbourDir;
-		
+		relativeToChunk += neighbourDir;	
 	}
 
 	return emptyOptional_BlockIntersection();
