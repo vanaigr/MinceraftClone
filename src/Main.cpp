@@ -210,7 +210,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     size -= size * yoffset * 0.07;
-	blockId = 1+misc::mod(blockId-1 + int(yoffset), 7);
+	blockId = 1+misc::mod(blockId-1 + int(yoffset), 9);
 }
 
 static const Font font{ ".\\assets\\font.txt" };
@@ -253,7 +253,7 @@ static GLuint pl_modelMatrix_u = 0;
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
-static int viewDistance = 5;
+static int viewDistance = 3;
 
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
@@ -394,6 +394,8 @@ static void reloadShaders() {
 				c(7, 0), c(7, 0), c(7, 0), //leaves
 				c(8, 0), c(8, 0), c(8, 0), //stone
 				c(9, 0), c(9, 0), c(9, 0), //glass
+				c(11, 0), c(11, 0), c(11, 0), //diamond
+				c(12, 0), c(12, 0), c(12, 0), //obsidian
 			};
 			glGenBuffers(1, &blockSides_u);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, blockSides_u);
