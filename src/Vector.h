@@ -305,6 +305,12 @@ public:
 		return *this / this->length();
 	}
 	
+	inline constexpr vec3<C> normalizedNonan() const {
+		return (*this / this->length()).applied([](auto const c, auto i) -> C { 
+			if(c==c) return c; else return C(0); 
+		});
+	}
+	
 	inline constexpr C distance(vec3<C> const other) const {
 		return (*this - other).length();
 	}

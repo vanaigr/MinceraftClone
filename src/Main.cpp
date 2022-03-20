@@ -39,34 +39,37 @@ static const vec2<uint32_t> windowSize{ 1920, 1080 };
 static const vec2<uint32_t> windowSize{ 1280, 720 };
 #endif // FULLSCREEN
 
+GLFWwindow* window;
+
 static const vec2<double> windowSize_d{ windowSize.convertedTo<double>() };
 
 static vec2<double> mousePos(0, 0), pmousePos(0, 0);
 
-static bool isPan{ false };
-static bool isZoomMovement{ false };
-static double zoomMovement{ 0 };
-static double size = 1;
-
 static bool shift{ false }, ctrl{ false };
 
-static vec3<double> movementDir{};
-static double speedModifier = 2.5;
+static bool isPan{ false };
 
 static bool debug{ false };
 
-static double deltaTime{ 16.0/1000.0 };
+static double const height{ 1.95 };
+static double const width{ 0.6 };
+
+static int64_t const width_i{ ChunkCoord::posToFracRAway(width).x }; 
+static int64_t const height_i{ ChunkCoord::posToFracRAway(height).x };
+
+static double const deltaTime{ 16.0/1000.0 };
 static double const fixedDeltaTime{ 16.0/1000.0 };
 
-static double movementSpeed{ 8 };
-static bool jump{ false };
+static double speedModifier = 2.5;
+static double playerSpeed{ 2.7 };
+static double spectatorSpeed{ 0.2 };
 
 static double const aspect{ windowSize_d.y / windowSize_d.x };
 
 static bool isOnGround{false};
+
 static vec3d playerForce{};
-static ChunkCoord playerCoord_{ vec3i{0,0,0}, vec3d{0.01,12.001,0.01} };
-static ChunkCoord spectatorCoord{ playerCoord_ };
+static ChunkCoord playerCoord{ vec3i{0,0,0}, vec3d{0.01,12.001,0.01} };
 static Viewport playerViewport{ 
 	vec2d{ misc::pi / 2.0, 0 },
 	aspect,
@@ -75,25 +78,43 @@ static Viewport playerViewport{
 	400
 };
 
-static double const height{ 1.95 };
-static double const width{ 0.6 };
+static ChunkCoord spectatorCoord{ playerCoord };
+static Viewport spectatorViewport{ 
+	vec2d{ misc::pi / 2.0, 0 },
+	aspect,
+	90.0 / 180.0 * misc::pi,
+	0.001,
+	400
+};
 
-static int64_t const width_i{ ChunkCoord::posToFracRAway(width).x }; 
-static int64_t const height_i{ ChunkCoord::posToFracRAway(height).x };
-	
-static  vec3d const viewportOffset_{0,height*0.9,0};
-static bool isFreeCam{ false };
+static vec3d const viewportOffset_{0,height*0.9,0};
+static bool isSpectator{ false };
 
 static Viewport &viewport_current() {
-    return playerViewport;
+    if(isSpectator) return spectatorViewport;
+	return playerViewport;
 }
-static ChunkCoord &playerCoord() {
-	if(isFreeCam) return spectatorCoord;
-	else return playerCoord_;
+
+static ChunkCoord &currentCoord() {
+	if(isSpectator) return spectatorCoord;
+	return playerCoord;
 }
 
 static vec3d viewportOffset() {
-	return viewportOffset_ * (!isFreeCam);
+	return viewportOffset_ * (!isSpectator);
+}
+
+struct Input {
+	vec3i movement;
+	vec2d panning;
+	bool jump;
+};
+
+static Input playerInput, spectatorInput;
+
+Input &currentInput() {
+	if(isSpectator) return spectatorInput;
+	else return playerInput;
 }
 
 static void reloadShaders();
@@ -116,8 +137,14 @@ static int blockId = 1;
 
 static void quit();
 
-static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    bool isPress = !(action == GLFW_RELEASE);
+enum class Key : uint8_t { RELEASE = GLFW_RELEASE, PRESS = GLFW_PRESS, REPEAT = GLFW_REPEAT, NOT_PRESSED };
+static_assert(GLFW_RELEASE >= 0 && GLFW_RELEASE < 256 && GLFW_PRESS >= 0 && GLFW_PRESS < 256 && GLFW_REPEAT >= 0 && GLFW_REPEAT < 256);
+static Key keys[GLFW_KEY_LAST+1];
+
+void handleKey(int const key) {
+	auto const action{ misc::to_underlying(keys[key]) };
+	
+	bool isPress = !(action == GLFW_RELEASE);
 	if(key == GLFW_KEY_GRAVE_ACCENT && !isPress) {
 		mouseCentered = !mouseCentered;
 		if(mouseCentered) {
@@ -129,18 +156,18 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 		quit();
 	}
 	if(key == GLFW_KEY_W)
-		movementDir.z = 1 * isPress;
+		currentInput().movement.z = 1 * isPress;
 	else if(key == GLFW_KEY_S)
-		movementDir.z = -1 * isPress;
+		currentInput().movement.z = -1 * isPress;
 	
-	if(isFreeCam) {
+	if(isSpectator) {
 		if (key == GLFW_KEY_Q)
-			movementDir.y = 1 * isPress;
+			currentInput().movement.y = 1 * isPress;
 		else if(key == GLFW_KEY_E)
-			movementDir.y = -1 * isPress;
+			currentInput().movement.y = -1 * isPress;
 	}
-	else if (key == GLFW_KEY_SPACE) {
-		jump = isPress;
+	else if(key == GLFW_KEY_SPACE) {
+		currentInput().jump = isPress;
 	}
 		
 	if (key == GLFW_KEY_KP_0 && !isPress) 
@@ -149,23 +176,34 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 		debugBtn1 = !debugBtn1;	
 
 	if(key == GLFW_KEY_D)
-		movementDir.x = 1 * isPress;
+		currentInput().movement.x = 1 * isPress;
 	else if(key == GLFW_KEY_A)
-		movementDir.x = -1 * isPress;
+		currentInput().movement.x = -1 * isPress;
 	
 	if(key == GLFW_KEY_F5 && action == GLFW_PRESS)
 		reloadShaders();
 	else if(key == GLFW_KEY_F4 && action == GLFW_PRESS)
 		debug = !debug;
-	else if(key == GLFW_KEY_F3 && action == GLFW_PRESS) { 
-		isFreeCam = !isFreeCam;
-		if(isFreeCam) {
-			spectatorCoord = playerCoord_ + viewportOffset_;
+	else if(key == GLFW_KEY_F3 && action == GLFW_RELEASE) { 
+		isSpectator = !isSpectator;
+		if(isSpectator) {
+			spectatorCoord = playerCoord + viewportOffset_;
+			spectatorViewport.rotation = playerViewport.rotation;
 		}
 	}
 	else if(key == GLFW_KEY_TAB && action == GLFW_PRESS) testInfo = true;
+}
 
-    shift = (mods & GLFW_MOD_SHIFT) != 0;
+static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+	if(key == GLFW_KEY_UNKNOWN) return;
+	if(action == GLFW_REPEAT) return;
+	
+	if(action == GLFW_PRESS) keys[key] = Key::PRESS;
+	else if(action == GLFW_RELEASE) keys[key] = Key::RELEASE;
+	
+	handleKey(key);
+	
+	shift = (mods & GLFW_MOD_SHIFT) != 0;
     ctrl = (mods & GLFW_MOD_CONTROL) != 0;
 }
 
@@ -185,7 +223,10 @@ static void cursor_position_callback(GLFWwindow* window, double mousex, double m
 	}
 	
 	pMouse = mousePos_;
-    mousePos = vec2<double>(relativeTo.x + mousePos_.x, -relativeTo.y + windowSize_d.y - mousePos_.y);
+    mousePos = vec2<double>(relativeTo.x + mousePos_.x, relativeTo.y + mousePos_.y);
+	
+	if(isPan || mouseCentered) currentInput().panning += (mousePos - pmousePos) / windowSize_d;
+	pmousePos = mousePos;
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
@@ -196,20 +237,9 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 	else if(button == GLFW_MOUSE_BUTTON_RIGHT) {
 		if(mouseCentered) blockAction = action == GLFW_PRESS ? BlockAction::PLACE : BlockAction::NONE;
 	}
-    else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
-        if (action == GLFW_PRESS) {
-            zoomMovement = 0;
-            isZoomMovement = true;
-        }
-        else if (action == GLFW_RELEASE) {
-            isZoomMovement = false;
-            zoomMovement = 0;
-        }
-	}
 }
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-    size -= size * yoffset * 0.07;
 	blockId = 1+misc::mod(blockId-1 + int(yoffset), 9);
 }
 
@@ -1018,7 +1048,7 @@ static void loadChunks() {
 	for(size_t i = 0; i != chunksPresent.size(); i++)
 		chunksPresent[i] = -1;
 	
-	vec3i playerChunk{ playerCoord().chunk() };
+	vec3i playerChunk{ currentCoord().chunk() };
 	
 	vec3<int32_t> b{viewDistance, viewDistance, viewDistance};
 	
@@ -1370,7 +1400,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 }
 
 bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
-	ChunkCoord const relativeBlockCoord{ ChunkCoord{ blockChunk, ChunkCoord::Block{blockCoord} } - playerCoord_ };
+	ChunkCoord const relativeBlockCoord{ ChunkCoord{ blockChunk, ChunkCoord::Block{blockCoord} } - currentCoord() };
 	vec3l const blockStartF{ relativeBlockCoord.position__long() };
 	vec3l const blockEndF{ blockStartF + ChunkCoord::fracBlockDim };
 	
@@ -1391,15 +1421,27 @@ static void update() {
 	auto const diffBlockMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBlockUpdate).count() };
 	auto const diffPhysicsMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPhysicsUpdate).count() };
 	
-    auto& currentViewport = viewport_current();
-	auto &player{ playerCoord() };
-
-    vec2<double> diff = (mousePos - pmousePos) / windowSize_d;
 	
-	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE && !isFreeCam) {
+	for(size_t i{}; i < sizeof(keys)/sizeof(keys[0]); ++i) {
+		auto &key{ keys[i] };
+		auto const action{ misc::to_underlying(key) };
+		if(action == GLFW_PRESS) {
+			key = Key::REPEAT;
+		}
+		else if(action == GLFW_REPEAT) {
+			handleKey(i);
+		}
+		else if(action == GLFW_RELEASE) {
+			key = Key::NOT_PRESSED;
+		}
+	}
+
+   // vec2<double> diff = playerInput.panning;// (mousePos - pmousePos) / windowSize_d;
+	
+	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE && !isSpectator) {
 		bool isAction = false;
 
-		ChunkCoord const viewport{ playerCoord_ + ChunkCoord::Fractional{ChunkCoord::posToFracTrunk(viewportOffset_)} };
+		ChunkCoord const viewport{ currentCoord() + ChunkCoord::Fractional{ChunkCoord::posToFracTrunk(viewportOffset_)} };
 		PosDir const pd{ PosDir(viewport, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
 		vec3i const dirSign{ pd.direction };
 		DDA checkBlock{ pd };
@@ -1536,61 +1578,68 @@ static void update() {
 		}
 	}
 	
-	vec3d input{};
-    if (isZoomMovement && isFreeCam) {
-        zoomMovement += diff.x;
-
-        const auto forwardDir = currentViewport.forwardDir();
-		input += forwardDir * zoomMovement * size;
-    }
-    if (isPan || mouseCentered) {
-        currentViewport.rotation += diff * (2 * misc::pi) * vec2d{ 0.8, 0.8 };
-        currentViewport.rotation.y = misc::clamp(currentViewport.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
-    }
-    if (movementDir.lengthSquare() != 0) {
-		vec3<double> movement;
-		if(isFreeCam) {
-			double projection[3][3];
-			currentViewport.localToGlobalSpace(&projection);
-			
-			movement = vecMult(projection, movementDir);
-		}
-		else {
-			movement = currentViewport.flatForwardDir()*movementDir.z + currentViewport.flatTopDir()*movementDir.y + currentViewport.flatRightDir()*movementDir.x;
-		}
+	{
+		double projection[3][3];
+		spectatorViewport.localToGlobalSpace(&projection);
+				
+		auto const movement{ 
+			vecMult( projection, vec3d(spectatorInput.movement).normalizedNonan() ) 
+			* spectatorSpeed
+			* (shift ? 1.0*speedModifier : 1)
+			* (ctrl  ? 1.0/speedModifier : 1)
+		};
 		
-		input += movement.normalized() * movementSpeed 
-				* (shift ? 1.0*speedModifier : 1)
-				* (ctrl  ? 1.0/speedModifier : 1);
-    }
-	
-	if(jump && isOnGround && !isFreeCam) input+=vec3d{0,1,0}*16;
-	
-	input *= deltaTime;
-	
-	if(isFreeCam) spectatorCoord += input;
-	else {
-		playerForce = playerForce.applied([&](double const coord, auto const index) -> double { 
-			return misc::clamp(coord + input[index], fmin(coord, input[index]), fmax(coord, input[index]));
-		});
+		spectatorCoord += movement;
+		spectatorViewport.rotation += spectatorInput.panning * (2 * misc::pi) * vec2d{ 0.8, -0.8 };
+		spectatorViewport.rotation.y = misc::clamp(spectatorViewport.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
+		spectatorInput = Input();
 	}
 	
-	if(diffPhysicsMs > fixedDeltaTime * 1000) {
-		lastPhysicsUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
+	{
+		playerViewport.rotation += playerInput.panning * (2 * misc::pi) * vec2d{ 0.8, -0.8 };
+		playerViewport.rotation.y = misc::clamp(playerViewport.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
 		
-		if(!debugBtn0) {
-			playerForce+=vec3d{0,-1,0} * fixedDeltaTime;
-			isOnGround = false;
-			updateCollision(playerCoord_, playerForce, isOnGround);
+		if(diffPhysicsMs > fixedDeltaTime * 1000) {
+			lastPhysicsUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
+			
+			static vec3d currentPlayerMovement{};
+			
+			auto const playerMovement{ 
+				(
+					  playerViewport.flatForwardDir()*playerInput.movement.z
+					+ playerViewport.flatTopDir()    *playerInput.movement.y
+					+ playerViewport.flatRightDir()  *playerInput.movement.x
+				).normalizedNonan()
+			    * playerSpeed
+				* (shift ? 1.0*speedModifier : 1)
+				* (ctrl  ? 1.0/speedModifier : 1)
+			}; 
+		
+			if(!debugBtn0) {
+				playerForce += vec3d{0,-1,0} * fixedDeltaTime; 
+				if(isOnGround) {
+					playerForce += (
+						vec3d{0,1,0}*14*double(playerInput.jump)
+						+ playerMovement	
+					) * fixedDeltaTime;
+				}
+				else {
+					auto const movement{ playerMovement * 0.5 * fixedDeltaTime };
+					playerForce = playerForce.applied([&](double const coord, auto const index) -> double { 
+						return misc::clamp(coord + movement[index], fmin(coord, movement[index]), fmax(coord, movement[index]));
+					});
+				}
+
+				isOnGround = false;
+				updateCollision(playerCoord, playerForce, isOnGround);
+			}
 		}
+		
+		playerInput = Input();
 	}
 	
 	loadChunks();
-
-    pmousePos = mousePos;
 }
-
-GLFWwindow* window;
 	
 int main(void) {	
     if (!glfwInit()) return -1;
@@ -1639,7 +1688,6 @@ int main(void) {
     glfwSetScrollCallback(window, scroll_callback);
 	glfwSetCursorPos(window, 0, 0);
 	cursor_position_callback(window, 0, 0);
-	pmousePos = mousePos;
 	
 	//load shaders
 	reloadShaders();
@@ -1705,9 +1753,9 @@ int main(void) {
     {
 		auto startFrame = std::chrono::steady_clock::now();
 		
-		auto &player{ playerCoord() };
+		//auto &player{ playerCoord() };
 		auto &currentViewport{ viewport_current() };
-		auto const position{ player.position()+viewportOffset() };
+		//auto const position{ player.position()+viewportOffset() };
         auto const rightDir{ currentViewport.rightDir() };
         auto const topDir{ currentViewport.topDir() };
         auto const forwardDir{ currentViewport.forwardDir() };
@@ -1716,7 +1764,7 @@ int main(void) {
 		float toGlob[3][3];
 		currentViewport.localToGlobalSpace(&toGlob);
 		currentViewport.globalToLocalSpace(&toLoc);
-		ChunkCoord const cameraCoord{ player + viewportOffset() };
+		ChunkCoord const cameraCoord{ currentCoord() + viewportOffset() };
 		auto const cameraChunk{ cameraCoord.chunk() };
 		auto const cameraPosInChunk{ cameraCoord.positionInChunk() };
 		
@@ -1733,8 +1781,8 @@ int main(void) {
 		glEnable(GL_DEPTH_TEST); 
 		glClear(GL_DEPTH_BUFFER_BIT);
 		
-		if(isFreeCam){
-			auto const playerRelativePos{ vec3f((playerCoord_ - player).position()) };
+		if(isSpectator){
+			auto const playerRelativePos{ vec3f((playerCoord - currentCoord()).position()) };
 			float const translation4[4][4] = {
 					{ 1, 0, 0, playerRelativePos.x },
 					{ 0, 1, 0, playerRelativePos.y },
@@ -1782,12 +1830,11 @@ int main(void) {
         );
 		
 		if(testInfo) {
-			std::cout << position << '\n';
 			std::cout.precision(17);
-			std::cout << playerCoord().positionInChunk() << '\n';
+			std::cout << currentCoord().positionInChunk() << '\n';
 			std::cout.precision(2);
-			std::cout << playerCoord().blockInChunk() << '\n';
-			std::cout << playerCoord().chunk() << '\n';
+			std::cout << currentCoord().blockInChunk() << '\n';
+			std::cout << currentCoord().chunk() << '\n';
 			std::cout << "----------------------------\n";
 		}
 		

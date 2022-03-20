@@ -274,4 +274,8 @@ public:
 	inline static constexpr vec3i indexBlock(int16_t index) { //used in vectex.shader
 		return vec3i{ index % chunkDim, (index / chunkDim) % chunkDim, (index / chunkDim / chunkDim) };
 	}
+	
+	inline static constexpr bool checkIsInChunk(vec3i const blockCoord) {
+		return blockCoord.inMMX(vec3i{0}, vec3i{chunkDim}).all();
+	}
 };
