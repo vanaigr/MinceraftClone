@@ -247,7 +247,11 @@ static const Font font{ ".\\assets\\font.txt" };
 
 static size_t const texturesCount = 4;
 static GLuint textures[texturesCount];
-static GLuint &atlas_t = textures[0], &font_t = textures[1], &framebufferColor_t = textures[2], &framebufferDepth_t = textures[3];
+static GLuint atlas_it = 0, font_it = 1, framebufferColor_it = 2, framebufferDepth_it = 3;
+static GLuint &atlas_t = textures[atlas_it], 
+			  &font_t = textures[font_it], 
+			  &framebufferColor_t = textures[framebufferColor_it], 
+			  &framebufferDepth_t = textures[framebufferDepth_it];
 
 static GLuint framebuffer;
 
@@ -271,6 +275,9 @@ static GLuint testProgram;
 static GLuint debugProgram;
 	static GLuint db_projection_u, db_toLocal_u, db_isInChunk_u;
 	static GLuint db_playerChunk_u, db_playerInChunk_u;
+	
+static GLuint currentBlockProgram;
+  static GLuint cb_blockIndex_u;
 
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
@@ -318,9 +325,9 @@ static void reloadShaders() {
 	glDeleteTextures(texturesCount, &textures[0]);
 	glGenTextures(texturesCount, &textures[0]);
 	
-	{
+	{ //models framebuffer
 		//color
-		glActiveTexture(GL_TEXTURE2);
+		glActiveTexture(GL_TEXTURE0 + framebufferColor_it);
 		glBindTexture(GL_TEXTURE_2D, framebufferColor_t);
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -329,7 +336,7 @@ static void reloadShaders() {
 		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, windowSize.x, windowSize.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
 		//depth
-		glActiveTexture(GL_TEXTURE3);
+		glActiveTexture(GL_TEXTURE0 + framebufferDepth_it);
 		glBindTexture(GL_TEXTURE_2D, framebufferDepth_t);
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -351,7 +358,7 @@ static void reloadShaders() {
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
 	
-	{
+	{ //main program
 		glDeleteProgram(mainProgram);
 		mainProgram = glCreateProgram();
 		ShaderLoader sl{};
@@ -376,7 +383,6 @@ static void reloadShaders() {
 		glUseProgram(mainProgram);
 		
 		glUniform2ui(glGetUniformLocation(mainProgram, "windowSize"), windowSize.x, windowSize.y);
-		glUniform2f(glGetUniformLocation(mainProgram, "atlasTileCount"), 512 / 16, 512 / 16);
 		
 		time_u   = glGetUniformLocation(mainProgram, "time");
 		mouseX_u = glGetUniformLocation(mainProgram, "mouseX");
@@ -395,21 +401,21 @@ static void reloadShaders() {
 		playerInChunk_u = glGetUniformLocation(mainProgram, "playerInChunk");
 		startChunkIndex_u = glGetUniformLocation(mainProgram, "startChunkIndex");
 		
-		glUniform1i(glGetUniformLocation(mainProgram, "worldColor"), 2);
-		glUniform1i(glGetUniformLocation(mainProgram, "worldDepth"), 3);
+		glUniform1i(glGetUniformLocation(mainProgram, "worldColor"), framebufferColor_it);
+		glUniform1i(glGetUniformLocation(mainProgram, "worldDepth"), framebufferDepth_it);
 	
 		Image image;
 		ImageLoad("assets/atlas.bmp", &image);
 	
-		glActiveTexture(GL_TEXTURE0);
+		glActiveTexture(GL_TEXTURE0 + atlas_it);
 		glBindTexture(GL_TEXTURE_2D, atlas_t);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data);
-        //glBindTexture(GL_TEXTURE_2D, 0);
+		glUniform2f(glGetUniformLocation(mainProgram, "atlasTileCount"), 512 / 16, 512 / 16); //is current block program
 		
 		GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
-		glUniform1i(atlasTex_u, 0);
+		glUniform1i(atlasTex_u, atlas_it);
 		
 		{
 			auto const c = [](int16_t const x, int16_t const y) -> int32_t {
@@ -463,7 +469,7 @@ static void reloadShaders() {
 		resizeBuffer();
 	}
 	
-	{
+	{ //font program
 		glDeleteProgram(fontProgram);
 		fontProgram = glCreateProgram();
 		ShaderLoader sl{};
@@ -514,7 +520,7 @@ static void reloadShaders() {
 		Image image;
 		ImageLoad("assets/font.bmp", &image);
 	
-		glActiveTexture(GL_TEXTURE1);
+		glActiveTexture(GL_TEXTURE0 + font_it);
 		glBindTexture(GL_TEXTURE_2D, font_t);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -522,10 +528,10 @@ static void reloadShaders() {
         //glBindTexture(GL_TEXTURE_2D, 0);
 		
 		GLuint const fontTex_u = glGetUniformLocation(fontProgram, "font");
-		glUniform1i(fontTex_u, 1);
+		glUniform1i(fontTex_u, font_it);
 	}
 	
-	{
+	{ //test program
 		glDeleteProgram(testProgram);
 		testProgram = glCreateProgram();
 		ShaderLoader sl{};
@@ -578,7 +584,7 @@ static void reloadShaders() {
 		tt_projection_u = glGetUniformLocation(testProgram, "projection");
 	}
 	
-	{
+	{ //debug program
 		glDeleteProgram(debugProgram);
 		debugProgram = glCreateProgram();
 		ShaderLoader dbsl{};
@@ -701,7 +707,7 @@ static void reloadShaders() {
 		db_playerInChunk_u = glGetUniformLocation(debugProgram, "playerInChunk");
 	}
 	
-	{
+	{ //player model program
 		glDeleteProgram(playerProgram);
 		playerProgram = glCreateProgram();
 		ShaderLoader plsl{};
@@ -778,6 +784,89 @@ static void reloadShaders() {
 		
 		pl_projection_u = glGetUniformLocation(playerProgram, "projection");
 		pl_modelMatrix_u = glGetUniformLocation(playerProgram, "model_matrix");
+	}
+	
+	{ //current block program
+		glDeleteProgram(currentBlockProgram);
+		currentBlockProgram = glCreateProgram();
+		ShaderLoader sl{};
+		
+		sl.addShaderFromCode(
+		R"(#version 430		
+			uniform vec2 startPos;
+			uniform vec2 endPos;
+			
+			out vec2 uv;
+			void main(void){
+				const vec2 verts[] = {
+					vec2(0),
+					vec2(1, 0),
+					vec2(0, 1),
+					vec2(1)
+				};
+				
+				gl_Position = vec4( mix(startPos, endPos, verts[gl_VertexID]), 0.0, 1 );
+				//gl_Position = vec4(  verts[gl_VertexID], 0.0, 1 );
+				uv = verts[gl_VertexID];
+			}
+		)", GL_VERTEX_SHADER,"current block vertex");
+		
+		sl.addShaderFromCode(
+		R"(#version 430
+			uniform uint block;
+			uniform vec2 atlasTileCount;
+			uniform sampler2D atlas;
+			
+			layout(binding = 2) restrict readonly buffer AtlasDescription {
+				int positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot 
+			};
+			
+			vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
+				vec2 uv = vec2(
+					coord.x + offset.x,
+					coord.y + atlasTileCount.y - (offset.y + 1)
+				) / atlasTileCount;
+				return texture2D(atlas, uv).rgb;
+			}
+			
+			vec2 atlasAt(const uint id, const ivec3 side) {
+				const int offset = int(side.y == 1) + int(side.y == -1) * 2;
+				const int index = (int(id) * 3 + offset);
+				const int pos = positions[index];
+				const int bit16 = 65535;
+				return vec2( pos&bit16, (pos>>16)&bit16 );
+			}
+
+			in vec2 uv;
+			
+			out vec4 color;
+			void main() {
+				const vec2 offset = atlasAt(block, ivec3(1,0,0));
+				color = vec4(sampleAtlas(offset, uv), 1);
+			}
+		)",
+		GL_FRAGMENT_SHADER,
+		"current block shader");
+		
+		sl.attachShaders(currentBlockProgram);
+	
+		glLinkProgram(currentBlockProgram);
+		glValidateProgram(currentBlockProgram);
+	
+		sl.deleteShaders();
+	
+		glUseProgram(currentBlockProgram);
+		
+		glUniform1i(glGetUniformLocation(currentBlockProgram, "atlas"), atlas_it);
+		cb_blockIndex_u = glGetUniformLocation(currentBlockProgram, "block");
+		
+		double const size{ 0.12 };
+		vec2d const end{ 1 - 0.04*aspect, 1-0.04 };
+		vec2d const start{ end - vec2d{aspect,1}*size };
+
+		glUniform2f(glGetUniformLocation(currentBlockProgram, "startPos"), start.x, start.y);
+		glUniform2f(glGetUniformLocation(currentBlockProgram, "endPos"), end.x, end.y);
+		glUniform2f(glGetUniformLocation(currentBlockProgram, "atlasTileCount"), 512 / 16, 512 / 16);
 	}
 	
 	float projection[4][4];
@@ -1672,13 +1761,6 @@ int main(void) {
         return -1;
     }
 	
-	glEnable(GL_DEPTH_TEST);  
-	glDepthFunc(GL_LESS); 
-	
-	glEnable(GL_CULL_FACE); 
-	glCullFace(GL_BACK); 
-	//glEnable(GL_FRAMEBUFFER_SRGB); 
-	
     fprintf(stdout, "Using GLEW %s\n", glewGetString(GLEW_VERSION));
 
     //callbacks
@@ -1779,6 +1861,8 @@ int main(void) {
 		
 		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
 		glEnable(GL_DEPTH_TEST); 
+		glEnable(GL_CULL_FACE); 
+		glCullFace(GL_BACK); 
 		glClear(GL_DEPTH_BUFFER_BIT);
 		
 		if(isSpectator){
@@ -1810,10 +1894,10 @@ int main(void) {
 			glDrawArrays(GL_TRIANGLES, 0,36);
 		}
 		
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		glEnable(GL_FRAMEBUFFER_SRGB); 
 		glDisable(GL_DEPTH_TEST); 
-		
+		glDisable(GL_CULL_FACE); 
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		
 		glUseProgram(mainProgram);
 		
@@ -1897,6 +1981,12 @@ int main(void) {
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		}
 		
+		{
+			glUseProgram(currentBlockProgram);
+			glUniform1ui(cb_blockIndex_u, blockId);
+			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		}
+		
 		glDisable(GL_FRAMEBUFFER_SRGB); 
 		
 		/*{
@@ -1913,6 +2003,8 @@ int main(void) {
 			glBindVertexArray(0);
 		}*/
 	
+		
+		
 		{ 
 			glEnable(GL_BLEND);
 			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1955,17 +2047,12 @@ int main(void) {
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
 			
 			glBindVertexArray(fontVA);
-				glDisable(GL_DEPTH_TEST);
-				glDepthMask(GL_FALSE); 
-				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, textCount);
-				glDepthMask(GL_TRUE);
-				glEnable(GL_DEPTH_TEST);
+			glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, textCount);
 			glBindVertexArray(0);
 			
 			glDisable(GL_BLEND);
 		}
 		
-		//if(testInfo) std::cout << "FPS:" << (1000000.0 / mc.mean()) << '\n';
 		
 		testInfo = false; 
 		glfwSwapBuffers(window);
