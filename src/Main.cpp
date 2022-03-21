@@ -244,11 +244,19 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) 
 
 static const Font font{ ".\\assets\\font.txt" };
 
-static size_t const texturesCount = 4;
+enum Textures : GLuint {
+	atlas_it = 0,
+	font_it,
+	noise_it,
+	framebufferColor_it,
+	framebufferDepth_it,
+	texturesCount
+};
+
 static GLuint textures[texturesCount];
-static GLuint atlas_it = 0, font_it = 1, framebufferColor_it = 2, framebufferDepth_it = 3;
 static GLuint &atlas_t = textures[atlas_it], 
 			  &font_t = textures[font_it], 
+			  &noise_t = textures[noise_it], 
 			  &framebufferColor_t = textures[framebufferColor_it], 
 			  &framebufferDepth_t = textures[framebufferDepth_it];
 
@@ -357,6 +365,18 @@ static void reloadShaders() {
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
 	
+	{//noise texture
+		Image image{};
+		ImageLoad("assets/noise.bmp", &image);
+		glActiveTexture(GL_TEXTURE0 + noise_it);
+		glBindTexture(GL_TEXTURE_2D, noise_t);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data);
+	}
+	
 	{ //main program
 		glDeleteProgram(mainProgram);
 		mainProgram = glCreateProgram();
@@ -415,6 +435,8 @@ static void reloadShaders() {
 		
 		GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
 		glUniform1i(atlasTex_u, atlas_it);
+		
+		glUniform1i(glGetUniformLocation(mainProgram, "noise"), noise_it);
 		
 		{
 			auto const c = [](int16_t const x, int16_t const y) -> int32_t {
@@ -1044,7 +1066,7 @@ void generateChunkData(Chunks::Chunk chunk) {
 	
 	neighbours_ = neighbours;
 	
-	auto const filename{ chunkFilename(chunk) };
+	//auto const filename{ chunkFilename(chunk) };
 		
 	//std::ifstream chunkFileIn{ filename, std::ios::binary };
 	
