@@ -120,7 +120,7 @@ Input &currentInput() {
 static void reloadShaders();
 
 static bool testInfo = false;
-static bool debugBtn0 = false, debugBtn1 = false;
+static bool debugBtn0 = false, debugBtn1 = false, debugBtn2 = false;
 
 
 bool mouseCentered = true;
@@ -170,10 +170,9 @@ void handleKey(int const key) {
 		currentInput().jump = isPress;
 	}
 		
-	if (key == GLFW_KEY_KP_0 && !isPress) 
-			debugBtn0 = !debugBtn0;
-	if (key == GLFW_KEY_KP_1 && !isPress) 
-		debugBtn1 = !debugBtn1;	
+	     if(key == GLFW_KEY_KP_0 && !isPress) debugBtn0 = !debugBtn0;
+	else if(key == GLFW_KEY_KP_1 && !isPress) debugBtn1 = !debugBtn1;	
+	else if(key == GLFW_KEY_KP_2 && !isPress) debugBtn2 = !debugBtn2;
 
 	if(key == GLFW_KEY_D)
 		currentInput().movement.x = 1 * isPress;
@@ -240,7 +239,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 }
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-	blockId = 1+misc::mod(blockId-1 + int(yoffset), 9);
+	blockId = 1+misc::mod(blockId-1 + int(yoffset), 12);
 }
 
 static const Font font{ ".\\assets\\font.txt" };
@@ -432,6 +431,9 @@ static void reloadShaders() {
 				c(9, 0), c(9, 0), c(9, 0), //glass
 				c(11, 0), c(11, 0), c(11, 0), //diamond
 				c(12, 0), c(12, 0), c(12, 0), //obsidian
+				c(13, 0), c(13, 0), c(13, 0), //rainbow?
+				c(14, 0), c(14, 0), c(14, 0), //brick
+				c(15, 0), c(15, 0), c(15, 0), //stone brick
 			};
 			glGenBuffers(1, &blockSides_u);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, blockSides_u);
@@ -1042,8 +1044,8 @@ void generateChunkData(Chunks::Chunk chunk) {
 	
 	neighbours_ = neighbours;
 	
-	//auto const filename{ chunkFilename(chunk) };
-			
+	auto const filename{ chunkFilename(chunk) };
+		
 	//std::ifstream chunkFileIn{ filename, std::ios::binary };
 	
 	vec3i start{15};
@@ -1907,11 +1909,13 @@ int main(void) {
         glUniform1f(mouseX_u, mousePos.x / windowSize_d.x);
         glUniform1f(mouseY_u, mousePos.y / windowSize_d.y);
 
-        glUniform1f(time_u,
-            sin(
-                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0
-            )
-        );
+		static double lastTime{};
+		double curTime{ std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0 };
+		
+		static double offset{};
+		if(debugBtn2) offset += curTime - lastTime;
+		lastTime = curTime;
+		glUniform1f(time_u, offset);
 		
 		if(testInfo) {
 			std::cout.precision(17);

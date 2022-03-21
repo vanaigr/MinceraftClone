@@ -228,6 +228,7 @@ Optional_BlockIntersection emptyOptional_BlockIntersection() {
 	return a;
 }
 
+//https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
 vec3 refract(const vec3 incoming, const vec3 normal, const float ior)  { 
     float cosi = clamp(-1, 1, dot(incoming, normal));
     float etai = 1, etat = ior; 
@@ -236,6 +237,15 @@ vec3 refract(const vec3 incoming, const vec3 normal, const float ior)  {
     const float eta = etai / etat; 
     const float k = 1 - eta * eta * (1 - cosi * cosi); 
     return k < 0 ? vec3(0) : eta * incoming + (eta * cosi - sqrt(k)) * n; 
+}
+
+//https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
+vec3 reflect(const vec3 incoming, const vec3 normal)  { 
+    return incoming - 2 * dot(incoming, normal) * normal; 
+} 
+
+vec3 screenMultipty(const vec3 v1, const vec3 v2) {
+	return 1 - (1-v1) * (1-v2);
 }
 
 Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const float maxDist) { 	
@@ -263,7 +273,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 		const vec3 relativeOrig = ray.orig - relativeToChunk * chunkDim;
 
 		if(!empty) {
-			const ivec3 farBoundaries = positive_ * (endPos - startPos+1) + startPos-1;
+			const ivec3 farBoundaries = positive_ * (endPos - startPos) + startPos;
 			
 			const vec3 border0Dist  = -min(relativeOrig - startPos, vec3(0,0,0)) * dir_;
 			const vec3 border16Dist = -max(relativeOrig - endPos, vec3(0,0,0)) * dir_;
@@ -281,13 +291,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 				
 			vec3 curLen = stepLength * curSteps + stepLength * firstCellDiff;
 			
-			const vec3 testAt =  
-				+ vec3(not(outside)) * (firstCellRow - negative_ + curSteps*dir_)
-				+ vec3(   (outside)) * at(ray, minLen);
-				
-			const bvec3 inBounds = lessThanEqual((testAt - relativeToChunk * chunkDim - farBoundaries) * dir_, ivec3(0,0,0));
-			
-			if(all(inBounds)) {
+			{
 				bool next = false;
 				
 				for(int i = 0; i < 100; i++) {
@@ -306,9 +310,9 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 							+ otherAxis_f * curCoordF;
 					const ivec3 cellAt = ivec3(floor(coordAt));
 							
-					if(minCurLen > maxDist) return emptyOptional_BlockIntersection();
+					//if(minCurLen > maxDist) return emptyOptional_BlockIntersection();
 							
-					const bvec3 inBounds = lessThanEqual((cellAt - relativeToChunk * chunkDim - minAxis_f * negative_ - farBoundaries) * dir_, ivec3(0,0,0));
+					const bvec3 inBounds = lessThanEqual((cellAt - relativeToChunk * chunkDim - farBoundaries) * dir_, ivec3(0,0,0));
 			
 					if( !all(inBounds) ) {
 						next = true;
@@ -351,8 +355,11 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 									const ivec3 side = minAxis_i * (ivec3(x, y, z) * 2 - 1) * dir_;
 									const bool backside = dot(vec3(side), ray.dir) > 0;
 									
+									const vec2 offset = atlasAt(blockId, side);
+									const vec3 color = sampleAtlas(offset, uv) * mix(vec3(1), glass.it.color, vec3(glass.is));
+									
 									if(blockId == 5) {
-										if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue;
+										if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue; 
 									}
 									if(blockId == 7) {
 										if(glass.is) { glass.it.glassDir = ray.dir; continue; }
@@ -390,9 +397,6 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 										);
 										continue;
 									}
-									
-									const vec2 offset = atlasAt(blockId, side);
-									const vec3 color = sampleAtlas(offset, uv) * mix(vec3(1), glass.it.color, vec3(glass.is));
 									
 									return Optional_BlockIntersection(
 										true,    
@@ -440,6 +444,8 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex, const f
 		relativeToChunk += neighbourDir;	
 	}
 
+	
+	//return leaves;
 	return emptyOptional_BlockIntersection();
 }
 
@@ -476,8 +482,6 @@ Trace trace(Ray ray, int chunkIndex) {
 			const int intersectionChunkIndex = i.chunkIndex;
 			col = i.color;
 			
-
-			//if(true) return Trace(col, t);
 			if(blockId == 7) {
 				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + i.glassDir * 0.001, i.glassDir );
 				chunkIndex = intersectionChunkIndex;
@@ -492,7 +496,13 @@ Trace trace(Ray ray, int chunkIndex) {
 				}
 				else// if(t < far/5)
 				{
-					ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + normalize(vec3(i.side)) * 0.0001, normalize(vec3(1,3,2)) );
+					const vec4 q = vec4(normalize(vec3(1+sin(time)/10,3,2)), cos(time)/5);
+					const vec3 v = normalize(vec3(1, 4, 2));
+					const vec3 temp = cross(q.xyz, v) + q.w * v;
+					const vec3 rotated = v + 2.0*cross(q.xyz, temp);
+					
+					const vec3 dir = normalize(rotated);
+					ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + normalize(vec3(i.side)) * 0.0001, dir );
 					chunkIndex = intersectionChunkIndex;
 					shadow = true;
 					origColor = col;
