@@ -2,22 +2,20 @@
 #include"Misc.h"
 #include<type_traits>
 
-struct Viewport {
-	private:
-	template<typename El, size_t i_, size_t j_> 
-	static inline void copy2DArray(El const (&in)[i_][j_], El (&out)[i_][j_]) {
-		for(size_t i = 0; i < i_; ++i) {
-			for(size_t j = 0; j < j_; ++j) {
-				out[i][j] = in[i][j];
-			}
+template<typename El, size_t i_, size_t j_> 
+static inline void copy2DArray(El const (&in)[i_][j_], El (&out)[i_][j_]) {
+	for(size_t i = 0; i < i_; ++i) {
+		for(size_t j = 0; j < j_; ++j) {
+			out[i][j] = in[i][j];
 		}
 	}
+}
+
+struct Viewport {
 	public:
 	
     vec2<double> rotation{};
-	double aspectRatio;// height / width
-	double fov;
-	double near, far;
+
 
     constexpr vec3<double> rightDir() const {
         return vec3<double>(cos(rotation.x), 0, sin(rotation.x));
@@ -73,6 +71,14 @@ struct Viewport {
 			*mat_out
 		);
 	}
+	
+
+};
+
+struct Camera {
+	double aspectRatio;// height / width
+	double fov;
+	double near, far;
 	
 	template<typename O, typename = std::enable_if_t<std::is_convertible<double, O>::value>>
 	void projectionMatrix(O (*mat_out)[4][4]) const {		

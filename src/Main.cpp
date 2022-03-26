@@ -71,27 +71,36 @@ static bool isOnGround{false};
 static vec3d playerForce{};
 static ChunkCoord playerCoord{ vec3i{0,0,0}, vec3d{0.01,12.001,0.01} };
 static Viewport playerViewport{ 
-	vec2d{ misc::pi / 2.0, 0 },
-	aspect,
-	90.0 / 180.0 * misc::pi,
-	0.001,
-	400
+	vec2d{ misc::pi / 2.0, 0 }
 };
 
 static ChunkCoord spectatorCoord{ playerCoord };
-static Viewport spectatorViewport{ 
-	vec2d{ misc::pi / 2.0, 0 },
+
+static Camera playerCamera {
 	aspect,
 	90.0 / 180.0 * misc::pi,
 	0.001,
-	400
+	800
 };
+
+static Viewport viewportDesired{ playerViewport };
 
 static vec3d const viewportOffset_{0,height*0.9,0};
 static bool isSpectator{ false };
 
+static bool isSmoothCamera{ false };
+static double zoom = 3;
+
+static double currentZoom() {
+	if(isSmoothCamera) return zoom;
+	return 1;
+}
+
+static Camera &currentCamera() {
+	return playerCamera;
+}
+
 static Viewport &viewport_current() {
-    if(isSpectator) return spectatorViewport;
 	return playerViewport;
 }
 
@@ -106,11 +115,11 @@ static vec3d viewportOffset() {
 
 struct Input {
 	vec3i movement;
-	vec2d panning;
 	bool jump;
 };
 
 static Input playerInput, spectatorInput;
+static vec2d deltaRotation{ 0 };
 
 Input &currentInput() {
 	if(isSpectator) return spectatorInput;
@@ -169,6 +178,9 @@ void handleKey(int const key) {
 	else if(key == GLFW_KEY_SPACE) {
 		currentInput().jump = isPress;
 	}
+	
+	if(key == '-' && isPress) zoom = 1 + (zoom - 1) * 0.95;
+	else if(key == '=' && isPress) zoom = 1 + (zoom - 1) * (1/0.95);
 		
 	     if(key == GLFW_KEY_KP_0 && !isPress) debugBtn0 = !debugBtn0;
 	else if(key == GLFW_KEY_KP_1 && !isPress) debugBtn1 = !debugBtn1;	
@@ -187,7 +199,6 @@ void handleKey(int const key) {
 		isSpectator = !isSpectator;
 		if(isSpectator) {
 			spectatorCoord = playerCoord + viewportOffset_;
-			spectatorViewport.rotation = playerViewport.rotation;
 		}
 	}
 	else if(key == GLFW_KEY_TAB && action == GLFW_PRESS) testInfo = true;
@@ -224,7 +235,10 @@ static void cursor_position_callback(GLFWwindow* window, double mousex, double m
 	pMouse = mousePos_;
     mousePos = vec2<double>(relativeTo.x + mousePos_.x, relativeTo.y + mousePos_.y);
 	
-	if(isPan || mouseCentered) currentInput().panning += (mousePos - pmousePos) / windowSize_d;
+	if(isPan || mouseCentered) {
+		deltaRotation += (mousePos - pmousePos) / windowSize_d;
+	}
+	
 	pmousePos = mousePos;
 }
 
@@ -235,6 +249,12 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 	}
 	else if(button == GLFW_MOUSE_BUTTON_RIGHT) {
 		if(mouseCentered) blockAction = action == GLFW_PRESS ? BlockAction::PLACE : BlockAction::NONE;
+	}
+	else if(button == GLFW_MOUSE_BUTTON_MIDDLE) {
+		isSmoothCamera = action != GLFW_RELEASE;
+		if(!isSmoothCamera) {
+			viewportDesired.rotation = viewport_current().rotation; //may reset changes from cursor_position_callback
+		}
 	}
 }
 
@@ -266,6 +286,7 @@ static GLuint mainProgram = 0;
   static GLuint rightDir_u;
   static GLuint topDir_u;
   static GLuint near_u, far_u;
+  static GLuint fov_u;
   static GLuint startChunkIndex_u;
   static GLuint time_u;
   static GLuint mouseX_u, mouseY_u;
@@ -297,7 +318,7 @@ static GLuint pl_modelMatrix_u = 0;
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
-static int viewDistance = 3;
+static int viewDistance = 20;
 
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
@@ -410,8 +431,8 @@ static void reloadShaders() {
 	
 		rightDir_u = glGetUniformLocation(mainProgram, "rightDir");
 		topDir_u = glGetUniformLocation(mainProgram, "topDir");
-		glUniform1f(glGetUniformLocation(mainProgram, "near"), playerViewport.near);
-		glUniform1f(glGetUniformLocation(mainProgram, "far"), playerViewport.far);
+		near_u = glGetUniformLocation(mainProgram, "near");
+		far_u = glGetUniformLocation(mainProgram, "far");
 		projection_u = glGetUniformLocation(mainProgram, "projection");
 		toLocal_matrix_u = glGetUniformLocation(mainProgram, "toLocal");
 		//chunk_u = glGetUniformLocation(mainProgram, "chunk");
@@ -892,21 +913,6 @@ static void reloadShaders() {
 		glUniform2f(glGetUniformLocation(currentBlockProgram, "endPos"), end.x, end.y);
 		glUniform2f(glGetUniformLocation(currentBlockProgram, "atlasTileCount"), 512 / 16, 512 / 16);
 	}
-	
-	float projection[4][4];
-	viewport_current().projectionMatrix(&projection);
-	
-	glUseProgram(playerProgram);
-	glUniformMatrix4fv(pl_projection_u, 1, GL_TRUE, &projection[0][0]);
-	 
-	glUseProgram(debugProgram);
-	glUniformMatrix4fv(db_projection_u, 1, GL_TRUE, &projection[0][0]);	
-	
-	glUseProgram(mainProgram);
-	glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
-	
-	glUseProgram(testProgram);
-	glUniformMatrix4fv(tt_projection_u, 1, GL_TRUE, &projection[0][0]);
 }
 
 template<typename T, typename L>
@@ -1691,27 +1697,24 @@ static void update() {
 		}
 	}
 	
+	auto const curZoom{ currentZoom() };
+		
 	{
 		double projection[3][3];
-		spectatorViewport.localToGlobalSpace(&projection);
+		viewport_current().localToGlobalSpace(&projection);
 				
 		auto const movement{ 
 			vecMult( projection, vec3d(spectatorInput.movement).normalizedNonan() ) 
-			* spectatorSpeed
+			* spectatorSpeed / curZoom
 			* (shift ? 1.0*speedModifier : 1)
 			* (ctrl  ? 1.0/speedModifier : 1)
 		};
 		
 		spectatorCoord += movement;
-		spectatorViewport.rotation += spectatorInput.panning * (2 * misc::pi) * vec2d{ 0.8, -0.8 };
-		spectatorViewport.rotation.y = misc::clamp(spectatorViewport.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
 		spectatorInput = Input();
 	}
 	
 	{
-		playerViewport.rotation += playerInput.panning * (2 * misc::pi) * vec2d{ 0.8, -0.8 };
-		playerViewport.rotation.y = misc::clamp(playerViewport.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
-		
 		if(diffPhysicsMs > fixedDeltaTime * 1000) {
 			lastPhysicsUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
 			
@@ -1750,6 +1753,21 @@ static void update() {
 		
 		playerInput = Input();
 	}
+	
+	auto &currentViewport{ viewport_current() };
+	
+	viewportDesired.rotation += deltaRotation * (2 * misc::pi) * (vec2d{ 0.8, -0.8 } / curZoom);
+	viewportDesired.rotation.y = misc::clamp(viewportDesired.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
+	deltaRotation = 0;
+	
+	if(isSmoothCamera) {
+		currentViewport.rotation = vec2lerp( currentViewport.rotation, viewportDesired.rotation, vec2d(0.05) );
+	}
+	else {
+		currentViewport.rotation = viewportDesired.rotation;
+	}
+	
+	playerCamera.fov = misc::lerp( playerCamera.fov, 90.0 / 180 * misc::pi / curZoom, 0.1 );
 	
 	loadChunks();
 }
@@ -1881,6 +1899,21 @@ int main(void) {
 			{ 0          , 0          , 0          , 1 },
 		};
 		
+		float projection[4][4];
+		currentCamera().projectionMatrix(&projection);
+	
+		glUseProgram(playerProgram);
+		glUniformMatrix4fv(pl_projection_u, 1, GL_TRUE, &projection[0][0]);
+		
+		glUseProgram(debugProgram);
+		glUniformMatrix4fv(db_projection_u, 1, GL_TRUE, &projection[0][0]);	
+		
+		glUseProgram(mainProgram);
+		glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
+		
+		glUseProgram(testProgram);
+		glUniformMatrix4fv(tt_projection_u, 1, GL_TRUE, &projection[0][0]);
+		
 		//glClear(GL_COLOR_BUFFER_BIT);
 		
 		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -1927,6 +1960,10 @@ int main(void) {
 		
         glUniform3f(rightDir_u, rightDir.x, rightDir.y, rightDir.z);
         glUniform3f(topDir_u, topDir.x, topDir.y, topDir.z);
+		
+		auto const &currentCam{ currentCamera() };
+		glUniform1f(near_u, currentCam.near);
+        glUniform1f(far_u , currentCam.far );
 
         glUniform1f(mouseX_u, mousePos.x / windowSize_d.x);
         glUniform1f(mouseY_u, mousePos.y / windowSize_d.y);
