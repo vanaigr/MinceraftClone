@@ -619,13 +619,26 @@ Trace trace(Ray ray, int chunkIndex) {
 				
 				const vec3 startRelativeAt = at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim;
 				
+				const int shadowOffsetsCount = 3;
+				const float shadowOffsets[] = { -1, 0, 1 };
+				
+				const float shadowSubdiv = 32;
+				const float shadowSmoothness = 32;
+				
+				const vec3 offset_ = vec3(
+					shadowOffsets[ int(mod(floor(startRelativeAt.x * shadowSubdiv), shadowOffsetsCount)) ],
+					shadowOffsets[ int(mod(floor(startRelativeAt.y * shadowSubdiv), shadowOffsetsCount)) ],
+					shadowOffsets[ int(mod(floor(startRelativeAt.z * shadowSubdiv), shadowOffsetsCount)) ]
+				);
+				const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
+				
 				const vec4 q = vec4(normalize(vec3(1+sin(time)/10,3,2)), cos(time)/5);
-				const vec3 v = normalize(vec3(1, 4, 2));
+				const vec3 v = normalize(vec3(1, 4, 2) + offset);
 				const vec3 temp = cross(q.xyz, v) + q.w * v;
 				const vec3 rotated = v + 2.0*cross(q.xyz, temp);
 				
 				const vec3 dir = normalize(rotated);
-				ray = Ray( startRelativeAt + normalize(i.normal) * 0.0001, dir );
+				ray = Ray( floor( startRelativeAt * shadowSubdiv)/shadowSubdiv + normalize(i.normal) * 0.0001, dir );
 				chunkIndex = intersectionChunkIndex;
 				
 				shadowIndex = curSteps++;
