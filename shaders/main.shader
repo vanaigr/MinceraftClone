@@ -221,13 +221,10 @@ void swap(inout float v1, inout float v2) {
 }
 
 struct BlockIntersection {
-	//ivec3 index;
-	ivec3 side;
-	//bool backside;
+	vec3 normal;
 	vec3 newDir;
 	vec3 color;
 	vec3 at;
-	//vec2 uv;
 	float t;
 	int chunkIndex;
 	uint id;
@@ -274,6 +271,107 @@ ivec3 mix3i(const ivec3 a, const ivec3 b, const ivec3 f) {
 
 int dot3i(const ivec3 a, const ivec3 b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+struct BlockInfo {
+	vec3 normal;
+	vec3 newRayDir;
+	vec3 color;
+	uint block;
+};
+
+BlockInfo testBlocks(
+	const Ray ray,
+	const vec3 fromBlockCoord, const uint fromBlock, 
+	const vec3 toBlockCoord, const uint toBlock, 
+	const vec3 curCoordF, const ivec3 intersectionSide
+) {
+	const vec3 dir = ray.dir;
+	const ivec3 dir_ = ivec3(sign(dir));
+	
+	const uint blocks[] = {
+		fromBlock,
+		toBlock
+	};
+	const vec3 blockCoords[] = {
+		fromBlockCoord,
+		toBlockCoord
+	};
+			
+	BlockInfo glass = BlockInfo(vec3(0), vec3(0), vec3(1), 0);
+	for(int s = 0; s < 2; s ++) {
+		const uint blockId = blocks[s];
+		const vec3 blockCoord = blockCoords[s];
+		
+		if(blockId != 0) { 
+			const vec3 blockCoord = curCoordF - blockCoord;
+			vec2 uv = clamp(vec2(
+				dot(intersectionSide, blockCoord.zxx),
+				dot(intersectionSide, blockCoord.yzy)
+			), 0.0001, 0.9999);
+			const ivec3 side = intersectionSide * ((1-s) * 2 - 1) * dir_;
+			const bool backside = dot(vec3(side), ray.dir) > 0;
+			const ivec3 normal = side * ( backside ? -1 : 1 );
+			
+			const vec2 offset = atlasAt(blockId, side);
+			const vec3 color = sampleAtlas(offset, uv) * glass.color;
+			
+			if(blockId == 5) { //leaves
+				if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue; 
+			}
+			if(blockId == 7) { //glass
+				if(glass.block != 0) { glass = BlockInfo(vec3(0), vec3(0), vec3(1), 0); continue; }
+				
+				const vec3 glassOffset = vec3( 
+					sin(blockCoord.x*9)/2, 
+					sin(blockCoord.z*9)/8, 
+					sin(blockCoord.y*6 + blockCoord.x*4)/8
+				) / 100;
+				
+				const vec3 glassBlockCoord = blockCoord - glassOffset;
+				
+				vec2 glassUv = vec2(
+					dot(intersectionSide, glassBlockCoord.zxx),
+					dot(intersectionSide, glassBlockCoord.yzy)
+				);
+				const vec2 offset = atlasAt(blockId, side);
+				const vec3 color = sampleAtlas(offset, clamp(glassUv, 0.0001, 0.9999));
+	
+				const vec3 incoming = ray.dir - glassOffset * vec3(1-intersectionSide);
+				const vec3 refracted = refract2(normalize(incoming), normalize(vec3(side)), 1.1 );
+				
+				glass = BlockInfo(
+					normal,
+					normalize(refracted),
+					color,
+					blockId
+				);
+				continue;
+			}
+			if(blockId == 8) { //diamond						
+				const vec3 offset = normalize(texture2D(noise, uv/5).xyz - 0.5) * 0.01;
+				const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
+				const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
+				
+				return BlockInfo(
+					normal,
+					reflected,
+					color,
+					blockId
+				);
+			}
+			
+			//other blocks
+			return BlockInfo(
+				normal,
+				vec3(0),
+				color,
+				blockId
+			);
+		}
+	}	
+		
+	return glass; //glass may have block id = 0 - empty block
 }
 
 Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) { 	
@@ -392,7 +490,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 					
 					const ivec3 faces = ivec3( (equal(curCoordF, curCoord) || minAxis_b) );
 					
-					//const ivec3 fromBlockCoord = cellAt - faces*dir_;
+					const ivec3 fromBlockCoord = cellAt - faces*dir_;
 					const ivec3 toBlockCoord = cellAt;
 					
 					
@@ -404,106 +502,28 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 					else toBlock = blockAt(
 						nextChunkIndex,
 						toBlockCoord - nextRelativeToChunk * chunkDim
+					);					
+					
+					const BlockInfo i = testBlocks(
+						ray,
+						fromBlockCoord, fromBlock, 
+						toBlockCoord  , toBlock  ,
+						coordAt, minAxis_i
 					);
+					fromBlock = toBlock;
 					
-					const uint blocks[] = {
-						fromBlock,
-						toBlock
-					};
-					fromBlock = blocks[1];
-									
-					Optional_BlockIntersection glass = emptyOptional_BlockIntersection();
-					for(int s = 0; s < 2; s ++) {
-						const uint blockId = blocks[s];
-						
-						if(blockId != 0) { 
-							const vec3 blockCoord = curCoordF - curCoord;
-							vec2 uv = vec2(
-								dot(minAxis_f, blockCoord.zxx),
-								dot(minAxis_f, blockCoord.yzy)
-							);
-							const ivec3 side = minAxis_i * (faces * (1-s) * 2 - 1) * dir_;
-							const bool backside = dot(vec3(side), ray.dir) > 0;
-							const ivec3 normal = side * ( backside ? -1 : 1 );
-							
-							const vec2 offset = atlasAt(blockId, side);
-							const vec3 color = sampleAtlas(offset, uv) * mix(vec3(1), glass.it.color, vec3(glass.is));
-							
-							if(blockId == 5) { //leaves
-								if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue; 
-							}
-							if(blockId == 7) { //glass
-								if(glass.is) { glass = emptyOptional_BlockIntersection(); continue; }
-								
-								const vec3 glassOffset = vec3( 
-									sin(blockCoord.x*9)/2, 
-									sin(blockCoord.z*9)/8, 
-									sin(blockCoord.y*6 + blockCoord.x*4)/8
-								) / 100;
-								
-								const vec3 glassBlockCoord = blockCoord - glassOffset;
-								
-								vec2 glassUv = vec2(
-									dot(minAxis_f, glassBlockCoord.zxx),
-									dot(minAxis_f, glassBlockCoord.yzy)
-								);
-								const vec2 offset = atlasAt(blockId, side);
-								const vec3 color = sampleAtlas(offset, clamp(glassUv, 0.0001, 0.9999));
-		
-								const vec3 incoming = ray.dir - glassOffset * vec3(1-faces);
-								const vec3 refracted = refract2(normalize(incoming), normalize(vec3(side)), 1.1 );
-								
-								glass = Optional_BlockIntersection(
-									true,    
-									BlockIntersection(
-										side,
-										normalize(refracted),
-										color,
-										coordAt,
-										minCurLen,
-										curChunkIndex,
-										blockId
-									)
-								);
-								continue;
-							}
-							if(blockId == 8) { //diamond						
-								const vec3 offset = normalize(texture2D(noise, uv/5).xyz - 0.5) * 0.01;
-								const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
-								const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
-								
-								return Optional_BlockIntersection(
-									true,
-									BlockIntersection(
-										side,
-										reflected,
-										color,
-										coordAt,
-										minCurLen,
-										curChunkIndex,
-										blockId
-									)
-								);
-							}
-							
-							//other blocks
-							return Optional_BlockIntersection(
-								true,    
-								BlockIntersection(
-									side,
-									vec3(0),
-									color,
-									coordAt,
-									minCurLen,
-									curChunkIndex,
-									blockId
-								)
-							);
-						}
-					}	
-						
-					
-					if(glass.is) return glass;
+					if(i.block != 0) return Optional_BlockIntersection(
+						true,
+						BlockIntersection(
+							i.normal,
+							i.newRayDir,
+							i.color,
+							coordAt,
+							minCurLen,
+							curChunkIndex,
+							i.block
+						)
+					);
 					
 					curSteps += minAxis_i;
 					curLen += minAxis_f * stepLength;
@@ -559,6 +579,7 @@ Trace trace(Ray ray, int chunkIndex) {
 	bool shadow = false;
 	int shadowIndex;
 	int curSteps = 0;
+	
 	while(true) {
 		if(curSteps == maxSteps) { curSteps--; break; }
 		
@@ -572,6 +593,7 @@ Trace trace(Ray ray, int chunkIndex) {
 			
 			const int intersectionChunkIndex = i.chunkIndex;
 			const vec3 col = i.color;
+			const vec3 at = i.at;
 			
 			if(blockId == 7) {
 				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim, i.newDir );
@@ -595,13 +617,15 @@ Trace trace(Ray ray, int chunkIndex) {
 				}
 				shadow = true;
 				
+				const vec3 startRelativeAt = at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim;
+				
 				const vec4 q = vec4(normalize(vec3(1+sin(time)/10,3,2)), cos(time)/5);
 				const vec3 v = normalize(vec3(1, 4, 2));
 				const vec3 temp = cross(q.xyz, v) + q.w * v;
 				const vec3 rotated = v + 2.0*cross(q.xyz, temp);
 				
 				const vec3 dir = normalize(rotated);
-				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + normalize(vec3(i.side)) * 0.0001, dir );
+				ray = Ray( startRelativeAt + normalize(i.normal) * 0.0001, dir );
 				chunkIndex = intersectionChunkIndex;
 				
 				shadowIndex = curSteps++;
@@ -677,5 +701,6 @@ void main() {
 	
 
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) color = vec4(vec3(0.98), 1);
-	else color = vec4(col, 1);
+	else 
+		color = vec4(col, 1);
 }		
