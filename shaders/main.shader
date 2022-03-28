@@ -670,14 +670,14 @@ Trace trace(Ray ray, int chunkIndex) {
 			const vec3 at = i.at;
 			
 			if(blockId == 7) {
-				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim, i.newDir );
+				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + i.newDir * 0.0001, i.newDir );
 				chunkIndex = intersectionChunkIndex;
 				
 				steps[curSteps++] = Step( col, t, blockId );
 				continue;
 			}
 			if(blockId == 8) {
-				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim, i.newDir );
+				ray = Ray( i.at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim + i.newDir * 0.0001, i.newDir );
 				chunkIndex = intersectionChunkIndex;
 				
 				steps[curSteps++] = Step( col, t, blockId );
