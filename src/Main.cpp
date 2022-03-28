@@ -41,6 +41,8 @@ static const vec2<uint32_t> windowSize{ 1280, 720 };
 
 GLFWwindow* window;
 
+static int viewDistance = 3;
+
 static const vec2<double> windowSize_d{ windowSize.convertedTo<double>() };
 
 static vec2<double> mousePos(0, 0), pmousePos(0, 0);
@@ -318,7 +320,6 @@ static GLuint pl_modelMatrix_u = 0;
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
 
-static int viewDistance = 20;
 
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
@@ -327,9 +328,9 @@ void resizeBuffer() {
 	
 	it.assign(it.size(), false);
 	
-	static_assert(sizeof(chunks.chunksData[0]) == 8192);
+	static_assert(sizeof(Chunks::ChunkData{}) == 16384);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * 8192, NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(Chunks::ChunkData{}), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkIndex_u);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
@@ -1400,7 +1401,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				uint16_t const &block{ chunkData[index] };
+				auto const &block{ chunkData[index] };
 				
 				if(block != 0) {
 					auto const newY{ ChunkCoord::blockToFrac(vec3i(blockPos.y+negative.y)).x - (positive_.y ? height_i : 0)}; 
@@ -1449,7 +1450,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				uint16_t const &block{ chunkData[index] };
+				auto const &block{ chunkData[index] };
 				
 				if(block != 0) {
 					auto const newX{ ChunkCoord::blockToFrac(vec3i(blockPos.x + negative.x)).x - width_i/2*dir.x }; 
@@ -1494,7 +1495,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				uint16_t const &block{ chunkData[index] };
+				auto const &block{ chunkData[index] };
 				
 				if(block != 0) {
 					auto const newZ{ ChunkCoord::blockToFrac(vec3i(blockPos.z + negative.z)).x - width_i/2*dir.z }; 
@@ -1596,12 +1597,12 @@ static void update() {
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				uint16_t const &block{ chunkData[index] };
+				auto const &block{ chunkData[index] };
 				
 				if(block != 0) {
 					auto &chunkData{ chunks.chunksData[chunkIndex] };
 					auto const index{ Chunks::blockIndex(blockCoord) };
-					uint16_t &block{ chunkData[index] };
+					auto &block{ chunkData[index] };
 					block = 0;
 					chunks.gpuPresent[chunkIndex] = false;
 					chunks.modified[chunkIndex] = true;
@@ -1658,7 +1659,7 @@ static void update() {
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				uint16_t const &block{ chunkData[index] };
+				auto const &block{ chunkData[index] };
 				
 				if(block != 0) {
 					ChunkCoord const bc{ coord - ChunkCoord::Block{ dirSign * vec3i(intersectionAxis) } };
@@ -1668,7 +1669,7 @@ static void update() {
 					int chunkIndex{ chunk.move(blockChunk, 5).get() };
 				
 					auto const index{ Chunks::blockIndex(blockCoord) };
-					uint16_t &block{ chunks.chunksData[chunkIndex][index] };
+					auto &block{ chunks.chunksData[chunkIndex][index] };
 					
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block != 0) { std::cout << "!\n"; } 
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block == 0) {
@@ -2001,7 +2002,7 @@ int main(void) {
 			
 			int i = 0;
 			for(auto const chunkIndex : chunks.used) {
-				auto &chunkData{ chunks.chunksData[chunkIndex] };
+				Chunks::ChunkData &chunkData{ chunks.chunksData[chunkIndex] };
 				std::vector<bool>::reference gpuPresent = chunks.gpuPresent[chunkIndex];
 				
 				if(!gpuPresent) {
@@ -2015,9 +2016,9 @@ int main(void) {
 					
 					gpuPresent = true;
 					
-					static_assert(sizeof chunkData == (8192));
+					static_assert(sizeof chunkData == 16384);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
-					glBufferSubData(GL_SHADER_STORAGE_BUFFER, 8192 * chunkIndex, 8192, &chunkData);
+					glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(chunkData) * chunkIndex, sizeof(chunkData), &chunkData);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 					
 					

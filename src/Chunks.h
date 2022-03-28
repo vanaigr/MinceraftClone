@@ -15,7 +15,7 @@ public:
 	static constexpr int const chunkDim = 1 << chunkDimAsPow2; //used in vertex.shader
 	static constexpr int const chunkSize = chunkDim*chunkDim*chunkDim;
 	//static constexpr int const tmpChunkSize = chunkDim*chunkDim*chunkDim/(sizeof(uint16_t) * 8);
-	using ChunkData = std::array<uint16_t, chunkSize>;
+	using ChunkData = std::array<uint32_t, chunkSize>;
 	//using tmpChunkData = std::array<uint8_t, tmpChunkSize>;
 	
 	struct AABB {

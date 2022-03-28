@@ -40,7 +40,7 @@ uniform sampler2D noise;
 #define chunkDim 16
 
 layout(binding = 1) restrict readonly buffer ChunksIndices {
-     uint data[][16*16*16/2]; //indeces are shorts 	//8192
+     uint data[][16*16*16];
 };
 
 
@@ -164,9 +164,7 @@ bool checkBoundaries(const ivec3 i) {
 
 uint blockAt(const int chunkIndex, const ivec3 i_v) {
 	const int index = i_v.x + i_v.y * 16 + i_v.z * 16 * 16;
-	const int packedIndex = index / 2;
-	const int offset = (index % 2) * 16;
-	const uint id = (data[chunkIndex][packedIndex] >> offset) & 65535;
+	const uint id = data[chunkIndex][index];
 	return id;
 }
 
@@ -392,6 +390,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 	ivec3 lastSteps = ivec3(0);
 	//uint lastBlock = blockAt_unnormalized(...);
 	
+	float prevMinLen = 0;
 	while(true) {
 		const uint  bounds = chunkBounds(curChunkIndex);
 		const ivec3 startBorder = start(bounds);
@@ -488,7 +487,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 						|| otherAxis_b
 					);
 					
-					const ivec3 faces = ivec3( (equal(curCoordF, curCoord) || minAxis_b) );
+					const ivec3 faces = ivec3(minAxis_b);
 					
 					const ivec3 fromBlockCoord = cellAt - faces*dir_;
 					const ivec3 toBlockCoord = cellAt;
@@ -512,6 +511,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 					);
 					fromBlock = toBlock;
 					
+					
 					if(i.block != 0) return Optional_BlockIntersection(
 						true,
 						BlockIntersection(
@@ -526,6 +526,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 					);
 					
 					curSteps += minAxis_i;
+					prevMinLen = minCurLen;
 					curLen += minAxis_f * stepLength;
 					
 					if(!inBounds) {
