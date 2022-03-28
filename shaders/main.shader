@@ -503,6 +503,97 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 						toBlockCoord - nextRelativeToChunk * chunkDim
 					);					
 					
+					if(false && fromBlock != 0) {
+						BlockInfo minInfo;
+						vec3 minCoordAt;
+						float minLength;
+						int minInfoIndex = -1;
+						
+						const vec3 steps = (fromBlockCoord + negative_ - firstCellRow)*dir_+0.5;
+						const vec3 lengths = steps * stepLength + firstCellDiff * stepLength;
+						
+						for(int i = 0; i < 3; i++) {
+							const ivec3 minAxis = ivec3(i==0,i==1,i==2);
+							const ivec3 otherAxis = 1 - minAxis;
+							
+							const float currentLength = dot(lengths, minAxis);
+							
+							if(currentLength <= prevMinLen || currentLength >= minCurLen) continue;
+							
+							const vec3 coordF = at(ray, currentLength);
+							const vec3 coordAt = minAxis * (firstCellRow + steps*dir_) + otherAxis * coordF;
+							
+							const BlockInfo info = testBlocks(
+								ray,
+								fromBlockCoord, fromBlock,
+								fromBlockCoord, fromBlock,
+								coordAt, minAxis
+							);
+							
+							if(info.block != 0 && (minInfoIndex == -1 || currentLength < minLength)) {
+								minInfo = info;
+								minCoordAt = coordAt;
+								minLength = currentLength;
+								minInfoIndex = i;
+							}
+						}
+						
+						if(minInfoIndex != -1) {
+							return Optional_BlockIntersection(
+								true,
+								BlockIntersection(
+									minInfo.normal,
+									minInfo.newRayDir,
+									minInfo.color,
+									minCoordAt,
+									minLength,
+									curChunkIndex,
+									minInfo.block
+								)
+							);
+						}
+					}
+					
+					
+					if(fromBlock != 0) {
+						const vec3 steps = (fromBlockCoord + negative_ - firstCellRow)*dir_+0.5;
+						vec3 lengths = steps * stepLength + firstCellDiff * stepLength;
+						
+						for(int i = 0; i < 3; i++) {					
+							const float currentLength = min(lengths.x, min(lengths.y, lengths.z));
+							const ivec3 minAxis = ivec3(equal(lengths, vec3(currentLength)));
+							const ivec3 otherAxis = 1 - minAxis;
+							if(currentLength >= prevMinLen) { 
+								if(currentLength >= minCurLen) break; //all lengths are outside of block bounds
+								
+								const vec3 coordF = at(ray, currentLength);
+								const vec3 coordAt = minAxis * (firstCellRow + steps*dir_) + otherAxis * coordF;
+								
+								const BlockInfo info = testBlocks(
+									ray,
+									fromBlockCoord, fromBlock,
+									fromBlockCoord, fromBlock,
+									coordAt, minAxis
+								);
+								
+								if(info.block != 0) return Optional_BlockIntersection(
+									true,
+									BlockIntersection(
+										info.normal,
+										info.newRayDir,
+										info.color,
+										coordAt,
+										currentLength,
+										curChunkIndex,
+										info.block
+									)
+								);
+							}
+
+							lengths = mix(lengths, vec3(999999999999.0), minAxis); //mix with 1.0 / 0.0 doesn't work
+						}
+					}
+					
 					const BlockInfo i = testBlocks(
 						ray,
 						fromBlockCoord, fromBlock, 
