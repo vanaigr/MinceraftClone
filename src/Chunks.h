@@ -22,6 +22,10 @@ public:
 	private:
 		uint32_t data_;
 	public:
+		static constexpr uint8_t blockCubeMask(vec3b const upperHalf) {
+			const int index = upperHalf.x + upperHalf.y * 2 + upperHalf.z * 4;
+			return 1 << index;
+		}
 		static constexpr bool blockCube(uint8_t const cubes, vec3b const upperHalf) {
 			const int index = upperHalf.x + upperHalf.y * 2 + upperHalf.z * 4;
 			return (cubes >> index) & 1;
@@ -31,7 +35,9 @@ public:
 		
 		Block() = default;
 		//constexpr Block(uint32_t const data__) : data_{ data__ } {}
-		constexpr Block(uint16_t const id, uint8_t cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {}
+		constexpr Block(uint16_t const id, uint8_t cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
+			if(id == 0 || cubes == 0) data_ = 0;
+		}
 		
 		constexpr uint16_t id() const { return uint16_t(data_ & ((1 << 16) - 1)); }
 		constexpr bool cube(vec3b const upperHalf) const { return blockCube(cubes(), upperHalf); }

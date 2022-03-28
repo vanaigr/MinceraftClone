@@ -144,7 +144,7 @@ enum class BlockAction {
 
 static double const blockActionCD{ 300.0 / 1000.0 };
 
-static int blockId = 1;
+static int blockPlaceId = 1;
 
 static void quit();
 
@@ -261,7 +261,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 }
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-	blockId = 1+misc::mod(blockId-1 + int(yoffset), 12);
+	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 12);
 }
 
 static const Font font{ ".\\assets\\font.txt" };
@@ -1318,9 +1318,9 @@ public:
 			//return ((coord / ChunkCoord::fracBlockDim) + std::max(dir[i], 0)) << ChunkCoord::fracBlockDimAsPow2;
 			
 			if(dir[i] >= 0) //round down
-				return ((coord >> ChunkCoord::fracBlockDimAsPow2) + 1) << ChunkCoord::fracBlockDimAsPow2;
+				return ((coord >> ChunkCoord::cubeDimAsPow2) + 1) << ChunkCoord::cubeDimAsPow2;
 			else //round up
-				return (-((-coord) >> ChunkCoord::fracBlockDimAsPow2) - 1) << ChunkCoord::fracBlockDimAsPow2;
+				return (-((-coord) >> ChunkCoord::cubeDimAsPow2) - 1) << ChunkCoord::cubeDimAsPow2;
 		});
 	};
 	
@@ -1577,12 +1577,26 @@ static void update() {
 				
 				if(intersectionAxis == 0) break;
 				
+				vec3l const cubeCoord{ 
+					ChunkCoord::fracToBlockCube(intersection)
+					  + vec3l(pd.direction.min(0)) * vec3l(intersectionAxis)
+				};
+				
+				auto const cubeLocalCoord{ 
+					cubeCoord.applied([](auto const coord, auto i) -> bool {
+						return bool(misc::mod(coord, 2ll));
+					})
+				};
+				
+				ChunkCoord const blockAt { 
+					vec3i{},
+					ChunkCoord::Fractional{ 
+						(cubeCoord - vec3l(cubeLocalCoord)) * ChunkCoord::cubeDim
+					}  
+				};
 				ChunkCoord const coord{ 
 					pd.chunk,
-					ChunkCoord::Block{ 
-						  ChunkCoord::fracToBlock(intersection)
-						+ pd.direction.min(0) * vec3i(intersectionAxis)
-					} 
+					ChunkCoord::Fractional{ blockAt.position__long() }
 				};
 				
 				vec3i const blockCoord = coord.blockInChunk();
@@ -1605,31 +1619,40 @@ static void update() {
 					auto &chunkData{ chunks.chunksData[chunkIndex] };
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					auto &block{ chunkData[index] };
-					block = Chunks::Block::emptyBlock();
-					chunks.gpuPresent[chunkIndex] = false;
-					chunks.modified[chunkIndex] = true;
-					isAction = true;
 					
-					auto &aabb{ chunks.chunksAABB[chunkIndex] };
-					vec3i const start_{ aabb.start() };
-					vec3i const end_  { aabb.end  () };
 					
-					vec3i start{ 16 };
-					vec3i end  { 0 };
-					for(int32_t x = start_.x; x <= end_.x; x++)
-					for(int32_t y = start_.y; y <= end_.y; y++)
-					for(int32_t z = start_.z; z <= end_.z; z++) {
-						vec3i const blk{x, y, z};
-						if(chunkData[Chunks::blockIndex(blk)].id() != 0) {
-							start = start.min(blk);
-							end   = end  .max(blk);
+					if(block.cube(cubeLocalCoord)) {
+						block = Chunks::Block{ block.id(), uint8_t( block.cubes() & (~Chunks::Block::blockCubeMask(cubeLocalCoord)) ) };
+						
+						chunks.gpuPresent[chunkIndex] = false;
+						chunks.modified[chunkIndex] = true;
+						isAction = true;
+						
+						auto &aabb{ chunks.chunksAABB[chunkIndex] };
+						vec3i const start_{ aabb.start() };
+						vec3i const end_  { aabb.end  () };
+						
+						vec3i start{ 16 };
+						vec3i end  { 0 };
+						for(int32_t x = start_.x; x <= end_.x; x++)
+						for(int32_t y = start_.y; y <= end_.y; y++)
+						for(int32_t z = start_.z; z <= end_.z; z++) {
+							vec3i const blk{x, y, z};
+							if(chunkData[Chunks::blockIndex(blk)].id() != 0) {
+								start = start.min(blk);
+								end   = end  .max(blk);
+							}
 						}
+						
+						aabb = Chunks::AABB(start, end);
+						break;
 					}
-					
-					aabb = Chunks::AABB(start, end);
-					break;
+					//block = Chunks::Block::emptyBlock();
+					//chunks.gpuPresent[chunkIndex] = false;
+					//chunks.modified[chunkIndex] = true;
+					//isAction = true;
 				}
-				else if(checkBlock.get_end() || i >= 100) break;
+				if(checkBlock.get_end() || i >= 100) break;
 			}
 		}
 		else {
@@ -1675,7 +1698,7 @@ static void update() {
 					
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() != 0) { std::cout << "!\n"; } 
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() == 0) {
-						block = Chunks::Block::fullBlock(blockId);//1;
+						block = Chunks::Block::fullBlock(blockPlaceId);//1;
 						chunks.gpuPresent[chunkIndex] = false;
 						chunks.modified[chunkIndex] = true;
 						isAction = true;
@@ -2049,7 +2072,7 @@ int main(void) {
 		
 		{
 			glUseProgram(currentBlockProgram);
-			glUniform1ui(cb_blockIndex_u, blockId);
+			glUniform1ui(cb_blockIndex_u, blockPlaceId);
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		}
 		

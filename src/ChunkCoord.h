@@ -8,6 +8,9 @@ struct ChunkCoord {
 	static constexpr auto fracChunkDim = 1ll << 32;
 	static constexpr auto fracBlockDimAsPow2 = (32 - Chunks::chunkDimAsPow2);
 	static constexpr auto fracBlockDim = 1ll << fracBlockDimAsPow2;
+	static constexpr auto cubeDimAsPow2 = ChunkCoord::fracBlockDimAsPow2 - 1;
+	static constexpr auto cubeDim = 1ll << cubeDimAsPow2;
+	
 	static_assert(fracBlockDim%2 == 0 && Chunks::chunkDimAsPow2 >= 0 && Chunks::chunkDimAsPow2 <= 32);
 	
 	static constexpr inline vec3l posToFrac(vec3d value) { return vec3l{(value*fracBlockDim).floor()}; }
@@ -27,6 +30,9 @@ struct ChunkCoord {
 	static constexpr inline vec3d fracToPos(vec3l value) { return static_cast<vec3d>(value) / fracBlockDim; }
 	static constexpr inline vec3i fracToBlock(vec3l value) { return value.applied([](auto coord, auto i)->auto{ return static_cast<int32_t>(misc::divFloor<int64_t>(coord, fracBlockDim)); }); }
 	static constexpr inline vec3i fracTochunk_(vec3l value) { return value.applied([](auto coord, auto i)->auto{ return static_cast<int32_t>(misc::divFloor<int64_t>(coord, fracChunkDim)); }); }
+	static constexpr inline vec3l fracToBlockCube(vec3l value) { return value.applied([](auto coord, auto i)->auto { 
+		return (coord >> cubeDimAsPow2); 
+	}); }
 	
 	vec3i chunk_;
 	vec3<uint32_t> chunkPart_;
