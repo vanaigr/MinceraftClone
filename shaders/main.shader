@@ -39,15 +39,9 @@ uniform sampler2D noise;
 //copied from Chunks.h
 #define chunkDim 16
 
-layout(binding = 1) restrict readonly buffer ChunksIndices {
+layout(binding = 1) restrict readonly buffer ChunksBlocks {
      uint data[][16*16*16];
-};
-
-
-
-struct Block {
-	uint id;
-};
+} chunksBlocks;
 
 layout(binding = 2) restrict readonly buffer AtlasDescription {
     int positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot 
@@ -161,19 +155,37 @@ bool checkBoundaries(const ivec3 i) {
 	return all(equal( testBounds(i), ivec3(0) ));
 }
 
+//copied from Chunks::Block
+struct Block {
+	uint data;
+};
+  uint blockId(const Block block) {
+  	return block.data & ((1 << 16) - 1);
+  }
+  uint blockCubes(const Block block) {
+  	return (block.data >> 24) /* & 255*/; 
+  }
+  bool cubeAt(const uint cubes, const ivec3 upperCube) { 
+  	const int index = upperCube.x + upperCube.y * 2 + upperCube.z * 4;
+  	return bool( (cubes >> index) & 1 );
+  }
 
-uint blockAt(const int chunkIndex, const ivec3 i_v) {
-	const int index = i_v.x + i_v.y * 16 + i_v.z * 16 * 16;
-	const uint id = data[chunkIndex][index];
-	return id;
+Block blockAir() {
+	return Block(0);
 }
 
-uint blockAt_unnormalized(int chunkIndex, ivec3 blockCoord) {
+Block blockAt(const int chunkIndex, const ivec3 i_v) {
+	const int index = i_v.x + i_v.y * 16 + i_v.z * 16 * 16;
+	const uint blockData = chunksBlocks.data[chunkIndex][index];
+	return Block(blockData);
+}
+
+Block blockAt_unnormalized(int chunkIndex, ivec3 blockCoord) {
 	const ivec3 outDir = testBounds(blockCoord);
 	
 	if( !all(equal(outDir, ivec3(0))) ) {
 		const int candChunkIndex = chunkNeighbourIndex(chunkIndex, outDir);
-		if(candChunkIndex < 0) return 0;//-1;
+		if(candChunkIndex < 0) return blockAir();
 		
 		chunkIndex = candChunkIndex;
 		blockCoord = blockCoord - outDir * chunkDim;
@@ -455,7 +467,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 			const bvec3 inChunkBounds = lessThanEqual((testCoordAt - relativeToChunk * chunkDim - farBoundaries) * dir_, vec3(0,0,0));
 			if(all(inChunkBounds)) {
 				//if(any(notEqual(nearBoundaries, mix3i(ivec3(chunkDim), ivec3(0), positive_)) && !outside)) lastBlock = 0;
-				uint fromBlock; 
+				Block fromBlock; 
 				{
 					const ivec3 checks = ivec3( (equal(testCoordF, floor(testCoordF)) || testMinAxis_b) );
 					
@@ -493,7 +505,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 					const ivec3 toBlockCoord = cellAt;
 					
 					
-					uint toBlock;
+					Block toBlock;
 					if(checkBoundaries(toBlockCoord - relativeToChunk * chunkDim)) toBlock = blockAt(
 						curChunkIndex,
 						toBlockCoord - relativeToChunk * chunkDim
@@ -501,61 +513,15 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 					else toBlock = blockAt(
 						nextChunkIndex,
 						toBlockCoord - nextRelativeToChunk * chunkDim
-					);					
+					);	
 					
-					if(false && fromBlock != 0) {
-						BlockInfo minInfo;
-						vec3 minCoordAt;
-						float minLength;
-						int minInfoIndex = -1;
-						
-						const vec3 steps = (fromBlockCoord + negative_ - firstCellRow)*dir_+0.5;
-						const vec3 lengths = steps * stepLength + firstCellDiff * stepLength;
-						
-						for(int i = 0; i < 3; i++) {
-							const ivec3 minAxis = ivec3(i==0,i==1,i==2);
-							const ivec3 otherAxis = 1 - minAxis;
-							
-							const float currentLength = dot(lengths, minAxis);
-							
-							if(currentLength <= prevMinLen || currentLength >= minCurLen) continue;
-							
-							const vec3 coordF = at(ray, currentLength);
-							const vec3 coordAt = minAxis * (firstCellRow + steps*dir_) + otherAxis * coordF;
-							
-							const BlockInfo info = testBlocks(
-								ray,
-								fromBlockCoord, fromBlock,
-								fromBlockCoord, fromBlock,
-								coordAt, minAxis
-							);
-							
-							if(info.block != 0 && (minInfoIndex == -1 || currentLength < minLength)) {
-								minInfo = info;
-								minCoordAt = coordAt;
-								minLength = currentLength;
-								minInfoIndex = i;
-							}
-						}
-						
-						if(minInfoIndex != -1) {
-							return Optional_BlockIntersection(
-								true,
-								BlockIntersection(
-									minInfo.normal,
-									minInfo.newRayDir,
-									minInfo.color,
-									minCoordAt,
-									minLength,
-									curChunkIndex,
-									minInfo.block
-								)
-							);
-						}
-					}
+					const uint fromBlockCubes = blockCubes(fromBlock);
+					const uint    fromBlockId = blockId   (fromBlock);
+					const uint   toBlockCubes = blockCubes(  toBlock);
+					const uint      toBlockId = blockId   (  toBlock);
 					
 					
-					if(fromBlock != 0) {
+					if(fromBlockId != 0) {
 						const vec3 steps = (fromBlockCoord + negative_ - firstCellRow)*dir_+0.5;
 						vec3 lengths = steps * stepLength + firstCellDiff * stepLength;
 						
@@ -563,16 +529,28 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 							const float currentLength = min(lengths.x, min(lengths.y, lengths.z));
 							const ivec3 minAxis = ivec3(equal(lengths, vec3(currentLength)));
 							const ivec3 otherAxis = 1 - minAxis;
-							if(currentLength >= prevMinLen) { 
-								if(currentLength >= minCurLen) break; //all lengths are outside of block bounds
+							
+							lengths = mix(lengths, vec3(999999999999.0), minAxis); //mix with 1.0 / 0.0 doesn't work
+							
+							if(currentLength < prevMinLen) continue; 
+							if(currentLength >= minCurLen) break; //all lengths are outside of block bounds
 								
 								const vec3 coordF = at(ray, currentLength);
 								const vec3 coordAt = minAxis * (firstCellRow + steps*dir_) + otherAxis * coordF;
 								
+								const bvec3 upperCubes = greaterThan(coordAt - fromBlockCoord, vec3(0.5));
+								
+								const bvec2 cubes = bvec2(
+									cubeAt(fromBlockCubes, negative_ * minAxis + ivec3(upperCubes) * (1-minAxis)),
+									cubeAt(fromBlockCubes, positive_ * minAxis + ivec3(upperCubes) * (1-minAxis))
+								);
+								
+								if(all(cubes) || all(not(cubes))) continue; 
+								
 								const BlockInfo info = testBlocks(
 									ray,
-									fromBlockCoord, fromBlock,
-									fromBlockCoord, fromBlock,
+									fromBlockCoord, cubes.x ? fromBlockId : 0,
+									fromBlockCoord, cubes.y ? fromBlockId : 0,
 									coordAt, minAxis
 								);
 								
@@ -588,16 +566,20 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 										info.block
 									)
 								);
-							}
-
-							lengths = mix(lengths, vec3(999999999999.0), minAxis); //mix with 1.0 / 0.0 doesn't work
+								
 						}
 					}
 					
+					const bvec3 fromUpperCubes = greaterThan(coordAt - fromBlockCoord, vec3(0.5));
+					const bool fromCube = cubeAt(fromBlockCubes, positive_ * minAxis_i + ivec3(fromUpperCubes) * (1-minAxis_i));
+					
+					const bvec3 toUpperCubes = greaterThan(coordAt - toBlockCoord, vec3(0.5));
+					const bool toCube = cubeAt(toBlockCubes, negative_ * minAxis_i + ivec3(toUpperCubes) * (1-minAxis_i));
+					
 					const BlockInfo i = testBlocks(
 						ray,
-						fromBlockCoord, fromBlock, 
-						toBlockCoord  , toBlock  ,
+						fromBlockCoord, fromCube ? fromBlockId : 0, 
+						toBlockCoord  , toCube   ?   toBlockId : 0,
 						coordAt, minAxis_i
 					);
 					fromBlock = toBlock;

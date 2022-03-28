@@ -996,9 +996,11 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i &start, vec3i &e
 						vec3i tl{ x,y,z };// tree-local block
 						auto const blk{ chunkOffset * Chunks::chunkDim + treeBlock + tl };
 						auto const index{ Chunks::blockIndex(blk) };
-						if(blk.inMMX(vec3i{0}, vec3i{Chunks::chunkDim}).all() && data[index] == 0) {
+						Chunks::Block &curBlock{ data[index] };
+						
+						if(blk.inMMX(vec3i{0}, vec3i{Chunks::chunkDim}).all() && curBlock.id() == 0) {
 							bool is = false;
-							if((is = tl.x == 0 && tl.z == 0 && tl.y <= 4)) data[index] = 4;
+							if((is = tl.x == 0 && tl.z == 0 && tl.y <= 4)) curBlock = Chunks::Block::fullBlock(4);
 							else if((is = 
 									 (tl.y >= 2 && tl.y <= 3
 									  && !( (abs(x) == abs(z))&&(abs(x)==2) )
@@ -1006,7 +1008,7 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i &start, vec3i &e
 								     (tl.in(vec3i{-1, 4, -1}, vec3i{1, 5, 1}).all()
 									  && !( (abs(x) == abs(z))&&(abs(x)==1) &&(tl.y==5 || (treeBlock.x*(x+1)/2+treeBlock.z*(z+1)/2)%2==0) )
 									 )
-							)) data[index] = 5;
+							)) curBlock = Chunks::Block::fullBlock(5);
 							
 							if(is) {
 								start = start.min(blk);
@@ -1037,9 +1039,9 @@ void writeChunk(Chunks::Chunk &chunk) {
 	for(int y{}; y < Chunks::chunkDim; y++) 
 	for(int z{}; z < Chunks::chunkDim; z++) {
 		vec3i const blockCoord{x,y,z};
-		uint16_t const &block = data[Chunks::blockIndex(blockCoord)];
+		auto const blockId = data[Chunks::blockIndex(blockCoord)].id();
 		
-		uint8_t const blk[] = { (unsigned char)((block >> 0) & 0xff), (unsigned char)((block >> 8) & 0xff) };
+		uint8_t const blk[] = { (unsigned char)((blockId >> 0) & 0xff), (unsigned char)((blockId >> 8) & 0xff) };
 		chunkFileOut.write(reinterpret_cast<char const *>(&blk[0]), 2);
 	}
 	
@@ -1104,13 +1106,13 @@ void generateChunkData(Chunks::Chunk chunk) {
 						if(diff < 1) block = 1; //grass
 						else if(diff < 5) block = 2; //dirt
 						else block = 6; //stone
-						data[index] = block;
+						data[index] = Chunks::Block::fullBlock(block);
 						
 						start = start.min(blockCoord);
 						end   = end  .max(blockCoord);
 					}
 					else {
-						data[index] = 0;
+						data[index] = Chunks::Block::emptyBlock();
 					}
 				}
 			
@@ -1401,9 +1403,9 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const &block{ chunkData[index] };
+				auto const blockId{ chunkData[index].id() };
 				
-				if(block != 0) {
+				if(blockId != 0) {
 					auto const newY{ ChunkCoord::blockToFrac(vec3i(blockPos.y+negative.y)).x - (positive_.y ? height_i : 0)}; 
 					if(positive_.y ? (newY >= playerPos.y && newY <= minY) : (newY <= playerPos.y && newY >= minY)) {
 						is = true;
@@ -1450,9 +1452,9 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const &block{ chunkData[index] };
+				auto const blockId{ chunkData[index].id() };
 				
-				if(block != 0) {
+				if(blockId != 0) {
 					auto const newX{ ChunkCoord::blockToFrac(vec3i(blockPos.x + negative.x)).x - width_i/2*dir.x }; 
 					if(positive_.x ? (newX >= playerPos.x && newX <= minX) : (newX <= playerPos.x && newX >= minX)) {
 						minX = newX;
@@ -1495,9 +1497,9 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const &block{ chunkData[index] };
+				auto const blockId{ chunkData[index].id() };
 				
-				if(block != 0) {
+				if(blockId != 0) {
 					auto const newZ{ ChunkCoord::blockToFrac(vec3i(blockPos.z + negative.z)).x - width_i/2*dir.z }; 
 					if(positive_.z ? (newZ >= playerPos.z && newZ <= minZ) : (newZ <= playerPos.z && newZ >= minZ)) {
 						minZ = newZ;
@@ -1597,13 +1599,13 @@ static void update() {
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const &block{ chunkData[index] };
+				auto const blockId{ chunkData[index].id() };
 				
-				if(block != 0) {
+				if(blockId != 0) {
 					auto &chunkData{ chunks.chunksData[chunkIndex] };
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					auto &block{ chunkData[index] };
-					block = 0;
+					block = Chunks::Block::emptyBlock();
 					chunks.gpuPresent[chunkIndex] = false;
 					chunks.modified[chunkIndex] = true;
 					isAction = true;
@@ -1618,7 +1620,7 @@ static void update() {
 					for(int32_t y = start_.y; y <= end_.y; y++)
 					for(int32_t z = start_.z; z <= end_.z; z++) {
 						vec3i const blk{x, y, z};
-						if(chunkData[Chunks::blockIndex(blk)] != 0) {
+						if(chunkData[Chunks::blockIndex(blk)].id() != 0) {
 							start = start.min(blk);
 							end   = end  .max(blk);
 						}
@@ -1659,9 +1661,9 @@ static void update() {
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const &block{ chunkData[index] };
+				auto const blockId{ chunkData[index].id() };
 				
-				if(block != 0) {
+				if(blockId != 0) {
 					ChunkCoord const bc{ coord - ChunkCoord::Block{ dirSign * vec3i(intersectionAxis) } };
 					vec3i const blockCoord = bc.blockInChunk();
 					vec3i const blockChunk = bc.chunk();
@@ -1671,9 +1673,9 @@ static void update() {
 					auto const index{ Chunks::blockIndex(blockCoord) };
 					auto &block{ chunks.chunksData[chunkIndex][index] };
 					
-					if(checkCanPlaceBlock(blockChunk, blockCoord) && block != 0) { std::cout << "!\n"; } 
-					if(checkCanPlaceBlock(blockChunk, blockCoord) && block == 0) {
-						block = blockId;//1;
+					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() != 0) { std::cout << "!\n"; } 
+					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() == 0) {
+						block = Chunks::Block::fullBlock(blockId);//1;
 						chunks.gpuPresent[chunkIndex] = false;
 						chunks.modified[chunkIndex] = true;
 						isAction = true;

@@ -9,13 +9,38 @@
 
 #include"Vector.h"
 
+
+
 struct Chunks {
 public:
 	static constexpr int const chunkDimAsPow2 = 4;
 	static constexpr int const chunkDim = 1 << chunkDimAsPow2; //used in vertex.shader
 	static constexpr int const chunkSize = chunkDim*chunkDim*chunkDim;
 	//static constexpr int const tmpChunkSize = chunkDim*chunkDim*chunkDim/(sizeof(uint16_t) * 8);
-	using ChunkData = std::array<uint32_t, chunkSize>;
+	
+	struct Block { //used in main.shader
+	private:
+		uint32_t data_;
+	public:
+		static constexpr bool blockCube(uint8_t const cubes, vec3b const upperHalf) {
+			const int index = upperHalf.x + upperHalf.y * 2 + upperHalf.z * 4;
+			return (cubes >> index) & 1;
+		}
+		static constexpr Block fullBlock(uint16_t const id) { return Block(id, 0b1111'1111); }
+		static constexpr Block emptyBlock() { return Block(0, 0); }
+		
+		Block() = default;
+		//constexpr Block(uint32_t const data__) : data_{ data__ } {}
+		constexpr Block(uint16_t const id, uint8_t cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {}
+		
+		constexpr uint16_t id() const { return uint16_t(data_ & ((1 << 16) - 1)); }
+		constexpr bool cube(vec3b const upperHalf) const { return blockCube(cubes(), upperHalf); }
+		
+		uint8_t cubes() const { return uint8_t(data_ >> 24); }
+		//uint32_t data() const { return data_; }
+	};
+	
+	using ChunkData = std::array<Block, chunkSize>;
 	//using tmpChunkData = std::array<uint8_t, tmpChunkSize>;
 	
 	struct AABB {
