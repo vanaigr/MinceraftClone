@@ -34,7 +34,7 @@ public:
 		static constexpr Block emptyBlock() { return Block(0, 0); }
 		
 		Block() = default;
-		//constexpr Block(uint32_t const data__) : data_{ data__ } {}
+		explicit constexpr Block(uint32_t const data__) : data_{ data__ } {}
 		constexpr Block(uint16_t const id, uint8_t cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
 			if(id == 0 || cubes == 0) data_ = 0;
 		}
@@ -43,7 +43,7 @@ public:
 		constexpr bool cube(vec3b const upperHalf) const { return blockCube(cubes(), upperHalf); }
 		
 		uint8_t cubes() const { return uint8_t(data_ >> 24); }
-		//uint32_t data() const { return data_; }
+		uint32_t data() const { return data_; }
 	};
 	
 	using ChunkData = std::array<Block, chunkSize>;
