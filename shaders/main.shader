@@ -240,15 +240,10 @@ struct BlockIntersection {
 	uint id;
 };
 
-
-struct Optional_BlockIntersection {
-	bool is;
-	BlockIntersection it;
-};
-
-Optional_BlockIntersection emptyOptional_BlockIntersection() {
-	Optional_BlockIntersection a;
-	return a;
+BlockIntersection noBlockIntersection() {
+	BlockIntersection i;
+	i.id = 0;
+	return i;
 }
 
 //https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
@@ -290,7 +285,7 @@ struct BlockInfo {
 	uint block;
 };
 
-BlockInfo testBlocks(
+BlockInfo testFace(
 	const Ray ray,
 	const vec3 fromBlockCoord, const uint fromBlock, 
 	const vec3 toBlockCoord, const uint toBlock, 
@@ -384,7 +379,7 @@ BlockInfo testBlocks(
 	return glass; //glass may have block id = 0 - empty block
 }
 
-Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) { 	
+BlockIntersection isInters(const Ray ray, const int chunkIndex) { 	
 	const vec3 dir = ray.dir;
 	const ivec3 dir_ = ivec3(sign(dir));
 	const ivec3 positive_ = max(+dir_, ivec3(0,0,0));
@@ -448,11 +443,10 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 			    ivec3(not(outside)) * ivec3(minSteps_vec) +
 			    ivec3(   (outside)) * ivec3(max(ceil(minLen * abs(dir) - firstCellDiff),0)));
 			  	
-			  vec3 curLen = stepLength * curSteps + stepLength * firstCellDiff;
-			
 			//test if calculated starting position is in chunk boundaries
-			  const float testMinCurLen = min(min(curLen.x, curLen.y), curLen.z);
-			  const bvec3 testMinAxis_b = equal(curLen, vec3(testMinCurLen));
+			  const vec3  testCurLen    = stepLength * curSteps + stepLength * firstCellDiff;
+			  const float testMinCurLen = min(min(testCurLen.x, testCurLen.y), testCurLen.z);
+			  const bvec3 testMinAxis_b = equal(testCurLen, vec3(testMinCurLen));
 			  const  vec3 testMinAxis_f = vec3(testMinAxis_b);
 			  const ivec3 testMinAxis_i = ivec3(testMinAxis_b);
 			  
@@ -478,15 +472,17 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 				}
 			
 				while(true) {
-					const float minCurLen   = min(min(curLen.x, curLen.y), curLen.z);
-					const bvec3 minAxis_b   = equal(curLen, vec3(minCurLen));
+					const vec3 curLen = stepLength * curSteps + stepLength * firstCellDiff;
+					
+					const float curMinLen   = min(min(curLen.x, curLen.y), curLen.z);
+					const bvec3 minAxis_b   = equal(curLen, vec3(curMinLen));
 					const  vec3 minAxis_f   = vec3(minAxis_b);
 					const ivec3 minAxis_i   = ivec3(minAxis_b);
 					
 					const bvec3 otherAxis_b = not(minAxis_b);
 					const ivec3 otherAxis_i = ivec3(not(minAxis_b));
 					const  vec3 otherAxis_f =  vec3(not(minAxis_b));
-					const  vec3 curCoordF   = at(ray, minCurLen);
+					const  vec3 curCoordF   = at(ray, curMinLen);
 					const ivec3 curCoord = ivec3(floor(curCoordF));
 					//
 					const vec3 coordAt = 
@@ -520,87 +516,82 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 					const uint   toBlockCubes = blockCubes(  toBlock);
 					const uint      toBlockId = blockId   (  toBlock);
 					
-					
-					if(fromBlockId != 0) {
-						const vec3 steps = (fromBlockCoord + negative_ - firstCellRow)*dir_+0.5;
-						vec3 lengths = steps * stepLength + firstCellDiff * stepLength;
-						
-						for(int i = 0; i < 3; i++) {					
-							const float currentLength = min(lengths.x, min(lengths.y, lengths.z));
-							const ivec3 minAxis = ivec3(equal(lengths, vec3(currentLength)));
-							const ivec3 otherAxis = 1 - minAxis;
+					if(fromBlockId == 0 && toBlockId == 0);
+					else {
+						if(fromBlockId != 0) {
+							vec3 steps = (fromBlockCoord + negative_ - firstCellRow)*dir_+0.5;
 							
-							lengths = mix(lengths, vec3(999999999999.0), minAxis); //mix with 1.0 / 0.0 doesn't work
-							
-							if(currentLength < prevMinLen) continue; 
-							if(currentLength >= minCurLen) break; //all lengths are outside of block bounds
+							for(int i = 0; i < 3; i++) {					
+								const vec3  lengths = steps * stepLength + firstCellDiff * stepLength;
+								const float currentLength = min(lengths.x, min(lengths.y, lengths.z));
+								const bvec3 minAxisB = equal(lengths, vec3(currentLength));
+								const ivec3 minAxis = ivec3(minAxisB);
+								const ivec3 otherAxis = 1 - minAxis;
 								
-								const vec3 coordF = at(ray, currentLength);
-								const vec3 coordAt = minAxis * (firstCellRow + steps*dir_) + otherAxis * coordF;
+								if(any(greaterThanEqual(steps, vec3(curSteps)) && minAxisB)) break; //all lengths are outside of block bounds
 								
-								const bvec3 upperCubes = greaterThan(coordAt - fromBlockCoord, vec3(0.5));
+								if(currentLength >= prevMinLen) {
+									const vec3 coordF = at(ray, currentLength);
+									const vec3 coordAt = minAxis * (firstCellRow + steps*dir_) + otherAxis * coordF;
+									
+									const bvec3 upperCubes = greaterThan(coordAt - fromBlockCoord, vec3(0.5));
+									
+									const bvec2 cubes = bvec2(
+										cubeAt(fromBlockCubes, negative_ * minAxis + ivec3(upperCubes) * (1-minAxis)),
+										cubeAt(fromBlockCubes, positive_ * minAxis + ivec3(upperCubes) * (1-minAxis))
+									);
+									
+									if(!( all(cubes) || all(not(cubes)) )) {
+										const BlockInfo info = testFace(
+											ray,
+											fromBlockCoord, cubes.x ? fromBlockId : 0,
+											fromBlockCoord, cubes.y ? fromBlockId : 0,
+											coordAt, minAxis
+										);
+										
+										if(info.block != 0) return BlockIntersection(
+											info.normal,
+											info.newRayDir,
+											info.color,
+											coordAt,
+											curMinLen,
+											curChunkIndex,
+											info.block
+										);
+									}
+								}
 								
-								const bvec2 cubes = bvec2(
-									cubeAt(fromBlockCubes, negative_ * minAxis + ivec3(upperCubes) * (1-minAxis)),
-									cubeAt(fromBlockCubes, positive_ * minAxis + ivec3(upperCubes) * (1-minAxis))
-								);
-								
-								if(all(cubes) || all(not(cubes))) continue; 
-								
-								const BlockInfo info = testBlocks(
-									ray,
-									fromBlockCoord, cubes.x ? fromBlockId : 0,
-									fromBlockCoord, cubes.y ? fromBlockId : 0,
-									coordAt, minAxis
-								);
-								
-								if(info.block != 0) return Optional_BlockIntersection(
-									true,
-									BlockIntersection(
-										info.normal,
-										info.newRayDir,
-										info.color,
-										coordAt,
-										currentLength,
-										curChunkIndex,
-										info.block
-									)
-								);
-								
+								steps += minAxis / 2.0;
+							}
 						}
-					}
-					
-					const bvec3 fromUpperCubes = greaterThan(coordAt - fromBlockCoord, vec3(0.5));
-					const bool fromCube = cubeAt(fromBlockCubes, positive_ * minAxis_i + ivec3(fromUpperCubes) * (1-minAxis_i));
-					
-					const bvec3 toUpperCubes = greaterThan(coordAt - toBlockCoord, vec3(0.5));
-					const bool toCube = cubeAt(toBlockCubes, negative_ * minAxis_i + ivec3(toUpperCubes) * (1-minAxis_i));
-					
-					const BlockInfo i = testBlocks(
-						ray,
-						fromBlockCoord, fromCube ? fromBlockId : 0, 
-						toBlockCoord  , toCube   ?   toBlockId : 0,
-						coordAt, minAxis_i
-					);
-					fromBlock = toBlock;
-					
-					
-					if(i.block != 0) return Optional_BlockIntersection(
-						true,
-						BlockIntersection(
+						
+						const bvec3 fromUpperCubes = greaterThan(coordAt - fromBlockCoord, vec3(0.5));
+						const bool fromCube = cubeAt(fromBlockCubes, positive_ * minAxis_i + ivec3(fromUpperCubes) * (1-minAxis_i));
+						
+						const bvec3 toUpperCubes = greaterThan(coordAt - toBlockCoord, vec3(0.5));
+						const bool toCube = cubeAt(toBlockCubes, negative_ * minAxis_i + ivec3(toUpperCubes) * (1-minAxis_i));
+						
+						BlockInfo i = testFace(
+							ray,
+							fromBlockCoord, fromCube ? fromBlockId : 0, 
+							toBlockCoord  , toCube   ?   toBlockId : 0,
+							coordAt, minAxis_i
+						);
+						
+						if(i.block != 0) return BlockIntersection(
 							i.normal,
 							i.newRayDir,
 							i.color,
 							coordAt,
-							minCurLen,
+							curMinLen,
 							curChunkIndex,
 							i.block
-						)
-					);
+						);
+					}
 					
+					fromBlock = toBlock;
+					prevMinLen = curMinLen;
 					curSteps += minAxis_i;
-					prevMinLen = minCurLen;
-					curLen += minAxis_f * stepLength;
 					
 					if(!inBounds) {
 						lastSteps = curSteps;
@@ -619,7 +610,7 @@ Optional_BlockIntersection isInters(const Ray ray, const int chunkIndex) {
 		relativeToChunk = nextRelativeToChunk;	
 	}
 
-	return emptyOptional_BlockIntersection();
+	return noBlockIntersection();
 }
 
 vec3 background(const vec3 dir) {
@@ -658,10 +649,9 @@ Trace trace(Ray ray, int chunkIndex) {
 		if(curSteps == maxSteps) { curSteps--; break; }
 		
 		int chunkCount;
-		Optional_BlockIntersection intersection = isInters(ray, chunkIndex);
+		const BlockIntersection i = isInters(ray, chunkIndex);
 		
-		if(intersection.is) {
-			const BlockIntersection i = intersection.it;
+		if(i.id != 0) {
 			const float t = i.t;
 			const uint blockId = i.id;
 			
@@ -693,8 +683,8 @@ Trace trace(Ray ray, int chunkIndex) {
 				
 				const vec3 startRelativeAt = at - (chunkPosition(intersectionChunkIndex) - chunkPosition(chunkIndex)) * chunkDim;
 				
-				const int shadowOffsetsCount = 3;
-				const float shadowOffsets[] = { -1, 0, 1 };
+				const int shadowOffsetsCount = 4;
+				const float shadowOffsets[] = { -1, 0, 1, 0 };
 				
 				const float shadowSubdiv = 32;
 				const float shadowSmoothness = 32;
@@ -707,12 +697,12 @@ Trace trace(Ray ray, int chunkIndex) {
 				const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
 				
 				const vec4 q = vec4(normalize(vec3(1+sin(time)/10,3,2)), cos(time)/5);
-				const vec3 v = normalize(vec3(1, 4, 2) + offset);
+				const vec3 v = normalize(vec3(-1, 4, 2) + offset);
 				const vec3 temp = cross(q.xyz, v) + q.w * v;
 				const vec3 rotated = v + 2.0*cross(q.xyz, temp);
 				
 				const vec3 dir = normalize(rotated);
-				ray = Ray( floor( startRelativeAt * shadowSubdiv)/shadowSubdiv + normalize(i.normal) * 0.0001, dir );
+				ray = Ray( ( floor(startRelativeAt * shadowSubdiv) + (1-abs(i.normal))*0.5 )/shadowSubdiv + normalize(i.normal) * 0.0001, dir );
 				chunkIndex = intersectionChunkIndex;
 				
 				shadowIndex = curSteps++;
@@ -790,4 +780,4 @@ void main() {
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) color = vec4(vec3(0.98), 1);
 	else 
 		color = vec4(col, 1);
-}		
+}				
