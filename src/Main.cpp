@@ -1392,8 +1392,6 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	vec3i dir{};
 	vec3b positive_{};
 	vec3b negative_{};
-	vec3i positive{};
-	vec3i negative{};
 	
 	vec3l playerMin{};
 	vec3l playerMax{};
@@ -1401,14 +1399,14 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	vec3i min{};
 	vec3i max{};
 	
+	Chunks::Move_to_neighbour_Chunk chunk{ chunks, playerChunk };
+	
 	auto const updateBounds = [&]() {	
 		vec3l const force_ = ChunkCoord::posToFracTrunk(force);
 		
 		dir = force_.sign();
 		positive_ = dir > vec3i(0);
 		negative_ = dir < vec3i(0);
-		positive = vec3i(positive_);
-		negative = vec3i(negative_);
 		
 		maxPlayerPos = playerPos + force_;
 		
@@ -1423,51 +1421,76 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			return misc::divCeil(coord, ChunkCoord::fracBlockDim)-1;
 		});
 	};
-	updateBounds();
 	
-	Chunks::Move_to_neighbour_Chunk chunk{ chunks, playerChunk };
+	struct MovementResult {
+		bool is;
+		int64_t coord;
+	};
 	
-	if(dir.y != 0){
-		auto const startY{ misc::divFloor(positive_.y ? playerMax.y : playerMin.y, ChunkCoord::fracBlockDim)-negative.y };
-		auto const endY{ misc::divFloor(maxPlayerPos.y + (positive_.y ? height_i : 0), ChunkCoord::fracBlockDim) };
-		auto const yCount{ (endY - startY) * dir.y };
+	auto const moveAlong = [&](vec3b const axis, int64_t const axisPlayerOffset, vec3b const otherAxis1, vec3b const otherAxis2) -> MovementResult {
+		if(!( (otherAxis1 || otherAxis2).equal(!axis).all() )) {
+			std::cout << "Error, axis not valid: " << axis << " - " << otherAxis1 << ' ' << otherAxis2 << '\n';
+			assert(false);
+		}
 		
-		bool is = false;
-		int64_t minY = maxPlayerPos.y;
+		auto const axisPositive{ positive_.dot(axis) };
+		auto const axisNegative{ negative_.dot(axis) };
+		auto const axisDir{ dir.dot(vec3i(axis)) };
 		
-		for(auto x{ min.x }; x <= max.x; x++)
-		for(auto z{ min.z }; z <= max.z; z++)
-			for(int32_t yo{}; yo <= yCount; yo++) {
-				vec3l const blockPos{x, startY + yo * dir.y, z};
-				
-				ChunkCoord const coord{ //TODO: remove conversion from block to frac
-					playerChunk,
-					ChunkCoord::Block{ vec3i(blockPos) } 
-				};
-						
-				vec3i const blockCoord = coord.blockInChunk();
-				vec3i const blockChunk = coord.chunk();
-				
-				auto const chunkIndex{ chunk.move(blockChunk, 0).get() };
-				if(chunkIndex == -1) { std::cout << "collision y: add chunk gen!" << coord << '\n'; return; }
-				
-				auto const chunkData{ chunks.chunksData[chunkIndex] };
-				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const blockId{ chunkData[index].id() };
-				
-				if(blockId != 0) {
-					auto const newY{ ChunkCoord::blockToFrac(vec3i(blockPos.y+negative.y)).x - (positive_.y ? height_i : 0)}; 
-					if(positive_.y ? (newY >= playerPos.y && newY <= minY) : (newY <= playerPos.y && newY >= minY)) {
-						is = true;
-						minY = newY;
-						break;
-					}
-				}
+		auto const axisPlayerMax{ playerMax.dot(vec3l(axis)) };
+		auto const axisPlayerMin{ playerMax.dot(vec3l(axis)) };
+		
+		auto const axisPlayerPos{ playerPos.dot(vec3l(axis)) };
+		auto const axisPlayerMaxPos{ maxPlayerPos.dot(vec3l(axis)) };
+		
+		auto const start{ misc::divFloor( axisPositive ? axisPlayerMax : axisPlayerMin, ChunkCoord::fracBlockDim)-int64_t(axisNegative) };
+		auto const end{ misc::divFloor(axisPlayerMaxPos + axisPlayerOffset, ChunkCoord::fracBlockDim) };
+		auto const count{ (end - start) * axisDir };
+		
+		
+		for(int32_t a{}; a <= count; a++) 
+		for(auto o1{ min.dot(vec3i(otherAxis1)) }; o1 <= max.dot(vec3i(otherAxis1)); o1++)
+		for(auto o2{ min.dot(vec3i(otherAxis2)) }; o2 <= max.dot(vec3i(otherAxis2)); o2++){
+			auto const axisCurCoord{ start + a * axisDir };
+			vec3l const blockPos{
+				  vec3l(axis      ) * axisCurCoord
+				+ vec3l(otherAxis1) * o1
+				+ vec3l(otherAxis2) * o2
+			};
+			
+			ChunkCoord const coord{ //TODO: remove conversion from block to frac
+				playerChunk,
+				ChunkCoord::Block{ vec3i(blockPos) } 
+			};
+					
+			vec3i const blockCoord = coord.blockInChunk();
+			vec3i const blockChunk = coord.chunk();
+			
+			auto const chunkIndex{ chunk.move(blockChunk, 1).get() };
+			if(chunkIndex == -1) { std::cout << "collision " << vec3i(axis) << ": add chunk gen!" << coord << '\n'; return { false, axisPlayerPos }; }
+			
+			auto const chunkData{ chunks.chunksData[chunkIndex] };
+			auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+			auto const blockId{ chunkData[index].id() };
+			
+			if(blockId != 0) {
+				auto const newCoord{ ChunkCoord::blockToFrac(vec3i(axisCurCoord + int64_t(axisNegative))).x - axisPlayerOffset }; 
+				if(axisPositive ? 
+					(newCoord >= axisPlayerPos)
+				  : (newCoord <= axisPlayerPos)
+				) return { true, newCoord };
 			}
+		}
+		return { false, axisPlayerMaxPos };
+	};
+	
+	updateBounds();
 		
-		playerPos.y = minY;
+	if(dir.y != 0) {
+		auto const result{ moveAlong(vec3b{0,1,0}, (positive_.y ? height_i : 0), vec3b{0,0,1},vec3b{1,0,0}) };
 		
-		if(is) {
+		playerPos.y = result.coord;
+		if(result.is) {
 			if(negative_.y) isOnGround = true;
 			force *= 0.8;
 			force.y = 0;
@@ -1476,96 +1499,27 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		updateBounds();
 	}
 
-	if(dir.x != 0){
-		auto const start{ misc::divFloor(positive_.x ? playerMax.x : playerMin.x, ChunkCoord::fracBlockDim)-negative.x };
-		auto const end{ misc::divFloor(maxPlayerPos.x+width_i/2*dir.x, ChunkCoord::fracBlockDim) };
-		auto const count{ (end - start) * dir.x };
+	if(dir.x != 0) {
+		auto const result{ moveAlong(vec3b{1,0,0}, width_i/2*dir.x, vec3b{0,0,1},vec3b{0,1,0}) };
 		
-		bool is = false;
-		int64_t minX = maxPlayerPos.x;
-		
-		for(auto y{ min.y }; y <= max.y; y++)
-		for(auto z{ min.z }; z <= max.z; z++)
-			for(int32_t xo{}; xo <= count; xo++) {
-				vec3l const blockPos{start + xo * dir.x, y, z};
-				
-				ChunkCoord const coord{ //TODO: remove conversion from block to frac
-					playerChunk,
-					ChunkCoord::Block{ vec3i(blockPos) } 
-				};
-						
-				vec3i const blockCoord = coord.blockInChunk();
-				vec3i const blockChunk = coord.chunk();
-				
-				auto const chunkIndex{ chunk.move(blockChunk, 1).get() };
-				if(chunkIndex == -1) { std::cout << "collision x: add chunk gen!" << coord << '\n'; return; }
-				
-				auto const chunkData{ chunks.chunksData[chunkIndex] };
-				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const blockId{ chunkData[index].id() };
-				
-				if(blockId != 0) {
-					auto const newX{ ChunkCoord::blockToFrac(vec3i(blockPos.x + negative.x)).x - width_i/2*dir.x }; 
-					if(positive_.x ? (newX >= playerPos.x && newX <= minX) : (newX <= playerPos.x && newX >= minX)) {
-						minX = newX;
-						is = true;
-						break;
-					}
-				}
-			}
-		
-		playerPos.x = minX;
-		if(is) {
+		playerPos.x = result.coord;
+		if(result.is) {
 			force.x = 0;
 		}
+		
 		updateBounds();
 	}
 	
-	if(dir.z != 0){
-		auto const start{ misc::divFloor(positive_.z ? playerMax.z : playerMin.z, ChunkCoord::fracBlockDim)-negative.z };
-		auto const end{ misc::divFloor(maxPlayerPos.z+width_i/2*dir.z, ChunkCoord::fracBlockDim) };
-		auto const count{ (end - start) * dir.z };
+	if(dir.z != 0) {
+		auto const result{ moveAlong(vec3b{0,0,1}, width_i/2*dir.z, vec3b{0,1,0},vec3b{1,0,0}) };
 		
-		bool is = false;
-		int64_t minZ = maxPlayerPos.z;
-		
-		for(auto x{ min.x }; x <= max.x; x++)
-		for(auto y{ min.y }; y <= max.y; y++)
-			for(int32_t zo{}; zo <= count; zo++) {
-				vec3l const blockPos{x, y, start + zo * dir.z};
-				
-				ChunkCoord const coord{ //TODO: remove conversion from block to frac
-					playerChunk,
-					ChunkCoord::Block{ vec3i(blockPos) } 
-				};
-						
-				vec3i const blockCoord = coord.blockInChunk();
-				vec3i const blockChunk = coord.chunk();
-				
-				auto const chunkIndex{ chunk.move(blockChunk, 2).get() };
-				if(chunkIndex == -1) { std::cout << "collision z: add chunk gen!" << coord << '\n'; return; }
-				
-				auto const chunkData{ chunks.chunksData[chunkIndex] };
-				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const blockId{ chunkData[index].id() };
-				
-				if(blockId != 0) {
-					auto const newZ{ ChunkCoord::blockToFrac(vec3i(blockPos.z + negative.z)).x - width_i/2*dir.z }; 
-					if(positive_.z ? (newZ >= playerPos.z && newZ <= minZ) : (newZ <= playerPos.z && newZ >= minZ)) {
-						minZ = newZ;
-						is = true;
-						break;
-					}
-				}
-			}
-		
-		playerPos.z = minZ;
-		if(is) {
-			force.z = 0;			
+		playerPos.z = result.coord;
+		if(result.is) {
+			force.z = 0;
 		}
-		updateBounds();
+		
+		//updateBounds();
 	}
-	
 	
 	player = ChunkCoord{ playerChunk, ChunkCoord::Fractional{playerPos} };
 	playerForce = force * (isOnGround ? vec3d{0.8,1,0.8} : vec3d{1});
