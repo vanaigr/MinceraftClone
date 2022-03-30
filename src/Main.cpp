@@ -87,6 +87,8 @@ static Camera playerCamera {
 	800
 };
 
+static bool breakFullBlock{ false };
+
 static Viewport viewportDesired{ playerViewport };
 
 static vec3d const viewportOffset_{0,height*0.9,0};
@@ -181,6 +183,10 @@ void handleKey(int const key) {
 	}
 	else if(key == GLFW_KEY_SPACE) {
 		currentInput().jump = isPress;
+	}
+	
+	if(key == GLFW_KEY_Z && !isPress) {
+		breakFullBlock = !breakFullBlock;
 	}
 	
 	if(key == '-' && isPress) zoom = 1 + (zoom - 1) * 0.95;
@@ -1637,7 +1643,12 @@ static void update() {
 					
 					
 					if(block.cube(cubeLocalCoord)) {
-						block = Chunks::Block{ block.id(), uint8_t( block.cubes() & (~Chunks::Block::blockCubeMask(cubeLocalCoord)) ) };
+						if(breakFullBlock) {
+							block = Chunks::Block::emptyBlock();
+						}
+						else {
+							block = Chunks::Block{ block.id(), uint8_t( block.cubes() & (~Chunks::Block::blockCubeMask(cubeLocalCoord)) ) };
+						}
 						
 						chunks.gpuPresent[chunkIndex] = false;
 						chunks.modified[chunkIndex] = true;
