@@ -1368,9 +1368,9 @@ public:
 			//return ((coord / ChunkCoord::fracBlockDim) + std::max(dir[i], 0)) << ChunkCoord::fracBlockDimAsPow2;
 			
 			if(dir[i] >= 0) //round down
-				return ((coord >> ChunkCoord::cubeDimAsPow2) + 1) << ChunkCoord::cubeDimAsPow2;
+				return ((coord >> ChunkCoord::fracCubeDimAsPow2) + 1) << ChunkCoord::fracCubeDimAsPow2;
 			else //round up
-				return (-((-coord) >> ChunkCoord::cubeDimAsPow2) - 1) << ChunkCoord::cubeDimAsPow2;
+				return (-((-coord) >> ChunkCoord::fracCubeDimAsPow2) - 1) << ChunkCoord::fracCubeDimAsPow2;
 		});
 	};
 	
@@ -1415,10 +1415,10 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		playerMax = vec3l{ playerPos.x+width_i/2, playerPos.y+height_i, playerPos.z+width_i/2 };
 		
 		min = (playerPos - vec3l{width_i/2,0,width_i/2}).applied([](auto const coord, auto i) -> int32_t {
-			return misc::divFloor(coord, ChunkCoord::fracBlockDim);
+			return misc::divFloor(coord, ChunkCoord::fracCubeDim);
 		});
 		max = (playerPos + vec3l{width_i/2,height_i,width_i/2}).applied([](auto const coord, auto i) -> int32_t {
-			return misc::divCeil(coord, ChunkCoord::fracBlockDim)-1;
+			return misc::divCeil(coord, ChunkCoord::fracCubeDim)-1;
 		});
 	};
 	
@@ -1443,27 +1443,38 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		auto const axisPlayerPos{ playerPos.dot(vec3l(axis)) };
 		auto const axisPlayerMaxPos{ maxPlayerPos.dot(vec3l(axis)) };
 		
-		auto const start{ misc::divFloor( axisPositive ? axisPlayerMax : axisPlayerMin, ChunkCoord::fracBlockDim)-int64_t(axisNegative) };
-		auto const end{ misc::divFloor(axisPlayerMaxPos + axisPlayerOffset, ChunkCoord::fracBlockDim) };
+		auto const start{ misc::divFloor( axisPositive ? axisPlayerMax : axisPlayerMin, ChunkCoord::fracCubeDim)-int64_t(axisNegative) };
+		auto const end{ misc::divFloor(axisPlayerMaxPos + axisPlayerOffset, ChunkCoord::fracCubeDim) };
 		auto const count{ (end - start) * axisDir };
 		
 		
 		for(int32_t a{}; a <= count; a++) 
 		for(auto o1{ min.dot(vec3i(otherAxis1)) }; o1 <= max.dot(vec3i(otherAxis1)); o1++)
 		for(auto o2{ min.dot(vec3i(otherAxis2)) }; o2 <= max.dot(vec3i(otherAxis2)); o2++){
-			auto const axisCurCoord{ start + a * axisDir };
-			vec3l const blockPos{
-				  vec3l(axis      ) * axisCurCoord
+			auto const axisCurCubeCoord{ start + a * axisDir };
+			vec3l const cubeCoord{
+				  vec3l(axis      ) * axisCurCubeCoord
 				+ vec3l(otherAxis1) * o1
 				+ vec3l(otherAxis2) * o2
 			};
 			
-			ChunkCoord const coord{ //TODO: remove conversion from block to frac
+			auto const cubeLocalCoord{ 
+				cubeCoord.applied([](auto const coord, auto i) -> bool {
+					return bool(misc::mod(coord, 2ll));
+				})
+			};
+			
+			ChunkCoord const blockAt { 
+				vec3i{},
+				ChunkCoord::Fractional{ 
+					(cubeCoord - vec3l(cubeLocalCoord)) * ChunkCoord::fracCubeDim
+				}  
+			};
+			ChunkCoord const coord{ 
 				playerChunk,
-				ChunkCoord::Block{ vec3i(blockPos) } 
+				ChunkCoord::Fractional{ blockAt.position__long() }
 			};
 					
-			vec3i const blockCoord = coord.blockInChunk();
 			vec3i const blockChunk = coord.chunk();
 			
 			auto const chunkIndex{ chunk.move(blockChunk, 1).get() };
@@ -1471,10 +1482,10 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			
 			auto const chunkData{ chunks.chunksData[chunkIndex] };
 			auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-			auto const blockId{ chunkData[index].id() };
+			auto const block{ chunkData[index] };
 			
-			if(blockId != 0) {
-				auto const newCoord{ ChunkCoord::blockToFrac(vec3i(axisCurCoord + int64_t(axisNegative))).x - axisPlayerOffset }; 
+			if(block.id() != 0 && block.cube(cubeLocalCoord)) {
+				auto const newCoord{ ChunkCoord::blockCubeToFrac(vec3i(axisCurCubeCoord + int64_t(axisNegative))).x - axisPlayerOffset }; 
 				if(axisPositive ? 
 					(newCoord >= axisPlayerPos)
 				  : (newCoord <= axisPlayerPos)
@@ -1595,7 +1606,7 @@ static void update() {
 				ChunkCoord const blockAt { 
 					vec3i{},
 					ChunkCoord::Fractional{ 
-						(cubeCoord - vec3l(cubeLocalCoord)) * ChunkCoord::cubeDim
+						(cubeCoord - vec3l(cubeLocalCoord)) * ChunkCoord::fracCubeDim
 					}  
 				};
 				ChunkCoord const coord{ 

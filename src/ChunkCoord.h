@@ -8,8 +8,8 @@ struct ChunkCoord {
 	static constexpr auto fracChunkDim = 1ll << 32;
 	static constexpr auto fracBlockDimAsPow2 = (32 - Chunks::chunkDimAsPow2);
 	static constexpr auto fracBlockDim = 1ll << fracBlockDimAsPow2;
-	static constexpr auto cubeDimAsPow2 = ChunkCoord::fracBlockDimAsPow2 - 1;
-	static constexpr auto cubeDim = 1ll << cubeDimAsPow2;
+	static constexpr auto fracCubeDimAsPow2 = ChunkCoord::fracBlockDimAsPow2 - 1;
+	static constexpr auto fracCubeDim = 1ll << fracCubeDimAsPow2;
 	
 	static_assert(fracBlockDim%2 == 0 && Chunks::chunkDimAsPow2 >= 0 && Chunks::chunkDimAsPow2 <= 32);
 	
@@ -23,6 +23,8 @@ struct ChunkCoord {
 	}
 	template<template<typename> typename Cont>
 	static constexpr inline Cont<int64_t> blockToFrac(Cont<int32_t> value) { return Cont<int64_t>(value)*fracBlockDim; }
+	template<template<typename> typename Cont>
+	static constexpr inline Cont<int64_t> blockCubeToFrac(Cont<int32_t> value) { return Cont<int64_t>(value)*fracCubeDim; }
 	static constexpr inline vec3l chunkToFrac(vec3i value) { return vec3l(value)*fracChunkDim; }
 	
 	static constexpr inline vec3i chunkToBlock(vec3i value) { return vec3i(value)*Chunks::chunkDim; }
@@ -31,7 +33,7 @@ struct ChunkCoord {
 	static constexpr inline vec3i fracToBlock(vec3l value) { return value.applied([](auto coord, auto i)->auto{ return static_cast<int32_t>(misc::divFloor<int64_t>(coord, fracBlockDim)); }); }
 	static constexpr inline vec3i fracTochunk_(vec3l value) { return value.applied([](auto coord, auto i)->auto{ return static_cast<int32_t>(misc::divFloor<int64_t>(coord, fracChunkDim)); }); }
 	static constexpr inline vec3l fracToBlockCube(vec3l value) { return value.applied([](auto coord, auto i)->auto { 
-		return (coord >> cubeDimAsPow2); 
+		return (coord >> fracCubeDimAsPow2); 
 	}); }
 	
 	vec3i chunk_;
