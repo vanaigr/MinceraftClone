@@ -134,7 +134,7 @@ vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
         coord.x + offset.x,
         coord.y + atlasTileCount.y - (offset.y + 1)
     ) / atlasTileCount;
-    return texture2D(atlas, uv).rgb;
+    return pow(texture2D(atlas, uv).rgb, vec3(2.2));
 }
 
 vec2 atlasAt(const uint id, const ivec3 side) {

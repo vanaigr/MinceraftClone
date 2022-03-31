@@ -317,6 +317,9 @@ static GLuint debugProgram;
 static GLuint currentBlockProgram;
   static GLuint cb_blockIndex_u;
 
+static GLuint blockHitbox_p;
+  static GLuint blockHitboxProjection_u, blockHitboxModelMatrix_u;
+
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
 
@@ -460,11 +463,10 @@ static void reloadShaders() {
 		glBindTexture(GL_TEXTURE_2D, atlas_t);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data);
-		glUniform2f(glGetUniformLocation(mainProgram, "atlasTileCount"), 512 / 16, 512 / 16); //is current block program
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data);
+		glUniform2f(glGetUniformLocation(mainProgram, "atlasTileCount"), 512 / 16, 512 / 16); //in current block program, in block hitbox program
 		
-		GLuint const atlasTex_u = glGetUniformLocation(mainProgram, "atlas");
-		glUniform1i(atlasTex_u, atlas_it);
+		glUniform1i(glGetUniformLocation(mainProgram, "atlas"), atlas_it);
 		
 		glUniform1i(glGetUniformLocation(mainProgram, "noise"), noise_it);
 		
@@ -839,7 +841,91 @@ static void reloadShaders() {
 		pl_projection_u = glGetUniformLocation(playerProgram, "projection");
 		pl_modelMatrix_u = glGetUniformLocation(playerProgram, "model_matrix");
 	}
+	
+	{ //block hitbox program
+		glDeleteProgram(blockHitbox_p);
+		blockHitbox_p = glCreateProgram();
+		ShaderLoader sl{};
+
+		sl.addShaderFromCode(
+			R"(#version 420
+			uniform mat4 projection;
+			uniform mat4 modelMatrix;
+			
+			out vec2 uv;
+			void main()
+			{
+				int tri = gl_VertexID / 3;
+				int idx = gl_VertexID % 3;
+				int face = tri / 2;
+				int top = tri % 2;
+			
+				int dir = face % 3;
+				int pos = face / 3;
+			
+				int nz = dir >> 1;
+				int ny = dir & 1;
+				int nx = 1 ^ (ny | nz);
+			
+				vec3 d = vec3(nx, ny, nz);
+				float flip = 1 - 2 * pos;
+			
+				vec3 n = flip * d;
+				vec3 u = -d.yzx;
+				vec3 v = flip * d.zxy;
+			
+				float mirror = -1 + 2 * top;
+				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
+				xyz = (xyz + 1) / 2;
+			
+				gl_Position = projection * (modelMatrix * vec4(xyz, 1.0));
+				uv = (vec2(mirror*(1-2*(idx&1)), mirror*(1-2*(idx>>1)))+1) / 2;
+			}
+			)", GL_VERTEX_SHADER, "Block hitbox vertex"
+		);
 		
+		sl.addShaderFromCode(
+			R"(#version 420
+			in vec2 uv;
+			out vec4 color;
+			
+			uniform vec2 atlasTileCount;
+			uniform sampler2D atlas;
+			
+			vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
+				vec2 uv = vec2(
+					coord.x + offset.x,
+					coord.y + atlasTileCount.y - (offset.y + 1)
+				) / atlasTileCount;
+				return texture(atlas, uv).rgb;
+			}
+
+			void main() {
+				const vec3 value = sampleAtlas(vec2(31), uv);
+				if(dot(value, vec3(1)) / 3 > 0.9) discard;
+				color = vec4(value, 0.8);
+			}
+			)", 
+			GL_FRAGMENT_SHADER,  
+			"Block hitbox fragment"
+		);
+	
+		sl.attachShaders(blockHitbox_p);
+	
+		glLinkProgram(blockHitbox_p);
+		glValidateProgram(blockHitbox_p);
+	
+		sl.deleteShaders();
+	
+		glUseProgram(blockHitbox_p);
+		
+		glUniform1i(glGetUniformLocation(blockHitbox_p, "atlas"), atlas_it);
+		glUniform2f(glGetUniformLocation(blockHitbox_p, "atlasTileCount"), 512 / 16, 512 / 16);
+		
+		blockHitboxModelMatrix_u = glGetUniformLocation(blockHitbox_p, "modelMatrix");
+		blockHitboxProjection_u  = glGetUniformLocation(blockHitbox_p, "projection");
+	}
+	
 	{ //current block program
 		glDeleteProgram(currentBlockProgram);
 		currentBlockProgram = glCreateProgram();
@@ -880,7 +966,7 @@ static void reloadShaders() {
 					coord.x + offset.x,
 					coord.y + atlasTileCount.y - (offset.y + 1)
 				) / atlasTileCount;
-				return texture2D(atlas, uv).rgb;
+				return pow(texture2D(atlas, uv).rgb, vec3(2.2));
 			}
 			
 			vec2 atlasAt(const uint id, const ivec3 side) {
@@ -1989,6 +2075,8 @@ int main(void) {
 		glUseProgram(testProgram);
 		glUniformMatrix4fv(tt_projection_u, 1, GL_TRUE, &projection[0][0]);
 		
+		glProgramUniformMatrix4fv(blockHitbox_p, blockHitboxProjection_u, 1, GL_TRUE, &projection[0][0]);
+		
 		//glClear(GL_COLOR_BUFFER_BIT);
 		
 		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -2120,9 +2208,49 @@ int main(void) {
 		}
 		
 		{
+			glUseProgram(blockHitbox_p);
+			
+			PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
+			auto const optionalResult{ trace(chunks, pd) };
+				
+			if(optionalResult) {
+				auto const result{ *optionalResult };
+				auto const chunk { result.chunk };
+				
+				ChunkCoord const blockCoord{ chunk.position(), ChunkCoord::Block{Chunks::indexBlock(result.blockIndex)} };
+				
+				auto const blockRelativePos{ 
+					vec3f((blockCoord - cameraCoord).position()) +  
+					(breakFullBlock ? vec3f{0} : (vec3f{Chunks::Block::cubeIndexPos(result.cubeIndex)} * 0.5))
+				};
+				float const size{ breakFullBlock ? 1.0f : 0.5f };
+				float const translation4[4][4] = {
+						{ size, 0, 0, blockRelativePos.x },
+						{ 0, size, 0, blockRelativePos.y },
+						{ 0, 0, size, blockRelativePos.z },
+						{ 0, 0, 0, 1                     },
+				};			
+				float playerToLocal[4][4];
+				misc::matMult(toLoc4, translation4, &playerToLocal);
+				
+				glUniformMatrix4fv(blockHitboxModelMatrix_u, 1, GL_TRUE, &playerToLocal[0][0]);
+				
+				glEnable(GL_DEPTH_TEST);
+				glEnable(GL_BLEND);
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+				glClear(GL_DEPTH_BUFFER_BIT);	
+				
+				glDrawArrays(GL_TRIANGLES, 0, 36);
+				
+				glDisable(GL_BLEND);
+				glDisable(GL_DEPTH_TEST);
+			}
+		}
+		
+		{
 			glUseProgram(currentBlockProgram);
 			glUniform1ui(cb_blockIndex_u, blockPlaceId);
-			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		}
 		
 		glDisable(GL_FRAMEBUFFER_SRGB); 
