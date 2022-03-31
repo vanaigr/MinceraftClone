@@ -317,9 +317,6 @@ static GLuint debugProgram;
 static GLuint currentBlockProgram;
   static GLuint cb_blockIndex_u;
 
-static GLuint blockHitbox_p;
-  stati GLuint blockHitboxProjection_u, blockHitboxModelMatrix_u;
-
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
 
@@ -842,75 +839,7 @@ static void reloadShaders() {
 		pl_projection_u = glGetUniformLocation(playerProgram, "projection");
 		pl_modelMatrix_u = glGetUniformLocation(playerProgram, "model_matrix");
 	}
-	
-	{ //block hitbox program
-		glDeleteProgram(blockHitbox_p);
-		blockHitbox_p = glCreateProgram();
-		ShaderLoader sl{};
-
-		sl.addShaderFromCode(
-			R"(#version 420
-			uniform mat4 projection;
-			uniform mat4 modelMatrix;
-			
-			out vec3 norm;
-			void main()
-			{
-				int tri = gl_VertexID / 3;
-				int idx = gl_VertexID % 3;
-				int face = tri / 2;
-				int top = tri % 2;
-			
-				int dir = face % 3;
-				int pos = face / 3;
-			
-				int nz = dir >> 1;
-				int ny = dir & 1;
-				int nx = 1 ^ (ny | nz);
-			
-				vec3 d = vec3(nx, ny, nz);
-				float flip = 1 - 2 * pos;
-			
-				vec3 n = flip * d;
-				vec3 u = -d.yzx;
-				vec3 v = flip * d.zxy;
-			
-				float mirror = -1 + 2 * top;
-				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-				xyz = (xyz + 1) / 2;
-			
-				gl_Position = projection * (modelMatrix * vec4(xyz, 1.0));
-				norm = n; //works for simple model matrix
-			}
-			)", GL_VERTEX_SHADER, "Player vertex"
-		);
 		
-		sl.addShaderFromCode(
-			R"(#version 420
-			in vec4 gl_FragCoord;
-			out vec4 color;
-
-			void main() {
-				color = vec4(1,0,0,1);
-			}
-			)", 
-			GL_FRAGMENT_SHADER,  
-			"Player shader"
-		);
-	
-		sl.attachShaders(blockHitbox_p);
-	
-		glLinkProgram(blockHitbox_p);
-		glValidateProgram(blockHitbox_p);
-	
-		sl.deleteShaders();
-	
-		glUseProgram(blockHitbox_p);
-		
-		blockHitboxProjection_u = glGetUniformLocation(blockHitbox_p, "modelMatrix");
-		blockHitboxProjection_u = glGetUniformLocation(blockHitbox_p, "projection");
-	}
-	
 	{ //current block program
 		glDeleteProgram(currentBlockProgram);
 		currentBlockProgram = glCreateProgram();
@@ -1384,7 +1313,7 @@ struct PosDir {
 	}
 	ChunkCoord at(vec3i inAxis, int64_t const coord) const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_at(inAxis, coord)} }; }
 	
-	friend srd::ostream &operator<<(std::ostream &o, PosDir const v) {
+	friend std::ostream &operator<<(std::ostream &o, PosDir const v) {
 		return o << "PosDir{" << v.start << ", " << v.end << ", " << v.direction << ", " << v.chunk << "}";
 	}
 };
@@ -1637,7 +1566,7 @@ struct BlockIntersection {
 	uint8_t cubeIndex;
 };
 
-static std::optional<BlockIntersection> trace(Chunks const chunks, PosDir const pd) {
+static std::optional<BlockIntersection> trace(Chunks &chunks, PosDir const pd) {
 	vec3i const dirSign{ pd.direction };
 	DDA checkBlock{ pd };
 		
@@ -1683,13 +1612,13 @@ static std::optional<BlockIntersection> trace(Chunks const chunks, PosDir const 
 		
 		auto const chunk{ chunks[chunkIndex] };
 		auto const chunkData{ chunk.data() };
-		auto &block{ chunkData[index] };
 		
-		auto const index{ Chunks::blockIndex(blockCoord) };
+		auto const blockIndex{ Chunks::blockIndex(blockCoord) };
+		auto &block{ chunkData[blockIndex] };
 		auto const blockId{ block.id() };
 		
 		if(blockId != 0) {
-			if(block.cube(cubeLocalCoord)) return {BlockIntersection{ chunk, index, Chunks::Block:: }};
+			if(block.cube(cubeLocalCoord)) return {BlockIntersection{ chunk, blockIndex, Chunks::Block::cubePosIndex(cubeLocalCoord) }};
 		}
 		
 		if(i >= 10000) {
@@ -1728,8 +1657,6 @@ static void update() {
 		}
 	}
 
-   // vec2<double> diff = playerInput.panning;// (mousePos - pmousePos) / windowSize_d;
-	
 	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE && !isSpectator) {
 		bool isAction = false;
 
@@ -1741,16 +1668,18 @@ static void update() {
 		Chunks::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
 	
 		if(blockAction == BlockAction::BREAK) {
-			auto const optionalResult{ trace(chunks, pd) };
+			auto optionalResult{ trace(chunks, pd) };
 			
 			if(optionalResult) {
-				auto const &result{ *optionalResult };
+				auto result{ *optionalResult };
 				
-				auto const chunk{ result.chunk };
-				auto const block{ chunk.data()[result.blockIndex] };
+				auto chunk{ result.chunk };
+				auto const &chunkData{ chunk.data() };
+				auto const chunkIndex{ chunk.chunkIndex() };
+				auto &block{ chunk.data()[result.blockIndex] };
 				
 				if(breakFullBlock) block = Chunks::Block::emptyBlock();
-				else block = Chunks::Block{ block.id(), uint8_t( block.cubes() & (~Chunks::Block::blockCubeMask(cubeLocalCoord)) ) };
+				else block = Chunks::Block{ block.id(), uint8_t( block.cubes() & (~Chunks::Block::blockCubeMask(result.cubeIndex)) ) };
 				
 				chunks.gpuPresent[chunkIndex] = false;
 				chunks.modified[chunkIndex] = true;
@@ -1774,94 +1703,6 @@ static void update() {
 				
 				aabb = Chunks::AABB(start, end);
 			}
-			/*for(int i = 0;; i++) {
-				vec3b const intersectionAxis{ checkBlock.next() };
-				vec3l const intersection{ checkBlock.get_current() };
-				
-				if(intersectionAxis == 0) break;
-				
-				vec3l const cubeCoord{ 
-					ChunkCoord::fracToBlockCube(intersection)
-					  + vec3l(pd.direction.min(0)) * vec3l(intersectionAxis)
-				};
-				
-				auto const cubeLocalCoord{ 
-					cubeCoord.applied([](auto const coord, auto i) -> bool {
-						return bool(misc::mod(coord, 2ll));
-					})
-				};
-				
-				ChunkCoord const blockAt { 
-					vec3i{},
-					ChunkCoord::Fractional{ 
-						(cubeCoord - vec3l(cubeLocalCoord)) * ChunkCoord::fracCubeDim
-					}  
-				};
-				ChunkCoord const coord{ 
-					pd.chunk,
-					ChunkCoord::Fractional{ blockAt.position__long() }
-				};
-				
-				vec3i const blockCoord = coord.blockInChunk();
-				vec3i const blockChunk = coord.chunk();
-				
-				int chunkIndex{ chunk.move(blockChunk, 10).get() };
-				
-				if(chunkIndex == -1) { 
-					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
-					//chunkIndex = chunks.usedChunks()[usedIndex];
-					std::cout << "block br: add chunk gen!" << coord << '\n'; 
-					break;
-				}
-				
-				auto const chunkData{ chunks.chunksData[chunkIndex] };
-				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
-				auto const blockId{ chunkData[index].id() };
-				
-				if(blockId != 0) {
-					auto &chunkData{ chunks.chunksData[chunkIndex] };
-					auto const index{ Chunks::blockIndex(blockCoord) };
-					auto &block{ chunkData[index] };
-					
-					
-					if(block.cube(cubeLocalCoord)) {
-						if(breakFullBlock) {
-							block = Chunks::Block::emptyBlock();
-						}
-						else {
-							block = Chunks::Block{ block.id(), uint8_t( block.cubes() & (~Chunks::Block::blockCubeMask(cubeLocalCoord)) ) };
-						}
-						
-						chunks.gpuPresent[chunkIndex] = false;
-						chunks.modified[chunkIndex] = true;
-						isAction = true;
-						
-						auto &aabb{ chunks.chunksAABB[chunkIndex] };
-						vec3i const start_{ aabb.start() };
-						vec3i const end_  { aabb.end  () };
-						
-						vec3i start{ 16 };
-						vec3i end  { 0 };
-						for(int32_t x = start_.x; x <= end_.x; x++)
-						for(int32_t y = start_.y; y <= end_.y; y++)
-						for(int32_t z = start_.z; z <= end_.z; z++) {
-							vec3i const blk{x, y, z};
-							if(chunkData[Chunks::blockIndex(blk)].id() != 0) {
-								start = start.min(blk);
-								end   = end  .max(blk);
-							}
-						}
-						
-						aabb = Chunks::AABB(start, end);
-						break;
-					}
-					//block = Chunks::Block::emptyBlock();
-					//chunks.gpuPresent[chunkIndex] = false;
-					//chunks.modified[chunkIndex] = true;
-					//isAction = true;
-				}
-				if(checkBlock.get_end() || i >= 100) break;
-			}*/
 		}
 		else {
 			for(int i = 0;; i++) {
@@ -2285,35 +2126,6 @@ int main(void) {
 		}
 		
 		glDisable(GL_FRAMEBUFFER_SRGB); 
-		
-		{
-			glUseProgram(blockHitbox_p);
-			
-			auto const blockRelativePos{ vec3f((playerCoord - currentCoord()).position()) };
-			float const translation4[4][4] = {
-					{ 1, 0, 0, playerRelativePos.x },
-					{ 0, 1, 0, playerRelativePos.y },
-					{ 0, 0, 1, playerRelativePos.z },
-					{ 0, 0, 0, 1                   },
-			};
-			float const model[4][4] ={
-				{ (float)width, 0, 0, (float)-width/2 },
-				{ 0, (float)height, 0, (float)0 },
-				{ 0, 0, (float)width, (float)-width/2 },
-				{ 0, 0, 0, 1  },
-			};
-						
-			float posToScale[4][4];
-			float playerToLocal[4][4];
-			
-			
-			misc::matMult(translation4, model, &posToScale);
-			misc::matMult(toLoc4, posToScale, &playerToLocal);
-			
-			glUniformMatrix4fv(pl_modelMatrix_u, 1, GL_TRUE, &playerToLocal[0][0]);
-						
-			glDrawArrays(GL_TRIANGLES, 0,36);
-		}
 		
 		/*{
 			glUseProgram(testProgram);

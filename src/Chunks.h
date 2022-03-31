@@ -22,12 +22,24 @@ public:
 	private:
 		uint32_t data_;
 	public:
-		static constexpr uint8_t blockCubeMask(vec3b const upperHalf) {
-			const int index = upperHalf.x + upperHalf.y * 2 + upperHalf.z * 4;
+		static constexpr uint8_t cubePosIndex(vec3b const pos) {
+			return pos.x + pos.y * 2 + pos.z * 4;
+		}
+		static constexpr vec3b cubeIndexPos(uint8_t const index) {
+			return vec3b( index & 1, (index / 2) & 1, (index / 4) & 1 );
+		}
+		static constexpr uint8_t blockCubeMask(uint8_t const index) {
 			return 1 << index;
 		}
+		static constexpr uint8_t blockCubeMask(vec3b const upperHalf) {
+			const auto index{ cubePosIndex(upperHalf) };
+			return 1 << index;
+		}
+		static constexpr bool blockCube(uint8_t const cubes, uint8_t const index) {
+			return (cubes >> index) & 1;
+		}
 		static constexpr bool blockCube(uint8_t const cubes, vec3b const upperHalf) {
-			const int index = upperHalf.x + upperHalf.y * 2 + upperHalf.z * 4;
+			const auto index{ cubePosIndex(upperHalf) };
 			return (cubes >> index) & 1;
 		}
 		static constexpr Block fullBlock(uint16_t const id) { return Block(id, 0b1111'1111); }
@@ -41,6 +53,8 @@ public:
 		
 		constexpr uint16_t id() const { return uint16_t(data_ & ((1 << 16) - 1)); }
 		constexpr bool cube(vec3b const upperHalf) const { return blockCube(cubes(), upperHalf); }
+		constexpr bool cube(uint8_t const index) const { return blockCube(cubes(), index); }
+		constexpr bool empty() const { return data_ == 0; }
 		
 		uint8_t cubes() const { return uint8_t(data_ >> 24); }
 		uint32_t data() const { return data_; }
