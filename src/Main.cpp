@@ -278,17 +278,13 @@ enum Textures : GLuint {
 	atlas_it = 0,
 	font_it,
 	noise_it,
-	framebufferColor_it,
-	framebufferDepth_it,
 	texturesCount
 };
 
 static GLuint textures[texturesCount];
 static GLuint &atlas_t = textures[atlas_it], 
 			  &font_t = textures[font_it], 
-			  &noise_t = textures[noise_it], 
-			  &framebufferColor_t = textures[framebufferColor_it], 
-			  &framebufferDepth_t = textures[framebufferDepth_it];
+			  &noise_t = textures[noise_it];
 
 static GLuint framebuffer;
 
@@ -297,6 +293,7 @@ static GLuint mainProgram = 0;
   static GLuint topDir_u;
   static GLuint near_u, far_u;
   static GLuint fov_u;
+  static GLuint playerRelativePosition_u, drawPlayer_u;
   static GLuint startChunkIndex_u;
   static GLuint time_u;
   static GLuint mouseX_u, mouseY_u;
@@ -322,11 +319,6 @@ static GLuint blockHitbox_p;
 
 static GLuint chunkIndex_u;
 static GLuint blockSides_u;
-
-static GLuint playerProgram = 0;
-
-static GLuint pl_projection_u = 0;
-static GLuint pl_modelMatrix_u = 0;
 
 static int32_t gpuChunksCount = 0;
 Chunks chunks{};
@@ -365,7 +357,7 @@ static void reloadShaders() {
 	glDeleteTextures(texturesCount, &textures[0]);
 	glGenTextures(texturesCount, &textures[0]);
 	
-	{ //models framebuffer
+	/*{
 		//color
 		glActiveTexture(GL_TEXTURE0 + framebufferColor_it);
 		glBindTexture(GL_TEXTURE_2D, framebufferColor_t);
@@ -396,7 +388,7 @@ static void reloadShaders() {
 		  }
 		
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	}
+	}*/
 	
 	{//noise texture
 		Image image{};
@@ -453,8 +445,8 @@ static void reloadShaders() {
 		playerInChunk_u = glGetUniformLocation(mainProgram, "playerInChunk");
 		startChunkIndex_u = glGetUniformLocation(mainProgram, "startChunkIndex");
 		
-		glUniform1i(glGetUniformLocation(mainProgram, "worldColor"), framebufferColor_it);
-		glUniform1i(glGetUniformLocation(mainProgram, "worldDepth"), framebufferDepth_it);
+		playerRelativePosition_u = glGetUniformLocation(mainProgram, "playerRelativePosition");
+		drawPlayer_u = glGetUniformLocation(mainProgram, "drawPlayer");
 	
 		Image image;
 		ImageLoad("assets/atlas.bmp", &image);
@@ -811,85 +803,6 @@ static void reloadShaders() {
 		
 		db_playerChunk_u = glGetUniformLocation(debugProgram, "playerChunk");
 		db_playerInChunk_u = glGetUniformLocation(debugProgram, "playerInChunk");
-	}
-	
-	{ //player model program
-		glDeleteProgram(playerProgram);
-		playerProgram = glCreateProgram();
-		ShaderLoader plsl{};
-
-		plsl.addShaderFromCode(
-			R"(#version 420
-			uniform mat4 projection;
-			uniform mat4 model_matrix;
-			
-			out vec3 norm;
-			void main()
-			{
-				int tri = gl_VertexID / 3;
-				int idx = gl_VertexID % 3;
-				int face = tri / 2;
-				int top = tri % 2;
-			
-				int dir = face % 3;
-				int pos = face / 3;
-			
-				int nz = dir >> 1;
-				int ny = dir & 1;
-				int nx = 1 ^ (ny | nz);
-			
-				vec3 d = vec3(nx, ny, nz);
-				float flip = 1 - 2 * pos;
-			
-				vec3 n = flip * d;
-				vec3 u = -d.yzx;
-				vec3 v = flip * d.zxy;
-			
-				float mirror = -1 + 2 * top;
-				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-				xyz = (xyz + 1) / 2;
-			
-				gl_Position = projection * (model_matrix * vec4(xyz, 1.0));
-				norm = n; //works for simple model matrix
-			}
-			)", GL_VERTEX_SHADER, "Player vertex"
-		);
-		
-		plsl.addShaderFromCode(
-			R"(#version 420
-			in vec4 gl_FragCoord;
-			out vec4 color;
-
-			in vec3 norm;
-			
-			float map(const float value, const float min1, const float max1, const float min2, const float max2) {
-				return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
-			}
-
-			void main() {
-				const vec3 n = normalize(norm);
-				const vec3 sun = normalize(vec3(1, 1, 1));
-				color = vec4(
-					vec3(1, 1, 1) * map(dot(n, sun), -1, 1, 0.6, 0.9),
-					1
-				);
-			}
-			)", 
-			GL_FRAGMENT_SHADER,  
-			"Player shader"
-		);
-	
-		plsl.attachShaders(playerProgram);
-	
-		glLinkProgram(playerProgram);
-		glValidateProgram(playerProgram);
-	
-		plsl.deleteShaders();
-	
-		glUseProgram(playerProgram);
-		
-		pl_projection_u = glGetUniformLocation(playerProgram, "projection");
-		pl_modelMatrix_u = glGetUniformLocation(playerProgram, "model_matrix");
 	}
 	
 	{ //block hitbox program
@@ -2112,9 +2025,6 @@ int main(void) {
 		
 		float projection[4][4];
 		currentCamera().projectionMatrix(&projection);
-	
-		glUseProgram(playerProgram);
-		glUniformMatrix4fv(pl_projection_u, 1, GL_TRUE, &projection[0][0]);
 		
 		glUseProgram(debugProgram);
 		glUniformMatrix4fv(db_projection_u, 1, GL_TRUE, &projection[0][0]);	
@@ -2129,45 +2039,9 @@ int main(void) {
 		
 		//glClear(GL_COLOR_BUFFER_BIT);
 		
-		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-		glEnable(GL_DEPTH_TEST); 
-		glEnable(GL_CULL_FACE); 
-		glCullFace(GL_BACK); 
-		glClear(GL_DEPTH_BUFFER_BIT);
-		
-		if(isSpectator) {
-			auto const playerRelativePos{ vec3f((playerCoord - currentCoord()).position()) };
-			float const translation4[4][4] = {
-					{ 1, 0, 0, playerRelativePos.x },
-					{ 0, 1, 0, playerRelativePos.y },
-					{ 0, 0, 1, playerRelativePos.z },
-					{ 0, 0, 0, 1                   },
-			};
-			float const model[4][4] ={
-				{ (float)width, 0, 0, (float)-width/2 },
-				{ 0, (float)height, 0, (float)0 },
-				{ 0, 0, (float)width, (float)-width/2 },
-				{ 0, 0, 0, 1  },
-			};
-						
-			float posToScale[4][4];
-			float playerToLocal[4][4];
-			
-			
-			misc::matMult(translation4, model, &posToScale);
-			misc::matMult(toLoc4, posToScale, &playerToLocal);
-			
-			glUseProgram(playerProgram);
-			
-			glUniformMatrix4fv(pl_modelMatrix_u, 1, GL_TRUE, &playerToLocal[0][0]);
-						
-			glDrawArrays(GL_TRIANGLES, 0,36);
-		}
-		
 		glEnable(GL_FRAMEBUFFER_SRGB); 
 		glDisable(GL_DEPTH_TEST); 
 		glDisable(GL_CULL_FACE); 
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		
 		glUseProgram(mainProgram);
 		
@@ -2211,6 +2085,11 @@ int main(void) {
 		if(playerChunkCand.is()) {
 			int playerChunkIndex = playerChunkCand.get().chunkIndex();
 			glUniform1i(startChunkIndex_u, playerChunkIndex);
+			
+			auto const playerRelativePos{ vec3f((playerCoord - ChunkCoord{cameraChunk, vec3d(0)}).position()) + vec3f{0, float(height/2.0), 0} };
+			glUniform3f(playerRelativePosition_u, playerRelativePos.x, playerRelativePos.y, playerRelativePos.z);
+			
+			glUniform1i(drawPlayer_u, isSpectator);
 			
 			int i = 0;
 			for(auto const chunkIndex : chunks.used) {
