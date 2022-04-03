@@ -655,7 +655,7 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunk
 									);
 									
 									if(info.block != 0) {
-										if(drawPlayer && !isNoSurface(playerIntersection.surface) && currentLength > playerIntersection.t) return BlockIntersection(
+										if(drawPlayer && !isNoSurface(playerIntersection.surface) && currentLength >= playerIntersection.t) return BlockIntersection(
 											playerIntersection.normal,
 											playerIntersection.newRayDir,
 											playerIntersection.color,
@@ -800,9 +800,9 @@ Trace trace(Ray ray, int chunkIndex) {
 					shadowOffsets[ int(mod(floor(startRelativeAt.y * shadowSubdiv), shadowOffsetsCount)) ],
 					shadowOffsets[ int(mod(floor(startRelativeAt.z * shadowSubdiv), shadowOffsetsCount)) ]
 				);
-				const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
+				const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness * int(isSurfaceBlock(i.surface));
 				
-				const vec4 q = vec4(normalize(vec3(1+sin(time)/10,3,2)), cos(time)/5);
+				const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
 				const vec3 v = normalize(vec3(-1, 4, 2) + offset);
 				const vec3 temp = cross(q.xyz, v) + q.w * v;
 				const vec3 rotated = v + 2.0*cross(q.xyz, temp);
