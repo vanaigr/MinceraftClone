@@ -39,7 +39,7 @@ static const vec2<uint32_t> windowSize{ 1920, 1080 };
 static const vec2<uint32_t> windowSize{ 1280, 720 };
 #endif // FULLSCREEN
 
-static constexpr bool loadSaveChunks = false;
+static constexpr bool loadChunks = false, saveChunks = false;
 
 GLFWwindow* window;
 
@@ -1091,7 +1091,7 @@ std::string chunkNewFilename(Chunks::Chunk const &chunk) {
 }
 
 void writeChunk(Chunks::Chunk &chunk) {
-	if(!loadSaveChunks) return;
+	if(!saveChunks) return;
 	auto const &data{ chunk.data() };
 	
 	std::ofstream chunkFileOut{ chunkNewFilename(chunk), std::ios::binary };
@@ -1281,7 +1281,7 @@ void fillChunkData(Chunks::Chunk chunk) {
 	vec3i start{15};
 	vec3i end  {0 };
 	
-	if(loadSaveChunks && tryReadChunk(chunk, start, end)) chunk.modified() = false;
+	if(loadChunks && tryReadChunk(chunk, start, end)) chunk.modified() = false;
 	else { genChunkData(chunk, start, end); chunk.modified() = true; }
 
 	aabb = Chunks::AABB(start, end);
@@ -1303,7 +1303,7 @@ static int32_t genChunkAt(vec3i const position) {
 	return usedIndex;
 }
 
-static void loadChunks() {
+static void updateChunks() {
 	if(debugBtn1) return;
 	static std::vector<int8_t> chunksPresent{};
 	auto const viewWidth = (viewDistance*2+1);
@@ -1930,13 +1930,13 @@ static void update() {
 	
 	playerCamera.fov = misc::lerp( playerCamera.fov, 90.0 / 180 * misc::pi / curZoom, 0.1 );
 	
-	loadChunks();
+	updateChunks();
 }
 	
 int main(void) {	
     if (!glfwInit()) return -1;
 	
-	loadChunks();
+	updateChunks();
 
     GLFWmonitor* monitor;
 #ifdef FULLSCREEN
