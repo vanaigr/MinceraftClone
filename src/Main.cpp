@@ -539,26 +539,74 @@ static void reloadShaders() {
 			layout(location = 2) in vec2 uv_s;
 			layout(location = 3) in vec2 uv_e;
 			
-			out vec2 uv;
+			//out vec2 uv;
+			
+			out vec2 startPos;
+			out vec2 endPos;
+			
+			out vec2 startUV;
+			out vec2 endUV;
 			void main(void){
 				vec2 interp = vec2(gl_VertexID % 2, gl_VertexID / 2);
 				gl_Position = vec4(mix(pos_s, pos_e, interp), 0, 1);
-				uv = mix(uv_s, uv_e, interp);
+				//uv = mix(uv_s, uv_e, interp);
+				startPos = pos_s;
+				endPos   = pos_e;
+				startUV  = uv_s ;
+				endUV    = uv_e ;
 			}
 		)", GL_VERTEX_SHADER,"font vertex");
 		
 		sl.addShaderFromCode(
 		R"(#version 420
 			in vec4 gl_FragCoord;
-			in vec2 uv;
+			//in vec2 uv;
+			
+			in vec2 startPos;
+			in vec2 endPos;
+			
+			in vec2 startUV;
+			in vec2 endUV;
 			
 			uniform sampler2D font;
+			uniform vec2 screenSize;
 			
 			out vec4 color;
+			
+			float col(vec2 coord) {
+				const vec2 pos = (coord / screenSize) * 2 - 1;
+				const vec2 uv = startUV + (pos - startPos) / (endPos - startPos) * (endUV - startUV);
+				
+				return texture2D(font, clamp(uv, startUV, endUV)).r;
+			}
+			
+			float rand(const vec2 co) {
+				return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+			}
+			
+			float sampleN(const vec2 coord, const uint n, const vec2 startRand) {
+				const vec2 pixelCoord = floor(coord);
+				const float fn = float(n);
+			
+				float result = 0;
+				for (uint i = 0; i < n; i++) {
+					for (uint j = 0; j < n; j++) {
+						const vec2 curCoord = pixelCoord + vec2(i / fn, j / fn);
+						const vec2 offset = vec2(rand(startRand + curCoord.xy), rand(startRand + curCoord.xy + i+1)) / fn;
+						const vec2 offsetedCoord = curCoord + offset;
+			
+						const float sampl = col(offsetedCoord);
+						result += sampl;
+					}
+				}
+			
+				return result / (fn * fn);
+			}
+
 			void main() {
-				const float col = texture2D(font, uv).r;
-				color = vec4(vec3(0), 1-col*col);
-				//color = vec4(col,col,col,1);
+				const float col = sampleN(gl_FragCoord.xy, 4, startUV);
+				
+				color = vec4(vec3(0), 1-col);
 			}
 		)",
 		GL_FRAGMENT_SHADER,
@@ -585,6 +633,8 @@ static void reloadShaders() {
 		
 		GLuint const fontTex_u = glGetUniformLocation(fontProgram, "font");
 		glUniform1i(fontTex_u, font_it);
+		
+		glUniform2f(glGetUniformLocation(fontProgram, "screenSize"), windowSize_d.x, windowSize_d.y);
 	}
 	
 	{ //test program
