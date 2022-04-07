@@ -414,6 +414,24 @@ public:
 			return misc::nonan(coord);
 		});
 	}
+	
+	inline constexpr vec3<C> mod(vec3<C> const it) const {
+		return this->applied([it](auto const coord, auto i) -> C {
+			return misc::mod(coord, it[i]);
+		});
+	}
+	
+	inline constexpr vec3<C> operator>>(vec3<C> const it) const {
+		return this->applied([it](auto const coord, auto i) -> C {
+			return coord >> it[i];
+		});
+	}
+	
+	inline constexpr vec3<C> operator<<(vec3<C> const it) const {
+		return this->applied([it](auto const coord, auto i) -> C {
+			return coord << it[i];
+		});
+	}
 };
 
 template<typename C>

@@ -5,7 +5,8 @@
 #include<cmath>
 
 struct ChunkCoord {	
-	static constexpr auto fracChunkDim = 1ll << 32;
+	static constexpr auto fracChunkDimAsPow2 = 32;
+	static constexpr auto fracChunkDim = 1ll << fracChunkDimAsPow2;
 	static constexpr auto fracBlockDimAsPow2 = (32 - Chunks::chunkDimAsPow2);
 	static constexpr auto fracBlockDim = 1ll << fracBlockDimAsPow2;
 	static constexpr auto fracCubeDimAsPow2 = ChunkCoord::fracBlockDimAsPow2 - 1;
@@ -22,44 +23,33 @@ struct ChunkCoord {
 		}) }; 
 	}
 	template<template<typename> typename Cont>
-	static constexpr inline Cont<int64_t> blockToFrac(Cont<int32_t> value) { return Cont<int64_t>(value)*fracBlockDim; }
+	static constexpr inline Cont<int64_t> blockToFrac(Cont<int64_t> value) { return Cont<int64_t>(value)*fracBlockDim; }
 	template<template<typename> typename Cont>
 	static constexpr inline Cont<int64_t> blockCubeToFrac(Cont<int32_t> value) { return Cont<int64_t>(value)*fracCubeDim; }
-	static constexpr inline vec3l chunkToFrac(vec3i value) { return vec3l(value)*fracChunkDim; }
+	static constexpr inline vec3l chunkToFrac(vec3i value) { return vec3l(value) << fracChunkDimAsPow2; }
 	
-	static constexpr inline vec3i chunkToBlock(vec3i value) { return vec3i(value)*Chunks::chunkDim; }
+	static constexpr inline vec3l chunkToBlock(vec3i value) { return vec3l(value) << Chunks::chunkDimAsPow2; }
 	
 	static constexpr inline vec3d fracToPos(vec3l value) { return static_cast<vec3d>(value) / fracBlockDim; }
-	static constexpr inline vec3i fracToBlock(vec3l value) { return value.applied([](auto coord, auto i)->auto{ return static_cast<int32_t>(misc::divFloor<int64_t>(coord, fracBlockDim)); }); }
-	static constexpr inline vec3i fracTochunk_(vec3l value) { return value.applied([](auto coord, auto i)->auto{ return static_cast<int32_t>(misc::divFloor<int64_t>(coord, fracChunkDim)); }); }
-	static constexpr inline vec3l fracToBlockCube(vec3l value) { return value.applied([](auto coord, auto i)->auto { 
-		return (coord >> fracCubeDimAsPow2); 
-	}); }
+	static constexpr inline vec3l fracToBlock(vec3l value) { return value >> fracBlockDimAsPow2; }
+	static constexpr inline vec3i fracTochunk(vec3l value) { return vec3i(value >> fracChunkDimAsPow2); }
+	static constexpr inline vec3l fracToBlockCube(vec3l value) { return value >> fracCubeDimAsPow2; }
 	
-	vec3i chunk_;
-	vec3<uint32_t> chunkPart_;
+	
+	vec3l coordinate;
 	
 	struct Fractional { vec3l it; explicit Fractional(vec3l t) : it{t} {} };
-	struct Block      { vec3i it; explicit Block     (vec3i t) : it{t} {} };
+	struct Block      { vec3l it; explicit Block     (vec3l t) : it{t} {} };
+	struct Position   { vec3d it; explicit Position  (vec3d t) : it{t} {} };
+	struct Chunk      { vec3i it; explicit Chunk     (vec3i t) : it{t} {} };
 		
-	ChunkCoord(vec3i chunk__, vec3d positionInChunk) : ChunkCoord(
-		chunk__,
-		Fractional { posToFrac(positionInChunk) }
-	) {}
-	
-	ChunkCoord(vec3i chunk__, Block block) : ChunkCoord(
-		chunk__,
-		Fractional{ blockToFrac(block.it) }
-	) {}
-		
-	ChunkCoord(vec3i chunk__, Fractional chunkPart__) {
-		chunkPart_ = chunkPart__.it.applied([](auto const coord, auto unused) -> uint32_t { 
-			return static_cast<uint32_t>(misc::mod(coord, fracChunkDim));
-		});
-		chunk_ = chunk__ + fracTochunk_(chunkPart__.it);
-	}
-	
 	ChunkCoord() = default;
+	ChunkCoord(vec3l const coord) : coordinate{ coord } {}
+	ChunkCoord(Chunk const chunk) : coordinate{ chunkToFrac(chunk.it) } {}
+	ChunkCoord(vec3i const chunk, Fractional const coord   ) : ChunkCoord{vec3l{chunk} * fracChunkDim + coord.it} {}
+	ChunkCoord(vec3i const chunk, Position   const position) : ChunkCoord{chunk, Fractional{posToFrac(position.it)}} {}
+	ChunkCoord(vec3i const chunk, Block      const block   ) : ChunkCoord{chunk, Fractional{blockToFrac(block.it )}} {}
+
 	
 	ChunkCoord(ChunkCoord const &) = default;
 	ChunkCoord(ChunkCoord &&) = default;
@@ -67,60 +57,50 @@ struct ChunkCoord {
 	ChunkCoord & operator=(ChunkCoord const &) = default;
 	ChunkCoord & operator=(ChunkCoord &&) = default;
 	
+	constexpr inline vec3l coord()  const { return coordinate; } 
 	
-	constexpr inline vec3d positionInChunk() const { return fracToPos(chunkPart__long()); }
-	constexpr inline vec3i block()    const { return chunkToBlock(chunk_) + fracToBlock(chunkPart__long()); }
-	constexpr inline vec3i blockInChunk()    const { return fracToBlock(chunkPart__long()); }
-	constexpr inline vec3<uint32_t> chunkPart()  const { return chunkPart_; } 
-	constexpr inline vec3l chunkPart__long()  const { return vec3l{ chunkPart_ }; } 
-	constexpr inline vec3l position__long()  const { return chunkToFrac(chunk_) + chunkPart__long(); } 
-	constexpr inline vec3d position() const { 
-		return static_cast<vec3d>(chunk_) * Chunks::chunkDim + positionInChunk(); 
-	}
-	vec3i chunk() const { return chunk_; }
+	constexpr inline vec3l chunkPart()  const { return coordinate.mod(fracChunkDim); } 
+	vec3i chunk() const { return vec3i(coordinate >> fracChunkDimAsPow2); }
 	
+	constexpr inline vec3l block()        const { return fracToBlock(coord()    ); }
+	constexpr inline vec3i blockInChunk() const { return vec3i(fracToBlock(chunkPart())); }
 	
-	friend ChunkCoord operator+(ChunkCoord const c1, ChunkCoord const c2) 
-		{return ChunkCoord(
-			c1.chunk_ + c2.chunk_, 
-			Fractional{ c1.chunkPart__long() + c2.chunkPart__long() }
-		);}
-	friend ChunkCoord &operator+=(ChunkCoord &c1, ChunkCoord const c2) { return c1 = c1+c2; }
-	
-	friend ChunkCoord operator+(ChunkCoord const c1, Fractional const offset) 
-		{return ChunkCoord( c1.chunk_, Fractional{c1.chunkPart__long() + offset.it} );}
-	friend ChunkCoord &operator+=(ChunkCoord &c1, Fractional const offset) {return c1 = c1 + offset; }
-	
-	friend ChunkCoord operator+(ChunkCoord const c1, Block const offset) 
-		{return ChunkCoord( c1.chunk_, Fractional{c1.chunkPart__long() + ChunkCoord::blockToFrac(offset.it)} );}
-	friend ChunkCoord &operator+=(ChunkCoord &c1, Block const offset) {return c1 = c1 + offset; }
-	
-	friend ChunkCoord operator+(ChunkCoord const c1, vec3d const offset) 
-		{return ChunkCoord( c1.chunk_, Fractional{ c1.chunkPart__long() + posToFrac(offset) } );}
-	friend ChunkCoord &operator+=(ChunkCoord &c1, vec3d const offset) {return c1 = c1 + offset; }
+	constexpr inline vec3d position()        const { return fracToPos(coord()    ); }
+	constexpr inline vec3d positionInChunk() const { return fracToPos(chunkPart()); }
 	
 	
-	friend ChunkCoord operator-(ChunkCoord const c1, ChunkCoord const c2) 
-		{return ChunkCoord(
-			c1.chunk_ - c2.chunk_, 
-			Fractional{ c1.chunkPart__long() - c2.chunkPart__long() }
-		);}
-	friend ChunkCoord &operator-=(ChunkCoord &c1, ChunkCoord const c2) { return c1 = c1-c2; }
+	friend ChunkCoord operator+(ChunkCoord const c1, ChunkCoord const c2) { return ChunkCoord{c1.coord() + c2.coord()}; }
+	friend ChunkCoord &operator+=(ChunkCoord    &c1, ChunkCoord const c2) { return c1 = c1+c2; }
 	
-	friend ChunkCoord operator-(ChunkCoord const c1, Fractional const offset) 
-		{return ChunkCoord( c1.chunk_, Fractional{c1.chunkPart__long() - offset.it} );}
-	friend ChunkCoord &operator-=(ChunkCoord &c1, Fractional const offset) {return c1 = c1 - offset; }
+	friend ChunkCoord operator+(ChunkCoord const c1, Fractional const offset) { return ChunkCoord{ c1.coord() + offset.it}; } 
+	friend ChunkCoord &operator+=(ChunkCoord    &c1, Fractional const offset) { return c1 = c1 + offset; }
 	
-	friend ChunkCoord operator-(ChunkCoord const c1, Block const offset) 
-		{return ChunkCoord( c1.chunk_, Fractional{c1.chunkPart__long() - ChunkCoord::blockToFrac(offset.it)} );}
-	friend ChunkCoord &operator-=(ChunkCoord &c1, Block const offset) {return c1 = c1 - offset; }
+	friend ChunkCoord operator+(ChunkCoord const c1, Block const offset) { return c1 + Fractional{blockToFrac(offset.it)}; }
+	friend ChunkCoord &operator+=(ChunkCoord    &c1, Block const offset) { return c1 = c1 + offset; }
 	
-	friend ChunkCoord operator-(ChunkCoord const c1, vec3d const offset) 
-		{return ChunkCoord( c1.chunk_, Fractional{ c1.chunkPart__long() - posToFrac(offset) } );}
-	friend ChunkCoord &operator-=(ChunkCoord &c1, vec3d const offset) {return c1 = c1 - offset; }
+	friend ChunkCoord operator+(ChunkCoord const c1, Chunk const offset) { return c1 + Fractional{chunkToFrac(offset.it)}; }
+	friend ChunkCoord &operator+=(ChunkCoord    &c1, Chunk const offset) { return c1 = c1 + offset; }
 	
+	friend ChunkCoord operator+(ChunkCoord const c1, vec3d const offset) { return c1 + Fractional{posToFrac(offset)}; }
+	friend ChunkCoord &operator+=(ChunkCoord    &c1, vec3d const offset) { return c1 = c1 + offset; }
+	
+	
+	friend ChunkCoord operator-(ChunkCoord const c1, ChunkCoord const c2) { return ChunkCoord{c1.coord() - c2.coord()}; }
+	friend ChunkCoord &operator-=(ChunkCoord    &c1, ChunkCoord const c2) { return c1 = c1-c2; }
+	
+	friend ChunkCoord operator-(ChunkCoord const c1, Fractional const offset) { return ChunkCoord{ c1.coord() - offset.it}; } 
+	friend ChunkCoord &operator-=(ChunkCoord    &c1, Fractional const offset) { return c1 = c1 - offset; }
+	
+	friend ChunkCoord operator-(ChunkCoord const c1, Block const offset) { return c1 - Fractional{blockToFrac(offset.it)}; }
+	friend ChunkCoord &operator-=(ChunkCoord    &c1, Block const offset) { return c1 = c1 - offset; }
+	
+	friend ChunkCoord operator-(ChunkCoord const c1, Chunk const offset) { return c1 - Fractional{chunkToFrac(offset.it)}; }
+	friend ChunkCoord &operator-=(ChunkCoord    &c1, Chunk const offset) { return c1 = c1 - offset; }
+	
+	friend ChunkCoord operator-(ChunkCoord const c1, vec3d const offset) { return c1 - Fractional{posToFrac(offset)}; }
+	friend ChunkCoord &operator-=(ChunkCoord    &c1, vec3d const offset) { return c1 = c1 - offset; }
 	
 	friend std::ostream& operator<<(std::ostream& stream, ChunkCoord const &v) {
-		return stream << '(' << v.chunk_ << ',' << v.positionInChunk() << ')';
+		return stream << "ChunkCoord{" << v.chunk() << ", " << v.chunkPart() << '}';
 	}
 };

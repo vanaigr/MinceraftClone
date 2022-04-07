@@ -73,7 +73,7 @@ static double const aspect{ windowSize_d.y / windowSize_d.x };
 static bool isOnGround{false};
 
 static vec3d playerForce{};
-static ChunkCoord playerCoord{ vec3i{0,0,0}, vec3d{0.01,12.001,0.01} };
+static ChunkCoord playerCoord{ vec3i{0,0,0}, ChunkCoord::Position{vec3d{0.01,12.001,0.01}} };
 static Viewport playerViewport{ 
 	vec2d{ misc::pi / 2.0, 0 }
 };
@@ -1331,7 +1331,7 @@ struct PosDir {
 	vec3i chunk;
 	
 	PosDir(ChunkCoord const coord, vec3l const line): 
-		start{ coord.chunkPart__long() },
+		start{ coord.chunkPart() },
 		end{ start + line },
 		
 		direction{ line.sign() },
@@ -1443,7 +1443,7 @@ public:
 static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround) {	
 	auto const playerChunk{ player.chunk() };
 	
-	vec3l playerPos{ player.chunkPart__long() };
+	vec3l playerPos{ player.chunkPart() };
 	vec3d force{ playerForce };
 	
 	vec3l maxPlayerPos{};
@@ -1531,7 +1531,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			};
 			ChunkCoord const coord{ 
 				playerChunk,
-				ChunkCoord::Fractional{ blockAt.position__long() }
+				ChunkCoord::Fractional{ blockAt.coord() }
 			};
 					
 			vec3i const blockChunk = coord.chunk();
@@ -1596,8 +1596,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 }
 
 bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
-	ChunkCoord const relativeBlockCoord{ ChunkCoord{ blockChunk, ChunkCoord::Block{blockCoord} } - currentCoord() };
-	vec3l const blockStartF{ relativeBlockCoord.position__long() };
+	ChunkCoord const relativeBlockCoord{ ChunkCoord{ blockChunk, ChunkCoord::Block{vec3l(blockCoord)} } - currentCoord() };
+	vec3l const blockStartF{ relativeBlockCoord.position() };
 	vec3l const blockEndF{ blockStartF + ChunkCoord::fracBlockDim };
 	
 	/*static_*/assert(width_i % 2 == 0);
@@ -1646,7 +1646,7 @@ static std::optional<BlockIntersection> trace(Chunks &chunks, PosDir const pd) {
 		};
 		ChunkCoord const coord{ 
 			pd.chunk,
-			ChunkCoord::Fractional{ blockAt.position__long() }
+			ChunkCoord::Fractional{ blockAt.coord() }
 		};
 		
 		vec3i const blockCoord = coord.blockInChunk();
@@ -1764,7 +1764,7 @@ static void update() {
 					pd.chunk,
 					ChunkCoord::Block{ 
 						  ChunkCoord::fracToBlock(intersection)
-						+ pd.direction.min(0) * vec3i{intersectionAxis}
+						+ vec3l(pd.direction.min(0)) * vec3l(intersectionAxis)
 					} 
 				};
 				
@@ -1785,7 +1785,7 @@ static void update() {
 				auto const blockId{ chunkData[index].id() };
 				
 				if(blockId != 0) {
-					ChunkCoord const bc{ coord - ChunkCoord::Block{ dirSign * vec3i(intersectionAxis) } };
+					ChunkCoord const bc{ coord - ChunkCoord::Block{ vec3l(dirSign) * vec3l(intersectionAxis) } };
 					vec3i const blockCoord = bc.blockInChunk();
 					vec3i const blockChunk = bc.chunk();
 			
@@ -2086,7 +2086,7 @@ int main(void) {
 			int playerChunkIndex = playerChunkCand.get().chunkIndex();
 			glUniform1i(startChunkIndex_u, playerChunkIndex);
 			
-			auto const playerRelativePos{ vec3f((playerCoord - ChunkCoord{cameraChunk, vec3d(0)}).position()) + vec3f{0, float(height/2.0), 0} };
+			auto const playerRelativePos{ vec3f((playerCoord - ChunkCoord{ChunkCoord::Chunk{cameraChunk}}).position()) + vec3f{0, float(height/2.0), 0} };
 			glUniform3f(playerRelativePosition_u, playerRelativePos.x, playerRelativePos.y, playerRelativePos.z);
 			
 			glUniform1i(drawPlayer_u, isSpectator);
@@ -2146,7 +2146,7 @@ int main(void) {
 				auto const result{ *optionalResult };
 				auto const chunk { result.chunk };
 				
-				ChunkCoord const blockCoord{ chunk.position(), ChunkCoord::Block{Chunks::indexBlock(result.blockIndex)} };
+				ChunkCoord const blockCoord{ chunk.position(), ChunkCoord::Block{vec3l(Chunks::indexBlock(result.blockIndex))} };
 				
 				auto const blockRelativePos{ 
 					vec3f((blockCoord - cameraCoord).position()) +  
