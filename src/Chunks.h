@@ -208,20 +208,20 @@ public:
 			return {};
 		}
 		
-		OptionalChunkIndex move(vec3i const otherChunk, int index) {
-			if(valid && Neighbours::checkDirValid(otherChunk - chunk.position())) return offset(otherChunk - chunk.position(), index);
+		OptionalChunkIndex move(vec3i const otherChunk) {
+			if(valid && Neighbours::checkDirValid(otherChunk - chunk.position())) return offset(otherChunk - chunk.position());
 			*this = Move_to_neighbour_Chunk(chunk.chunks(), otherChunk);
 			return optChunk();
 		}
 		
-		OptionalChunkIndex moveToNeighbour(vec3i const neighbour, int index) {
+		OptionalChunkIndex moveToNeighbour(vec3i const neighbour) {
 			if(!valid) return {};
-			return offset(neighbour - chunk.position(), index);
+			return offset(neighbour - chunk.position());
 		}
 			
-		OptionalChunkIndex offset(vec3i const dir, int index) {
+		OptionalChunkIndex offset(vec3i const dir) {
 			if(!Neighbours::checkDirValid(dir)) {
-				std::cerr << "dir " << index << " is invalid:" << dir << '\n';
+				std::cerr << "dir " << " is invalid:" << dir << '\n';
 				assert(false);
 				exit(-1);
 			}

@@ -26,9 +26,10 @@ struct ChunkCoord {
 	static constexpr inline Cont<int64_t> blockToFrac(Cont<int64_t> value) { return Cont<int64_t>(value)*fracBlockDim; }
 	template<template<typename> typename Cont>
 	static constexpr inline Cont<int64_t> blockCubeToFrac(Cont<int32_t> value) { return Cont<int64_t>(value)*fracCubeDim; }
-	static constexpr inline vec3l chunkToFrac(vec3i value) { return vec3l(value) << fracChunkDimAsPow2; }
+	static constexpr inline vec3l chunkToFrac(vec3i value) { return vec3l(value) * fracChunkDim; }
+	static constexpr inline vec3l cubeToFrac(vec3l value) { return value * fracCubeDim; }
 	
-	static constexpr inline vec3l chunkToBlock(vec3i value) { return vec3l(value) << Chunks::chunkDimAsPow2; }
+	static constexpr inline vec3l chunkToBlock(vec3i value) { return vec3l(value) * Chunks::chunkDim; }
 	
 	static constexpr inline vec3d fracToPos(vec3l value) { return static_cast<vec3d>(value) / fracBlockDim; }
 	static constexpr inline vec3l fracToBlock(vec3l value) { return value >> fracBlockDimAsPow2; }
@@ -59,14 +60,17 @@ struct ChunkCoord {
 	
 	constexpr inline vec3l coord()  const { return coordinate; } 
 	
-	constexpr inline vec3l chunkPart()  const { return coordinate.mod(fracChunkDim); } 
+	constexpr inline vec3l coordInChunk()  const { return coordinate.mod(fracChunkDim); } 
 	vec3i chunk() const { return vec3i(coordinate >> fracChunkDimAsPow2); }
 	
 	constexpr inline vec3l block()        const { return fracToBlock(coord()    ); }
-	constexpr inline vec3i blockInChunk() const { return vec3i(fracToBlock(chunkPart())); }
+	constexpr inline vec3i blockInChunk() const { return vec3i(fracToBlock(coordInChunk())); }
+	
+	constexpr inline vec3l cube()        const { return fracToBlockCube(coord()); }
+	constexpr inline vec3i cubeInChunk() const { return vec3i(fracToBlockCube(coordInChunk())); }
 	
 	constexpr inline vec3d position()        const { return fracToPos(coord()    ); }
-	constexpr inline vec3d positionInChunk() const { return fracToPos(chunkPart()); }
+	constexpr inline vec3d positionInChunk() const { return fracToPos(coordInChunk()); }
 	
 	
 	friend ChunkCoord operator+(ChunkCoord const c1, ChunkCoord const c2) { return ChunkCoord{c1.coord() + c2.coord()}; }
@@ -101,6 +105,6 @@ struct ChunkCoord {
 	friend ChunkCoord &operator-=(ChunkCoord    &c1, vec3d const offset) { return c1 = c1 - offset; }
 	
 	friend std::ostream& operator<<(std::ostream& stream, ChunkCoord const &v) {
-		return stream << "ChunkCoord{" << v.chunk() << ", " << v.chunkPart() << '}';
+		return stream << "ChunkCoord{" << v.chunk() << ", " << v.coordInChunk() << '}';
 	}
 };
