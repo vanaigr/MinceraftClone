@@ -40,6 +40,7 @@ struct ChunkCoord {
 	vec3l coordinate;
 	
 	struct Fractional { vec3l it; explicit Fractional(vec3l t) : it{t} {} };
+	struct Cube       { vec3l it; explicit Cube      (vec3l t) : it{t} {} };
 	struct Block      { vec3l it; explicit Block     (vec3l t) : it{t} {} };
 	struct Position   { vec3d it; explicit Position  (vec3d t) : it{t} {} };
 	struct Chunk      { vec3i it; explicit Chunk     (vec3i t) : it{t} {} };
@@ -49,6 +50,7 @@ struct ChunkCoord {
 	ChunkCoord(Chunk const chunk) : coordinate{ chunkToFrac(chunk.it) } {}
 	ChunkCoord(vec3i const chunk, Fractional const coord   ) : ChunkCoord{vec3l{chunk} * fracChunkDim + coord.it} {}
 	ChunkCoord(vec3i const chunk, Position   const position) : ChunkCoord{chunk, Fractional{posToFrac(position.it)}} {}
+	ChunkCoord(vec3i const chunk, Cube       const cube    ) : ChunkCoord{chunk, Fractional{cubeToFrac(cube.it )}} {}
 	ChunkCoord(vec3i const chunk, Block      const block   ) : ChunkCoord{chunk, Fractional{blockToFrac(block.it )}} {}
 
 	
@@ -105,6 +107,6 @@ struct ChunkCoord {
 	friend ChunkCoord &operator-=(ChunkCoord    &c1, vec3d const offset) { return c1 = c1 - offset; }
 	
 	friend std::ostream& operator<<(std::ostream& stream, ChunkCoord const &v) {
-		return stream << "ChunkCoord{" << v.chunk() << ", " << v.coordInChunk() << '}';
+		return stream << "ChunkCoord{" << v.chunk() << ", " << v.positionInChunk() << '}';
 	}
 };

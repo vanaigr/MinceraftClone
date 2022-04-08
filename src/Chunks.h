@@ -201,6 +201,7 @@ public:
 			valid = chunkIndexP != chunks.chunksIndex_position.end();
 			
 			if(valid) chunk = chunks[chunkIndexP->second];
+			else chunk = chunks[0]; //index 0 may be out of bounds but we need to remember Chunks
 		}
 		
 		OptionalChunkIndex optChunk() const {
@@ -234,7 +235,7 @@ public:
 		}
 		
 		bool is() const { return valid; }
-		Chunks::Chunk get() const { return chunk; };
+		//Chunks::Chunk get() const { return chunk; };
 	};
 private:
 	std::vector<int> vacant{};

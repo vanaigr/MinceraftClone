@@ -1587,7 +1587,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 					: (axisNewCoord <= axisPlayerPos)
 					) {
 						auto const diff{ playerPos.y - coord.coord().y };
-						if(upStepPossible && diff <= ChunkCoord::fracCubeDim && diff >= 0) return { upStepCoord, true, true };
+						if(upStepPossible && diff <= ChunkCoord::fracCubeDim && diff >= 0) return { upStepCoord, false, true };
 						else return { newCoord, true, false };
 					}
 				}
@@ -1606,17 +1606,16 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			
 			if(result.continueMovement) {
 				force -= (result.coord.coord() - playerPos) * vec3l{0,1,0};
-				playerPos = result.coord.coord();
 			}
+			else if(result.isCollision) {
+				if(negative_.y) isOnGround = true;
+				force = ChunkCoord::posToFracTrunk(ChunkCoord::fracToPos(force) * 0.8);
+				force.y = 0;
+			}
+			
+			playerPos = result.coord.coord();
 			updateBounds();
 		} while(result.continueMovement);
-		
-		playerPos = result.coord.coord();
-		if(result.isCollision) {
-			if(negative_.y) isOnGround = true;
-			force = ChunkCoord::posToFracTrunk(ChunkCoord::fracToPos(force) * 0.8);
-			force.y = 0;
-		}
 	}
 
 	if(dir.x != 0) {
@@ -1625,16 +1624,13 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			result = moveAlong(vec3b{1,0,0}, width_i/2*dir.x, vec3b{0,0,1},vec3b{0,1,0}, isOnGround);
 			
 			if(result.continueMovement) {
-				force -= (result.coord.coord() - playerPos) * vec3l{0,1,0};
-				playerPos = result.coord.coord();
+				force -= (result.coord.coord() - playerPos) * vec3l{1,0,0};
 			}
+			else if(result.isCollision) { force.x = 0; }
+			
+			playerPos = result.coord.coord();
 			updateBounds();
 		} while(result.continueMovement);
-		
-		playerPos = result.coord.coord();
-		if(result.isCollision) {
-			force.x = 0;
-		}
 	}
 	
 	if(dir.z != 0) {
@@ -1643,16 +1639,13 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			result = moveAlong(vec3b{0,0,1}, width_i/2*dir.z, vec3b{0,1,0},vec3b{1,0,0}, isOnGround);
 			
 			if(result.continueMovement) {
-				force -= (result.coord.coord() - playerPos) * vec3l{0,1,0};
-				playerPos = result.coord.coord();
+				force -= (result.coord.coord() - playerPos) * vec3l{0,0,1};
 			}
+			else if(result.isCollision) { force.z = 0; }
+			
+			playerPos = result.coord.coord();
 			updateBounds();
 		} while(result.continueMovement);
-		
-		playerPos = result.coord.coord();
-		if(result.isCollision) {
-			force.z = 0;
-		}
 	}
 	
 	player = ChunkCoord{ playerPos };
@@ -1661,7 +1654,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 
 bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
 	ChunkCoord const relativeBlockCoord{ ChunkCoord{ blockChunk, ChunkCoord::Block{vec3l(blockCoord)} } - currentCoord() };
-	vec3l const blockStartF{ relativeBlockCoord.position() };
+	vec3l const blockStartF{ relativeBlockCoord.coord() };
 	vec3l const blockEndF{ blockStartF + ChunkCoord::fracBlockDim };
 	
 	/*static_*/assert(width_i % 2 == 0);
@@ -1685,15 +1678,13 @@ static std::optional<BlockIntersection> trace(Chunks &chunks, PosDir const pd) {
 		
 	Chunks::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
 		
+	vec3l intersectionAxis{0};
 	for(int i = 0;; i++) {
-		vec3b const intersectionAxis{ checkBlock.next() };
 		vec3l const intersection{ checkBlock.get_current() };
-		
-		if(intersectionAxis == 0) break;
 		
 		vec3l const cubeCoord{ 
 			ChunkCoord::fracToBlockCube(intersection)
-			  + vec3l(pd.direction.min(0)) * vec3l(intersectionAxis)
+			  + vec3l(pd.direction.min(0)) * intersectionAxis
 		};
 		
 		auto const cubeLocalCoord{ 
@@ -1742,6 +1733,8 @@ static std::optional<BlockIntersection> trace(Chunks &chunks, PosDir const pd) {
 		if(checkBlock.get_end()) {
 			break;
 		}
+		
+		intersectionAxis = vec3l(checkBlock.next());
 	}
 
 	return {};
@@ -1826,8 +1819,8 @@ static void update() {
 				
 				ChunkCoord const coord{ 
 					pd.chunk,
-					ChunkCoord::Block{ 
-						  ChunkCoord::fracToBlock(intersection)
+					ChunkCoord::Cube{ 
+						  ChunkCoord::fracToBlockCube(intersection)
 						+ vec3l(pd.direction.min(0)) * vec3l(intersectionAxis)
 					} 
 				};
@@ -1860,7 +1853,7 @@ static void update() {
 					
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() != 0) { std::cout << "!\n"; } 
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() == 0) {
-						block = Chunks::Block::fullBlock(blockPlaceId);//1;
+						block = Chunks::Block::fullBlock(blockPlaceId);
 						chunks.gpuPresent[chunkIndex] = false;
 						chunks.modified[chunkIndex] = true;
 						isAction = true;
@@ -2148,9 +2141,9 @@ int main(void) {
 		glProgramUniform3i(debugProgram, db_playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
 		glProgramUniform3f(debugProgram, db_playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
 		
-		Chunks::Move_to_neighbour_Chunk const playerChunkCand{ chunks, cameraChunk };
-		if(playerChunkCand.is()) {
-			int playerChunkIndex = playerChunkCand.get().chunkIndex();
+		auto const playerChunkCand{ Chunks::Move_to_neighbour_Chunk(chunks, cameraChunk).optChunk().get() };
+		if(playerChunkCand != -1) {
+			int playerChunkIndex = playerChunkCand;
 			glUniform1i(startChunkIndex_u, playerChunkIndex);
 			
 			auto const playerRelativePos{ vec3f((playerCoord - ChunkCoord{ChunkCoord::Chunk{cameraChunk}}).position()) + vec3f{0, float(height/2.0), 0} };
@@ -2202,6 +2195,7 @@ int main(void) {
 
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		}
+		else glClear(GL_COLOR_BUFFER_BIT);
 		
 		{
 			glUseProgram(blockHitbox_p);

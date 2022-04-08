@@ -694,7 +694,6 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunk
 			}
 		}
 		
-		if(nextChunkIndex < 0) break;
 		
 		//if(empty || any(notEqual(farBoundaries, mix3i(ivec3(0), ivec3(chunkDim), positive_)) && !outOutside)) lastBlock = 0;
 		
@@ -709,6 +708,8 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunk
 			curChunkIndex,
 			playerIntersection.surface
 		);
+		
+		if(nextChunkIndex < 0) break;
 		
 		curChunkIndex = nextChunkIndex;
 		relativeToChunk = nextRelativeToChunk;	
