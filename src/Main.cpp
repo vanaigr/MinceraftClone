@@ -73,7 +73,9 @@ static double const aspect{ windowSize_d.y / windowSize_d.x };
 static bool isOnGround{false};
 
 static vec3d playerForce{};
+static vec3l const playerCameraOffset{ 0, ChunkCoord::posToFrac(height*0.85).x, 0 };
 static ChunkCoord playerCoord{ vec3i{0,0,0}, ChunkCoord::Position{vec3d{0.01,12.001,0.01}} };
+static ChunkCoord playerCamPos{playerCoord + playerCameraOffset};
 static Viewport playerViewport{ 
 	vec2d{ misc::pi / 2.0, 0 }
 };
@@ -91,7 +93,6 @@ static bool breakFullBlock{ false };
 
 static Viewport viewportDesired{ playerViewport };
 
-static vec3d const viewportOffset_{0,height*0.9,0};
 static bool isSpectator{ false };
 
 static bool isSmoothCamera{ false };
@@ -115,8 +116,9 @@ static ChunkCoord &currentCoord() {
 	return playerCoord;
 }
 
-static vec3d viewportOffset() {
-	return viewportOffset_ * (!isSpectator);
+static ChunkCoord currentCameraPos() {
+	if(isSpectator) return spectatorCoord;
+	return playerCamPos;
 }
 
 struct Input {
@@ -206,10 +208,10 @@ void handleKey(int const key) {
 	else if(key == GLFW_KEY_F4 && action == GLFW_PRESS)
 		debug = !debug;
 	else if(key == GLFW_KEY_F3 && action == GLFW_RELEASE) { 
-		isSpectator = !isSpectator;
-		if(isSpectator) {
-			spectatorCoord = playerCoord + viewportOffset_;
+		if(!isSpectator) {
+			spectatorCoord = currentCameraPos();
 		}
+		isSpectator = !isSpectator;
 	}
 	else if(key == GLFW_KEY_TAB && action == GLFW_PRESS) testInfo = true;
 }
@@ -1771,7 +1773,7 @@ static void update() {
 	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE && !isSpectator) {
 		bool isAction = false;
 
-		ChunkCoord const viewport{ currentCoord() + ChunkCoord::Fractional{ChunkCoord::posToFracTrunk(viewportOffset_)} };
+		ChunkCoord const viewport{ currentCameraPos() };
 		PosDir const pd{ PosDir(viewport, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
 		vec3i const dirSign{ pd.direction };
 		DDA checkBlock{ pd };
@@ -1956,6 +1958,9 @@ static void update() {
 	playerCamera.fov = misc::lerp( playerCamera.fov, 90.0 / 180 * misc::pi / curZoom, 0.1 );
 	
 	updateChunks();
+	
+	auto const diff{(playerCoord+playerCameraOffset - playerCamPos).position()};
+	playerCamPos = playerCamPos + vec3lerp(vec3d{}, vec3d(diff), vec3d(0.4));
 }
 	
 int main(void) {	
@@ -2074,7 +2079,7 @@ int main(void) {
 		float toGlob[3][3];
 		currentViewport.localToGlobalSpace(&toGlob);
 		currentViewport.globalToLocalSpace(&toLoc);
-		ChunkCoord const cameraCoord{ currentCoord() + viewportOffset() };
+		ChunkCoord const cameraCoord{ currentCameraPos() };
 		auto const cameraChunk{ cameraCoord.chunk() };
 		auto const cameraPosInChunk{ cameraCoord.positionInChunk() };
 		
