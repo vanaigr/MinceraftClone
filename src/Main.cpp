@@ -61,7 +61,7 @@ static double const width{ 0.6 };
 static int64_t const width_i{ ChunkCoord::posToFracRAway(width).x }; 
 static int64_t const height_i{ ChunkCoord::posToFracRAway(height).x };
 
-static double const deltaTime{ 16.0/1000.0 };
+static double       deltaTime{ 16.0/1000.0 };
 static double const fixedDeltaTime{ 16.0/1000.0 };
 
 static double speedModifier = 2.5;
@@ -1920,29 +1920,28 @@ static void update() {
 	}
 	
 	{
+		static vec3d playerMovement{};
+		
+		playerMovement += ( 
+			(
+				  playerViewport.flatForwardDir()*playerInput.movement.z
+				+ playerViewport.flatTopDir()    *playerInput.movement.y
+				+ playerViewport.flatRightDir()  *playerInput.movement.x
+			).normalizedNonan()
+		    * playerSpeed
+			* (shift ? 1.0*speedModifier : 1)
+			* (ctrl  ? 1.0/speedModifier : 1)
+		) * deltaTime; 
+			
 		if(diffPhysicsMs > fixedDeltaTime * 1000) {
 			lastPhysicsUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
-			
-			static vec3d currentPlayerMovement{};
-			
-			auto const playerMovement{ 
-				(
-					  playerViewport.flatForwardDir()*playerInput.movement.z
-					+ playerViewport.flatTopDir()    *playerInput.movement.y
-					+ playerViewport.flatRightDir()  *playerInput.movement.x
-				).normalizedNonan()
-			    * playerSpeed
-				* (shift ? 1.0*speedModifier : 1)
-				* (ctrl  ? 1.0/speedModifier : 1)
-			}; 
-		
+
 			if(!debugBtn0) {
 				playerForce += vec3d{0,-1,0} * fixedDeltaTime; 
 				if(isOnGround) {
 					playerForce += (
-						vec3d{0,1,0}*14*double(playerInput.jump)
-						+ playerMovement	
-					) * fixedDeltaTime;
+						vec3d{0,1,0}*14*double(playerInput.jump)	
+					) * fixedDeltaTime + playerMovement;
 				}
 				else {
 					auto const movement{ playerMovement * 0.5 * fixedDeltaTime };
@@ -1954,6 +1953,8 @@ static void update() {
 				isOnGround = false;
 				updateCollision(playerCoord, playerForce, isOnGround);
 			}
+			
+			playerMovement = 0;
 		}
 		
 		playerInput = Input();
@@ -2001,6 +2002,7 @@ int main(void) {
     }
 
     glfwMakeContextCurrent(window);
+	glfwSwapInterval( 0 );
 	if(mouseCentered) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	
     GLenum err = glewInit();
@@ -2369,10 +2371,12 @@ int main(void) {
 				lastError = err;
 			}
 		}
-
+		
         update();
 		
-		mc.add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - startFrame).count());
+		auto const dTime{ std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - startFrame).count() };
+		mc.add(dTime);
+		deltaTime = double(dTime) / 1000000.0;
     }
 
     glfwTerminate();
