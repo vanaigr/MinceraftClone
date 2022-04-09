@@ -440,6 +440,13 @@ public:
 			return coord << it[i];
 		});
 	}
+	
+	inline constexpr vec3<C> mix(vec3<C> const from, vec3<C> const to) {
+		return misc::mix<vec3<C>>(from, to, *this);
+		//return this->applied([from, to](auto const coord, auto i) -> C {
+		//	return misc::mix(from[i], to[i], coord);
+		//});
+	}
 };
 
 template<typename C>

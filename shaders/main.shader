@@ -218,12 +218,36 @@ Block blockAt_unnormalized(int chunkIndex, ivec3 blockCoord) {
 	return blockAt(chunkIndex, blockCoord);
 }
 
-ivec3 vertexNeighbourOffset(const int index) {
-	const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
-	const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
-	const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
-	return ivec3(x,y,z);
+layout(binding = 6) restrict readonly buffer ChunksAO {
+    uint data[];
+} ao;
+
+//copied from Chunks.h
+  ivec3 vertCoord(const int index) {
+  	return ivec3( index % (chunkDim*2), (index / (chunkDim*2)) % (chunkDim*2), (index / (chunkDim*2) / (chunkDim*2)) );
+  }
+  
+  int coordVert(const ivec3 coord) {
+  	return coord.x + coord.y*(chunkDim*2) + coord.z*(chunkDim*2)*(chunkDim*2);
+  }
+  
+uint aoAt(const int chunkIndex, const ivec3 vertexCoord) {
+	const int startIndex = chunkIndex * chunkDim*2*chunkDim*2*chunkDim*2;
+	const int offset = coordVert(vertexCoord);
+	const int index = startIndex + offset;
+	
+	const int el = index / 4;
+	const int sh = (index % 4) * 8;
+	
+	return (ao.data[el] >> sh) & 255;
 }
+  
+  ivec3 vertexNeighbourOffset(const int index) {
+  	const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
+  	const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
+  	const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
+  	return ivec3(x,y,z);
+  }
 
 float lightForChunkVertexDir(const int chunkIndex, const ivec3 vertex, const ivec3 dir) {
 	const bvec3 dirMask = notEqual(dir, ivec3(0));
@@ -231,19 +255,29 @@ float lightForChunkVertexDir(const int chunkIndex, const ivec3 vertex, const ive
 	if(dirCount == 0) return 0;
 	const float maxLight = dirCount == 1 ? 4 : (dirCount == 2 ? 6 : 7);
 	
-	int light = 0;
+	int curChunkIndex = chunkIndex;
+	ivec3 cubeCoord = vertex;
+	
+	const ivec3 outDir = testBounds(shr3i(cubeCoord, 1));
+	if( !all(equal(outDir, ivec3(0))) ) {
+		const int candChunkIndex = chunkNeighbourIndex(chunkIndex, outDir);
+		if(candChunkIndex < 0) return 1;
+		
+		curChunkIndex = candChunkIndex;
+		cubeCoord -= outDir * chunkDim*2;
+	}
+	
+	const uint vertexAO = aoAt(curChunkIndex, cubeCoord);
+	
+	int blocks = 0;
 	for(int i = 0; i < 8; i++) {
 		const ivec3 vertexDirs = vertexNeighbourOffset(i);
 		if(any(equal(vertexDirs*2-1, dir))) {
-			const ivec3 cubeCoord = vertex + vertexDirs - 1;
-			
-			const Block blk = blockAt_unnormalized(chunkIndex, shr3i(cubeCoord, 1));
-			const bool cube = cubeAt(blockCubes(blk), and3i(cubeCoord, 1));
-			light += int(!cube);
+			blocks += int( (vertexAO >> i) & 1 );
 		}
 	}
 	
-	return float(light) / maxLight;
+	return (maxLight - float(blocks)) / maxLight;
 }
 
 vec3 rgb2hsv(const vec3 c) {
@@ -322,6 +356,7 @@ struct BlockIntersection {
 	float t;
 	int chunkIndex;
 	Surface surface;
+	float ao;
 };
 
 BlockIntersection noBlockIntersection() {
@@ -387,6 +422,7 @@ struct Intersection {
 	vec3 at;
 	float t;
 	Surface surface;
+	bool frontface;
 };
 //float intersectCube(const Ray ray, const vec3 center, const vec3 n1, const vec3 n2, const vec3 size, out vec3 n_out, out vec2 uv_out) {
 Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, const vec3 n1, const vec3 n2) {
@@ -435,7 +471,8 @@ Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, cons
 		vec3(1),
 		mix(center + normal * size * frontface, at(ray, shortestT), equal(normal, vec3(0))),
 		shortestT,
-		surfaceEntity(1)
+		surfaceEntity(1),
+		frontface > 0
 	);
 }
 
@@ -716,13 +753,14 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkInd
 											playerIntersection.at,
 											playerIntersection.t,
 											curChunkIndex,
-											playerIntersection.surface
+											playerIntersection.surface,
+											1
 										);
 										else {
 											const ivec3 otherAxis1 = cubesMinAxisB.x ? ivec3(0,1,0) : ivec3(1,0,0);
 											const ivec3 otherAxis2 = cubesMinAxisB.z ? ivec3(0,1,0) : ivec3(0,0,1);
 											const ivec3 vertexCoord = ivec3(floor(cubesCoordAt * 2)) - relativeToChunk * chunkDim * 2;
-
+											
 											float light = 0;
 											if(info.frontface) {
 												for(int i = 0 ; i < 4; i++) {
@@ -742,11 +780,12 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkInd
 											return BlockIntersection(
 												info.normal,
 												info.newRayDir,
-												info.color * (pow(light, 2)*0.45 + 0.55),
+												info.color,
 												cubesCoordAt,
 												currentLength,
 												curChunkIndex,
-												surfaceBlock(info.block)
+												surfaceBlock(info.block),
+												light
 											);
 										}
 									}
@@ -782,7 +821,8 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkInd
 			playerIntersection.at,
 			playerIntersection.t,
 			curChunkIndex,
-			playerIntersection.surface
+			playerIntersection.surface,
+			1
 		);
 		
 		if(nextChunkIndex < 0 || nextNotLoaded) break;
@@ -842,18 +882,20 @@ Trace trace(Ray ray, int chunkIndex) {
 			const vec3 col = i.color;
 			const vec3 at = i.at;
 			
+			const float light = i.ao;
+			
 			if(blockId == 7) {
 				ray = Ray( i.at - 0 + i.newDir * 0.0001, i.newDir );
 				chunkIndex = intersectionChunkIndex;
 				
-				steps[curSteps++] = Step( col, t, surfaceBlock(blockId) );
+				steps[curSteps++] = Step( col * mix(0.7, 1.0, pow(light, 2)), t, surfaceBlock(blockId) );
 				continue;
 			}
 			if(blockId == 8) {
 				ray = Ray( i.at - 0 + i.newDir * 0.0001, i.newDir );
 				chunkIndex = intersectionChunkIndex;
 				
-				steps[curSteps++] = Step( col, t, surfaceBlock(blockId) );
+				steps[curSteps++] = Step( col * mix(0.45, 1.0, pow(light, 2)), t, surfaceBlock(blockId) );
 				continue;
 			}
 			
@@ -892,7 +934,7 @@ Trace trace(Ray ray, int chunkIndex) {
 				chunkIndex = intersectionChunkIndex;
 				
 				shadowIndex = curSteps++;
-				steps[shadowIndex] = Step( col, t, surfaceBlock(blockId) );
+				steps[shadowIndex] = Step( col * mix(0.45, 1.0, pow(light, 2)), t, surfaceBlock(blockId) );
 				continue;
 			}
 		}

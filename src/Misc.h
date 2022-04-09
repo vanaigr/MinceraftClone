@@ -139,6 +139,11 @@ namespace misc {
 	constexpr inline T nonan(T val) {
 		return (val == val) ? val : T(0);
 	}
+	
+	template<typename T>
+	constexpr inline T mix(T const from, T const to, T const factor) {
+		return from * (T(1) - factor) + to * factor;
+	}
 
 	/*void invertMatrix3To(double const (&m)[3][3], double (*minv)[3][3]) {//https://stackoverflow.com/a/18504573/15291447
 	double const det = 

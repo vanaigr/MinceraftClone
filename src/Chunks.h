@@ -9,14 +9,12 @@
 
 #include"Vector.h"
 
-
-
 struct Chunks {
 public:
 	static constexpr int const chunkDimAsPow2 = 4;
 	static constexpr int const chunkDim = 1 << chunkDimAsPow2; //used in vertex.shader
 	static constexpr int const chunkSize = chunkDim*chunkDim*chunkDim;
-	//static constexpr int const tmpChunkSize = chunkDim*chunkDim*chunkDim/(sizeof(uint16_t) * 8);
+	static constexpr int const cubesCount = chunkDim*2*chunkDim*2*chunkDim*2;
 	
 	struct Block { //used in main.shader
 	private:
@@ -53,6 +51,7 @@ public:
 		
 		constexpr uint16_t id() const { return uint16_t(data_ & ((1 << 16) - 1)); }
 		constexpr bool cube(vec3b const upperHalf) const { return blockCube(cubes(), upperHalf); }
+		constexpr bool cube(vec3l const coord) const { return blockCube(cubes(), vec3b(coord)); }
 		constexpr bool cube(uint8_t const index) const { return blockCube(cubes(), index); }
 		constexpr bool empty() const { return data_ == 0; }
 		
@@ -173,10 +172,11 @@ public:
 		#define gs(name, accessor) decltype(auto) name () { return chunks(). accessor [chunk_index]; } decltype(auto) name () const { return chunks(). accessor [chunk_index]; }	
 			gs(position, chunksPos)
 			gs(aabb, chunksAABB)
-			gs(gpuChunkStatus, gpuChunksStatus)
+			gs(gpuStatus, gpuChunksStatus)
 			gs(modified, modified) //is this safe? (gpuPresent returns rvalue reference)
 			gs(data, chunksData)
 			gs(neighbours, chunksNeighbours)
+			gs(ao, chunksAO)
 		#undef gs
 	};
 
@@ -208,6 +208,7 @@ public:
 		}
 		
 		OptionalChunkIndex move(vec3i const otherChunk) {
+			if(otherChunk == chunk.position()) return optChunk();
 			if(valid && Neighbours::checkDirValid(otherChunk - chunk.position())) return offset(otherChunk - chunk.position());
 			*this = Move_to_neighbour_Chunk(chunk.chunks(), otherChunk);
 			return optChunk();
@@ -220,7 +221,7 @@ public:
 			
 		OptionalChunkIndex offset(vec3i const dir) {
 			if(!Neighbours::checkDirValid(dir)) {
-				std::cerr << "dir " << " is invalid:" << dir << '\n';
+				std::cerr << "dir is invalid:" << dir << '\n';
 				assert(false);
 				exit(-1);
 			}
@@ -255,6 +256,37 @@ public:
 		
 		void reset() { status = 0; }
 	};
+	
+	//used in main.shader
+	struct ChunkAO {
+		static vec3i dirsForIndex(const int index) {
+			const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
+			const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
+			const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
+			return vec3i{x,y,z} * 2 - 1;
+		}
+		
+		static constexpr int size = cubesCount;
+		
+		static vec3i vertCoord(int const index) {
+			return vec3i{ index % (chunkDim*2), (index / (chunkDim*2)) % (chunkDim*2), (index / (chunkDim*2) / (chunkDim*2)) };
+		}
+		
+		static int coordVert(vec3i const coord) {
+			return coord.x + coord.y*(Chunks::chunkDim*2) + coord.z*(Chunks::chunkDim*2)*(Chunks::chunkDim*2);
+		}
+		
+	private:
+		std::array<uint8_t, cubesCount> vertsBlocks;
+	public:
+		//ChunkAO() = default;
+		
+		uint8_t       &operator[](int const index)       { return vertsBlocks[index]; }
+		uint8_t const &operator[](int const index) const { return vertsBlocks[index]; }
+		
+		void reset() { vertsBlocks.fill(0); }
+	};
+	
 private:
 	std::vector<int> vacant{};
 	std::vector<int> used_{};
@@ -265,12 +297,14 @@ private:
 		} 
 	};
 public:
-	std::vector<vec3i> chunksPos{};
 	std::vector<int> used{};
+	
+	std::vector<vec3i> chunksPos{};
 	std::vector<AABB> chunksAABB{};
 	std::vector<GPUChunkStatus> gpuChunksStatus{};
 	std::vector<bool> modified{};
 	std::vector<ChunkData> chunksData{};
+	std::vector<ChunkAO> chunksAO;
 	std::vector<Neighbours> chunksNeighbours{};
 	std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
 	
@@ -291,6 +325,7 @@ public:
 			gpuChunksStatus.resize(index+1);
 			modified.resize(index+1);
 			chunksData.resize(index+1);
+			chunksAO.resize(index+1);
 			chunksNeighbours.resize(index+1);
 		}
 		used.push_back(index);
@@ -332,6 +367,10 @@ public:
 	}
 	
 	inline static constexpr int16_t blockIndex(vec3<int32_t> position) {
+		if(!position.in(vec3i{0}, vec3i{chunkDim-1}).all()) {
+			std::cout << "error: " << ' ' << position << '\n';
+			assert(false);
+		}
 		return position.x + position.y*Chunks::chunkDim + position.z*Chunks::chunkDim*Chunks::chunkDim;
 	}
 	
