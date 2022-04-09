@@ -409,6 +409,14 @@ public:
 		return x || y || z;
 	}
 	
+	inline constexpr C none() const {
+		return !x && !y && !z;
+	}
+	
+	inline constexpr C anyNot() const {
+		return !x || !y || !z;
+	}
+	
 	inline constexpr vec3<C> nonan() const {
 		return applied([](auto const coord, auto i) -> C {
 			return misc::nonan(coord);

@@ -329,9 +329,9 @@ Chunks chunks{};
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
 	gpuChunksCount = chunks.used.size();
-	auto &it = chunks.gpuPresent;
+	auto &it = chunks.gpuChunksStatus;
 	
-	it.assign(it.size(), false);
+	it.assign(it.size(), Chunks::GPUChunkStatus{});
 	
 	static_assert(sizeof(Chunks::ChunkData{}) == 16384);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
@@ -1256,7 +1256,7 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 		
 		chunks.chunksPos[chunkIndex] = chunkPosition;
 		chunks.chunksIndex_position[chunkPosition] = chunkIndex;
-		chunks.gpuPresent[chunkIndex] = false;
+		chunks.gpuChunksStatus[chunkIndex].reset();
 		
 		auto chunk{ chunks[chunkIndex] };
 		auto &neighbours_{ chunk.neighbours() };
@@ -1270,7 +1270,7 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 			if(neighbourIndex >= 0) {
 				neighbours[offset] = Chunks::OptionalNeighbour(neighbourIndex);
 				chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(offset)] = chunkIndex;
-				chunks[neighbourIndex].gpuPresent() = false;
+				chunks[neighbourIndex].gpuChunkStatus().setNeedsUpdate();
 			}
 			else neighbours[offset] = Chunks::OptionalNeighbour();
 		}
@@ -1282,7 +1282,6 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 			if(neighbourIndex >= 0) {
 				neighbours[offset] = Chunks::OptionalNeighbour(neighbourIndex);
 				chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(offset)] = chunkIndex;
-				chunks[neighbourIndex].gpuPresent() = false;
 			}
 			else neighbours[offset] = Chunks::OptionalNeighbour();
 		}
@@ -1331,7 +1330,7 @@ static void updateChunks() {
 				if(optNeighbour) {
 					auto const neighbourIndex{ optNeighbour.get() };
 					chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = Chunks::OptionalNeighbour();
-					chunks[neighbourIndex].gpuPresent() = false;
+					chunks[neighbourIndex].gpuChunkStatus().reset();
 				}
 			}
 		}
@@ -1812,7 +1811,7 @@ static void update() {
 				if(breakFullBlock) block = Chunks::Block::emptyBlock();
 				else block = Chunks::Block{ block.id(), uint8_t( block.cubes() & (~Chunks::Block::blockCubeMask(result.cubeIndex)) ) };
 				
-				chunks.gpuPresent[chunkIndex] = false;
+				chunks.gpuChunksStatus[chunkIndex].reset();
 				chunks.modified[chunkIndex] = true;
 				isAction = true;
 				
@@ -1879,7 +1878,7 @@ static void update() {
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() != 0) { std::cout << "!\n"; } 
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() == 0) {
 						block = Chunks::Block::fullBlock(blockPlaceId);
-						chunks.gpuPresent[chunkIndex] = false;
+						chunks.gpuChunksStatus[chunkIndex].reset();
 						chunks.modified[chunkIndex] = true;
 						isAction = true;
 						
@@ -2176,21 +2175,41 @@ int main(void) {
 			
 			glUniform1i(drawPlayer_u, isSpectator);
 			
-			int i = 0;
+			int sentCount{};
 			for(auto const chunkIndex : chunks.used) {
 				Chunks::ChunkData &chunkData{ chunks.chunksData[chunkIndex] };
-				std::vector<bool>::reference gpuPresent = chunks.gpuPresent[chunkIndex];
+				vec3i const chunkPosition{ chunks[chunkIndex].position() };
+				auto &gpuStatus = chunks.gpuChunksStatus[chunkIndex];
 				
-				if(!gpuPresent) {
+				if(gpuStatus.needsUpdate() || !gpuStatus.isFullyLoaded()) {
 					if(chunkIndex >= gpuChunksCount) {
 						std::cout << "Error: gpu buffer was not properly resized. size=" << gpuChunksCount << " expected=" << (chunkIndex+1);
 						exit(-1);
 					}
+					if(playerChunkIndex != chunkIndex && ((sentCount > 100) || (chunkPosition - cameraChunk).in(vec3i{-viewDistance}, vec3i{viewDistance}).anyNot())) {
+						if(gpuStatus.isStubLoaded()) continue;
+						if(gpuStatus.isFullyLoaded() && gpuStatus.needsUpdate()) continue;
+						
+						Chunks::Neighbours const neighbours{};
+						static_assert(sizeof(neighbours) == sizeof(int32_t) * Chunks::Neighbours::neighboursCount);
+						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
+						glBufferSubData(
+							GL_SHADER_STORAGE_BUFFER, 
+							sizeof(int32_t) * Chunks::Neighbours::neighboursCount * chunkIndex, 
+							Chunks::Neighbours::neighboursCount * sizeof(uint32_t), 
+							&neighbours
+						);
+						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+						
+						gpuStatus.markStubLoaded();
+						continue;
+					}
+					
 					uint32_t const aabbData{ chunks[chunkIndex].aabb().getData() };
-					vec3i const chunkPosition{ chunks[chunkIndex].position() };
 					auto const &neighbours{ chunks[chunkIndex].neighbours() };
 					
-					gpuPresent = true;
+					gpuStatus.markFullyLoaded();
+					gpuStatus.resetNeedsUpdate();
 					
 					static_assert(sizeof chunkData == 16384);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
@@ -2205,7 +2224,7 @@ int main(void) {
 					glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(vec3i) * chunkIndex, sizeof(vec3i), &chunkPosition);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-					static_assert(sizeof(neighbours) == sizeof(int32_t) * 6);
+					static_assert(sizeof(neighbours) == sizeof(int32_t) * Chunks::Neighbours::neighboursCount);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
 					glBufferSubData(
 						GL_SHADER_STORAGE_BUFFER, 
@@ -2214,6 +2233,8 @@ int main(void) {
 						&neighbours
 					);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+					
+					sentCount ++;
 				} 
 			}
 

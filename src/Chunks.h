@@ -173,7 +173,7 @@ public:
 		#define gs(name, accessor) decltype(auto) name () { return chunks(). accessor [chunk_index]; } decltype(auto) name () const { return chunks(). accessor [chunk_index]; }	
 			gs(position, chunksPos)
 			gs(aabb, chunksAABB)
-			gs(gpuPresent, gpuPresent) //is this safe? (gpuPresent returns rvalue reference)
+			gs(gpuChunkStatus, gpuChunksStatus)
 			gs(modified, modified) //is this safe? (gpuPresent returns rvalue reference)
 			gs(data, chunksData)
 			gs(neighbours, chunksNeighbours)
@@ -235,6 +235,26 @@ public:
 		bool is() const { return valid; }
 		//Chunks::Chunk get() const { return chunk; };
 	};
+	
+	struct GPUChunkStatus {
+	private:
+		uint8_t status : 2;
+		uint8_t flags  : 1;
+	public:
+		GPUChunkStatus() = default;
+		
+		bool isFullyLoaded() const { return (status & 1) != 0; }
+		void markFullyLoaded() { reset(); status = 1; }
+		
+		bool isStubLoaded() const { return (status & 2) != 0; }
+		void markStubLoaded() { reset(); status = 2; }
+		
+		bool needsUpdate () const { return (flags & 1) == 0; }
+		void setNeedsUpdate()   { flags &= ~1; }
+		void resetNeedsUpdate() { flags |=  1; }
+		
+		void reset() { status = 0; }
+	};
 private:
 	std::vector<int> vacant{};
 	std::vector<int> used_{};
@@ -248,7 +268,7 @@ public:
 	std::vector<vec3i> chunksPos{};
 	std::vector<int> used{};
 	std::vector<AABB> chunksAABB{};
-	std::vector<bool> gpuPresent{};
+	std::vector<GPUChunkStatus> gpuChunksStatus{};
 	std::vector<bool> modified{};
 	std::vector<ChunkData> chunksData{};
 	std::vector<Neighbours> chunksNeighbours{};
@@ -268,7 +288,7 @@ public:
 			index = usedSize;
 			chunksPos.resize(index+1);
 			chunksAABB.resize(index+1);
-			gpuPresent.resize(index+1);
+			gpuChunksStatus.resize(index+1);
 			modified.resize(index+1);
 			chunksData.resize(index+1);
 			chunksNeighbours.resize(index+1);

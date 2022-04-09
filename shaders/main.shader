@@ -69,6 +69,12 @@ ivec3 onePastEnd(const uint data) { return end(data) + 1; } //copied from Chunks
 bool emptyBounds(const ivec3 start, const ivec3 onePastEnd) {
 	return any(lessThanEqual(onePastEnd, start));
 }
+bool emptyBounds(const int chunkIndex) {
+	if(chunkIndex < 0) return true;
+	const uint bounds = chunkBounds(chunkIndex);
+	return emptyBounds(start(bounds), onePastEnd(bounds));
+}
+
 
 
 #define neighboursCount 6
@@ -104,6 +110,14 @@ int chunkNeighbourIndex(const int chunkIndex, const ivec3 dir) {
 	if(dir.y != 0) outChunkIndex = chunkDirectNeighbourIndex(outChunkIndex, ivec3(0,dir.y,0));
 	if(dir.z != 0) outChunkIndex = chunkDirectNeighbourIndex(outChunkIndex, ivec3(0,0,dir.z));
 	return outChunkIndex;
+}
+
+bool chunkNotLoaded(const int chunkIndex) {
+	if(chunkIndex == -1) return true;
+	const int index = chunkIndex * neighboursCount;
+	for(int i = 0; i < neighboursCount; i ++) 
+		if(ns.neighbours[index + i] != 0) return false;
+	return true;
 }
 
 
@@ -536,6 +550,7 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunk
 		  //
 		  const int nextChunkIndex = candChunkIndex;
 		  const ivec3 nextRelativeToChunk = relativeToChunk + outNeighbourDir;
+		  const bool nextNotLoaded = chunkNotLoaded(nextChunkIndex);
 
 		
 		if(!empty) {
@@ -602,6 +617,7 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunk
 						curChunkIndex,
 						toBlockCoord - relativeToChunk * chunkDim
 					);
+					else if(nextNotLoaded) toBlock = blockAir();
 					else toBlock = blockAt(
 						nextChunkIndex,
 						toBlockCoord - nextRelativeToChunk * chunkDim
@@ -709,7 +725,7 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunk
 			playerIntersection.surface
 		);
 		
-		if(nextChunkIndex < 0) break;
+		if(nextChunkIndex < 0 || nextNotLoaded) break;
 		
 		curChunkIndex = nextChunkIndex;
 		relativeToChunk = nextRelativeToChunk;	
