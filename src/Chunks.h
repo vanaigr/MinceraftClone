@@ -138,10 +138,8 @@ public:
 			static constexpr uint8_t mirror(uint8_t index) {
 				return dirAsIndex( -indexAsDir(index) );
 			}
-			
-			static constexpr bool isSelf(uint8_t index) {
-				return false;
-				//return indexAsDir(index) == 0;
+			static constexpr uint8_t mirror(vec3i const dir) {
+				return dirAsIndex( -dir );
 			}
 		
 		OptionalNeighbour &operator[](uint8_t index) { assert(checkIndexValid(index)); return n[index]; }
