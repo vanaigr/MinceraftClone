@@ -138,6 +138,13 @@ ivec3 chunkPosition(const int chunkIndex) {
 	);
 }
 
+ivec3 shr3i(const ivec3 v, const int i) {
+	return ivec3(v.x >> i, v.y >> i, v.z >> i);
+}
+ivec3 and3i(const ivec3 v, const int i) {
+	return ivec3(v.x & i, v.y & i, v.z & i);
+}
+
 vec3 relativeChunkPosition(const int chunkIndex) {
 	return vec3( (chunkPosition(chunkIndex) - playerChunk) * chunkDim ) - playerInChunk;
 }
@@ -209,6 +216,34 @@ Block blockAt_unnormalized(int chunkIndex, ivec3 blockCoord) {
 	}
 	
 	return blockAt(chunkIndex, blockCoord);
+}
+
+ivec3 vertexNeighbourOffset(const int index) {
+	const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
+	const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
+	const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
+	return ivec3(x,y,z);
+}
+
+float lightForChunkVertexDir(const int chunkIndex, const ivec3 vertex, const ivec3 dir) {
+	const bvec3 dirMask = notEqual(dir, ivec3(0));
+	const int dirCount = int(dirMask.x) + int(dirMask.y) + int(dirMask.z);
+	if(dirCount == 0) return 0;
+	const float maxLight = dirCount == 1 ? 4 : (dirCount == 2 ? 6 : 7);
+	
+	int light = 0;
+	for(int i = 0; i < 8; i++) {
+		const ivec3 vertexDirs = vertexNeighbourOffset(i);
+		if(any(equal(vertexDirs*2-1, dir))) {
+			const ivec3 cubeCoord = vertex + vertexDirs - 1;
+			
+			const Block blk = blockAt_unnormalized(chunkIndex, shr3i(cubeCoord, 1));
+			const bool cube = cubeAt(blockCubes(blk), and3i(cubeCoord, 1));
+			light += int(!cube);
+		}
+	}
+	
+	return float(light) / maxLight;
 }
 
 vec3 rgb2hsv(const vec3 c) {
@@ -405,10 +440,11 @@ Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, cons
 }
 
 struct BlockInfo {
-	vec3 normal;
+	ivec3 normal;
 	vec3 newRayDir;
 	vec3 color;
 	uint block;
+	bool frontface;
 };
 
 BlockInfo testFace(
@@ -429,7 +465,7 @@ BlockInfo testFace(
 		toBlockCoord
 	};
 			
-	BlockInfo glass = BlockInfo(vec3(0), vec3(0), vec3(1), 0);
+	BlockInfo glass = BlockInfo(ivec3(0), vec3(0), vec3(1), 0, false);
 	for(int s = 0; s < 2; s ++) {
 		const uint blockId = blocks[s];
 		const vec3 blockCoord = blockCoords[s];
@@ -440,6 +476,7 @@ BlockInfo testFace(
 				dot(intersectionSide, blockCoord.zxx),
 				dot(intersectionSide, blockCoord.yzy)
 			), 0.0001, 0.9999);
+			
 			const ivec3 side = intersectionSide * ((1-s) * 2 - 1) * dir_;
 			const bool backside = dot(vec3(side), ray.dir) > 0;
 			const ivec3 normal = side * ( backside ? -1 : 1 );
@@ -451,7 +488,7 @@ BlockInfo testFace(
 				if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue; 
 			}
 			if(blockId == 7) { //glass
-				if(glass.block != 0) { glass = BlockInfo(vec3(0), vec3(0), vec3(1), 0); continue; }
+				if(glass.block != 0) { glass = BlockInfo(ivec3(0), vec3(0), vec3(1), 0, false); continue; }
 				
 				const vec3 glassOffset = vec3( 
 					sin(blockCoord.x*9)/2, 
@@ -475,7 +512,8 @@ BlockInfo testFace(
 					normal,
 					normalize(refracted),
 					color,
-					blockId
+					blockId,
+					!backside
 				);
 				continue;
 			}
@@ -488,7 +526,8 @@ BlockInfo testFace(
 					normal,
 					reflected,
 					color,
-					blockId
+					blockId,
+					!backside
 				);
 			}
 			
@@ -497,7 +536,8 @@ BlockInfo testFace(
 				normal,
 				vec3(0),
 				color,
-				blockId
+				blockId,
+				!backside
 			);
 		}
 	}	
@@ -505,7 +545,7 @@ BlockInfo testFace(
 	return glass; //glass may have block id = 0 - empty block
 }
 
-BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunkIndex, const bool drawPlayer) { 	
+BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkIndex, const bool drawPlayer) { 	
 	const vec3 dir = ray.dir;
 	const ivec3 dir_ = ivec3(sign(dir));
 	const ivec3 positive_ = max(+dir_, ivec3(0,0,0));
@@ -516,8 +556,6 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunk
 	const  vec3 firstCellRow_f = vec3(positive_) * (floor(ray.orig)+1) + vec3(negative_) * (ceil(ray.orig)-1);
 	const ivec3 firstCellRow   = ivec3(firstCellRow_f); 
 	const  vec3 firstCellDiff  = abs(ray.orig-firstCellRow_f); //distance to the frist block side
-	
-	int curChunkIndex = chunkIndex;
 	
 	ivec3 lastSteps = ivec3(0);
 	//uint lastBlock = blockAt_unnormalized(...);
@@ -680,15 +718,37 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, const int chunk
 											curChunkIndex,
 											playerIntersection.surface
 										);
-										else return BlockIntersection(
-											info.normal,
-											info.newRayDir,
-											info.color,
-											cubesCoordAt,
-											currentLength,
-											curChunkIndex,
-											surfaceBlock(info.block)
-										);
+										else {
+											const ivec3 otherAxis1 = cubesMinAxisB.x ? ivec3(0,1,0) : ivec3(1,0,0);
+											const ivec3 otherAxis2 = cubesMinAxisB.z ? ivec3(0,1,0) : ivec3(0,0,1);
+											const ivec3 vertexCoord = ivec3(floor(cubesCoordAt * 2)) - relativeToChunk * chunkDim * 2;
+
+											float light = 0;
+											if(info.frontface) {
+												for(int i = 0 ; i < 4; i++) {
+													const ivec2 offset_ = ivec2(i%2, i/2);
+													const ivec3 offset = offset_.x * otherAxis1 + offset_.y * otherAxis2;
+													const ivec3 curVertexCoord = vertexCoord + offset;
+																		
+													const float vertexLight = lightForChunkVertexDir(curChunkIndex, curVertexCoord, info.normal);
+													
+													const float diffX = abs(offset_.x - mod(dot(localCubesCoordAt, otherAxis1)*2, 1));
+													const float diffY = abs(offset_.y - mod(dot(localCubesCoordAt, otherAxis2)*2, 1));
+													light += mix(mix(vertexLight, 0, diffY), 0, diffX);
+												}
+											}
+											else light = 0.5;
+											
+											return BlockIntersection(
+												info.normal,
+												info.newRayDir,
+												info.color * (pow(light, 2)*0.45 + 0.55),
+												cubesCoordAt,
+												currentLength,
+												curChunkIndex,
+												surfaceBlock(info.block)
+											);
+										}
 									}
 								}
 							}				
@@ -800,6 +860,7 @@ Trace trace(Ray ray, int chunkIndex) {
 			{
 				if(shadow) {
 					steps[curSteps] = Step( col, t, surfaceBlock(blockId) );
+			
 					break;
 				}
 				shadow = true;
@@ -837,6 +898,7 @@ Trace trace(Ray ray, int chunkIndex) {
 		}
 		else {
 			steps[curSteps] = Step( background(ray.dir), far, noSurface() );
+				
 			break;
 		}
 	}
@@ -854,6 +916,7 @@ Trace trace(Ray ray, int chunkIndex) {
 			}
 			//curSteps == shadowIndex
 			const Step current = steps[curSteps--]; 
+			
 			previous = Step( current.color * previous.color, current.depth, current.surface );
 		}
 		else {
@@ -862,7 +925,7 @@ Trace trace(Ray ray, int chunkIndex) {
 			previous = Step( current.color * 0.4, current.depth, current.surface );
 		}
 	}
-	else if(!isNoSurface(last.surface)) previous = Step( vec3(0), 1, noSurface() );
+	//else if(!isNoSurface(last.surface)) previous = Step( vec3(0), 1, noSurface() );
 	
 	for(; curSteps >= 0; curSteps--) {
 		const Step current = steps[curSteps];
