@@ -323,7 +323,7 @@ static GLuint chunkIndex_u;
 static GLuint blockSides_u;
 
 static int32_t gpuChunksCount = 0;
-Chunks chunks{};
+chunk::Chunks chunks{};
 
 
 void resizeBuffer() {
@@ -331,11 +331,11 @@ void resizeBuffer() {
 	gpuChunksCount = chunks.used.size();
 	auto &it = chunks.gpuChunksStatus;
 	
-	it.assign(it.size(), Chunks::GPUChunkStatus{});
+	it.assign(it.size(), chunk::GPUChunkStatus{});
 	
-	static_assert(sizeof(Chunks::ChunkData{}) == 16384);
+	static_assert(sizeof(chunk::ChunkData{}) == 16384);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(Chunks::ChunkData{}), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::ChunkData{}), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkIndex_u);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
@@ -350,13 +350,13 @@ void resizeBuffer() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * Chunks::Neighbours::neighboursCount * sizeof(int32_t), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * chunk::Neighbours::neighboursCount * sizeof(int32_t), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, chunksNeighbours_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
-	static_assert(sizeof(Chunks::ChunkAO) == sizeof(uint8_t) * Chunks::ChunkAO::size);
+	static_assert(sizeof(chunk::ChunkAO) == sizeof(uint8_t) * chunk::ChunkAO::size);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(Chunks::ChunkAO), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::ChunkAO), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, chunksAO_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
@@ -427,18 +427,7 @@ static void reloadShaders() {
 	
 		sl.attachShaders(mainProgram);
 	
-		glLinkProgram(mainProgram);	
-		
-		{
-			int length;
-			glGetProgramiv(mainProgram, GL_INFO_LOG_LENGTH, &length);
-			GLchar *msg = new GLchar[length + 1];
-			msg[0] = '\0';
-			glGetProgramInfoLog(mainProgram, length, &length, msg);
-			std::cout << "Program error:\n" << msg;
-			delete[] msg;
-		}
-	
+		glLinkProgram(mainProgram);		
 		glValidateProgram(mainProgram);
 	
 		sl.deleteShaders();
@@ -1034,8 +1023,8 @@ public:
 double heightAt(vec2i const flatChunk, vec2i const block) {
 	static siv::PerlinNoise perlin{ (uint32_t)rand() };
 	auto const value = perlin.octave2D(
-		(flatChunk.x * 1.0 * Chunks::chunkDim + block.x) / 20.0, 
-		(flatChunk.y * 1.0 * Chunks::chunkDim + block.y) / 20.0, 
+		(flatChunk.x * 1.0 * chunk::blocksInChunkDim + block.x) / 20.0, 
+		(flatChunk.y * 1.0 * chunk::blocksInChunkDim + block.y) / 20.0, 
 		3
 	);
 						
@@ -1050,42 +1039,41 @@ vec3i getTreeBlock(vec2i const flatChunk) {
 	
 	vec2i const it( 
 		(vec2d(random(vec2i{flatChunk.x+1, flatChunk.y}), random(vec2i{flatChunk.x*3, flatChunk.y*5})) 
-		 * Chunks::chunkDim)
-		.floor().clamp(0, 15)
+		 * chunk::blocksInChunkDim)
+		.floor().clamp(0, chunk::blocksInChunkDim)
 	);
 	
 	auto const height{ heightAt(flatChunk,it) };
 	
-	assert(height >= 0 && height < 16);
 	return vec3i{ it.x, int32_t(std::floor(height))+1, it.y };
 }
 
-std::string chunkFilename(Chunks::Chunk const &chunk) {
+std::string chunkFilename(chunk::Chunk const &chunk) {
 	auto const &pos{ chunk.position() };
 	std::stringstream ss{};
 	ss << "./save/" << pos << ".cnk";
 	return ss.str();
 }
 
-std::string chunkNewFilename(Chunks::Chunk const &chunk) {
+std::string chunkNewFilename(chunk::Chunk const &chunk) {
 	auto const &pos{ chunk.position() };
 	std::stringstream ss{};
 	ss << "./save2/" << pos << ".cnk2";
 	return ss.str();
 }
 
-void writeChunk(Chunks::Chunk &chunk) {
+void writeChunk(chunk::Chunk &chunk) {
 	if(!saveChunks) return;
 	else (std::cout << "not implemented\n"), (assert(false));
 	auto const &data{ chunk.data() };
 	
 	std::ofstream chunkFileOut{ chunkNewFilename(chunk), std::ios::binary };
 	
-	for(int x{}; x < Chunks::chunkDim; x++) 
-	for(int y{}; y < Chunks::chunkDim; y++) 
-	for(int z{}; z < Chunks::chunkDim; z++) {
+	for(int x{}; x < chunk::blocksInChunkDim; x++) 
+	for(int y{}; y < chunk::blocksInChunkDim; y++) 
+	for(int z{}; z < chunk::blocksInChunkDim; z++) {
 		vec3i const blockCoord{x,y,z};
-		auto const blockData = data[Chunks::blockIndex(blockCoord)].data();
+		auto const blockData = data[chunk::blockIndex(blockCoord)].data();
 		
 		uint8_t const blk[] = { 
 			(unsigned char)((blockData >> 0) & 0xff), 
@@ -1097,7 +1085,7 @@ void writeChunk(Chunks::Chunk &chunk) {
 	}
 }
 
-bool tryReadChunk(Chunks::Chunk &chunk, vec3i &start, vec3i &end) {
+bool tryReadChunk(chunk::Chunk &chunk, vec3i &start, vec3i &end) {
 	std::cout << "not implemented\n";
 	assert(false);
 	return false;
@@ -1106,12 +1094,12 @@ bool tryReadChunk(Chunks::Chunk &chunk, vec3i &start, vec3i &end) {
 	auto const filename2{ chunkNewFilename(chunk) };
 	std::ifstream chunkFileIn2{ filename2, std::ios::binary };	
 	if(!chunkFileIn2.fail()) {
-		for(int x{}; x < Chunks::chunkDim; x++) 
-		for(int y{}; y < Chunks::chunkDim; y++) 
-		for(int z{}; z < Chunks::chunkDim; z++) 
+		for(int x{}; x < chunk::blocksInChunkDim; x++) 
+		for(int y{}; y < chunk::blocksInChunkDim; y++) 
+		for(int z{}; z < chunk::blocksInChunkDim; z++) 
 		{
 			vec3i const blockCoord{x,y,z};
-			//uint16_t &block = data[Chunks::blockIndex(blockCoord)];
+			//uint16_t &block = data[chunk::blockIndex(blockCoord)];
 			uint8_t blk[4];
 			
 			chunkFileIn2.read( reinterpret_cast<char *>(&blk[0]), 4 );
@@ -1123,7 +1111,7 @@ bool tryReadChunk(Chunks::Chunk &chunk, vec3i &start, vec3i &end) {
 				| (uint32_t(blk[3]) << 24)					
 			);
 			
-			data[Chunks::blockIndex(blockCoord)] = Chunks::Block(block);
+			data[chunk::blockIndex(blockCoord)] = chunk::Block(block);
 			if(block != 0) {
 				start = start.min(blockCoord);
 				end   = end  .max(blockCoord);
@@ -1137,18 +1125,18 @@ bool tryReadChunk(Chunks::Chunk &chunk, vec3i &start, vec3i &end) {
 	auto const filename{ chunkFilename(chunk) };
 	std::ifstream chunkFileIn{ filename, std::ios::binary };
 	if(!chunkFileIn.fail()) {
-		for(int x{}; x < Chunks::chunkDim; x++) 
-		for(int y{}; y < Chunks::chunkDim; y++) 
-		for(int z{}; z < Chunks::chunkDim; z++) {
+		for(int x{}; x < chunk::blocksInChunkDim; x++) 
+		for(int y{}; y < chunk::blocksInChunkDim; y++) 
+		for(int z{}; z < chunk::blocksInChunkDim; z++) {
 			vec3i const blockCoord{x,y,z};
-			//uint16_t &block = data[Chunks::blockIndex(blockCoord)];
+			//uint16_t &block = data[chunk::blockIndex(blockCoord)];
 			uint8_t blk[2];
 			
 			chunkFileIn.read( reinterpret_cast<char *>(&blk[0]), 2 );
 			
 			uint16_t const block( blk[0] | (uint16_t(blk[1]) << 8) );
 			
-			data[Chunks::blockIndex(blockCoord)] = Chunks::Block::fullBlock(block);
+			data[chunk::blockIndex(blockCoord)] = chunk::Block::fullBlock(block);
 			if(block != 0) {
 				start = start.min(blockCoord);
 				end   = end  .max(blockCoord);
@@ -1162,7 +1150,7 @@ bool tryReadChunk(Chunks::Chunk &chunk, vec3i &start, vec3i &end) {
 	return false;*/
 }
 
-void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i &start, vec3i &end) {	
+void genTrees(vec3i const chunk, chunk::ChunkData &data, vec3i &start, vec3i &end) {	
 	for(int32_t cx{-1}; cx <= 1; cx ++) 
 	for(int32_t cz{-1}; cz <= 1; cz ++) {
 		vec3i const chunkOffset{ cx, -chunk.y, cz };
@@ -1174,15 +1162,15 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i &start, vec3i &e
 		for(int32_t y{0} ; y < 6 ; y++) 
 		for(int32_t z{-2}; z <= 2; z++) {
 			vec3i tl{ x,y,z };// tree-local block
-			auto const blk{ chunkOffset * Chunks::chunkDim + treeBlock + tl };
+			auto const blk{ chunkOffset * chunk::blocksInChunkDim + treeBlock + tl };
 			
-			if(blk.inMMX(vec3i{0}, vec3i{Chunks::chunkDim}).all()) {
-				auto const index{ Chunks::blockIndex(blk) };
-				Chunks::Block &curBlock{ data[index] };
+			if(blk.inMMX(vec3i{0}, vec3i{chunk::blocksInChunkDim}).all()) {
+				auto const index{ chunk::blockIndex(blk) };
+				chunk::Block &curBlock{ data[index] };
 				
 				if(curBlock.id() == 0) {
 					bool is = false;
-					if((is = tl.x == 0 && tl.z == 0 && tl.y <= 4)) curBlock = Chunks::Block::fullBlock(4);
+					if((is = tl.x == 0 && tl.z == 0 && tl.y <= 4)) curBlock = chunk::Block::fullBlock(4);
 					else if((is = 
 							(tl.y >= 2 && tl.y <= 3
 							&& !( (abs(x) == abs(z))&&(abs(x)==2) )
@@ -1190,7 +1178,7 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i &start, vec3i &e
 							(tl.in(vec3i{-1, 4, -1}, vec3i{1, 5, 1}).all()
 							&& !( (abs(x) == abs(z))&&(abs(x)==1) &&(tl.y==5 || (treeBlock.x*(x+1)/2+treeBlock.z*(z+1)/2)%2==0) )
 							)
-					)) curBlock = Chunks::Block::fullBlock(5);
+					)) curBlock = chunk::Block::fullBlock(5);
 					
 					if(is) {
 						start = start.min(blk);
@@ -1203,41 +1191,41 @@ void genTrees(vec3i const chunk, Chunks::ChunkData &data, vec3i &start, vec3i &e
 	
 }
 
-void genChunkData(double const (&heights)[Chunks::chunkDim * Chunks::chunkDim], Chunks::Chunk chunk, vec3i &start, vec3i &end) {
+void genChunkData(double const (&heights)[chunk::blocksInChunkDim * chunk::blocksInChunkDim], chunk::Chunk chunk, vec3i &start, vec3i &end) {
 	auto const &pos{ chunk.position() };
 	auto &data{ chunk.data() };
 	
-	for(int z = 0; z < Chunks::chunkDim; ++z)
-		for(int y = 0; y < Chunks::chunkDim; ++y) 
-			for(int x = 0; x < Chunks::chunkDim; ++x) {
-				vec3i const blockCoord{ x, y, z };
-				
-				auto const height{ heights[z * Chunks::chunkDim + x] };
-				auto const index{ Chunks::blockIndex(blockCoord) };
-				//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * Chunks::chunkDim + y + 1), 9)) { //repeated floor
-				double const diff{ height - double(pos.y * Chunks::chunkDim + y) };
-				if(diff >= 0) {
-					uint16_t block = 0;
-					if(diff < 1) block = 1; //grass
-					else if(diff < 5) block = 2; //dirt
-					else block = 6; //stone
-					data[index] = Chunks::Block::fullBlock(block);
-					
-					start = start.min(blockCoord);
-					end   = end  .max(blockCoord);
-				}
-				else {
-					data[index] = Chunks::Block::emptyBlock();
-				}
-			}
+	for(int z = 0; z < chunk::blocksInChunkDim; ++z)
+	for(int y = 0; y < chunk::blocksInChunkDim; ++y) 
+	for(int x = 0; x < chunk::blocksInChunkDim; ++x) {
+		vec3i const blockCoord{ x, y, z };
+		
+		auto const height{ heights[z * chunk::blocksInChunkDim + x] };
+		auto const index{ chunk::blockIndex(blockCoord) };
+		//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * chunk::blocksInChunkDim + y + 1), 9)) { //repeated floor
+		double const diff{ height - double(pos.y * chunk::blocksInChunkDim + y) };
+		if(diff >= 0) {
+			uint16_t block = 0;
+			if(diff < 1) block = 1; //grass
+			else if(diff < 5) block = 2; //dirt
+			else block = 6; //stone
+			data[index] = chunk::Block::fullBlock(block);
+			
+			start = start.min(blockCoord);
+			end   = end  .max(blockCoord);
+		}
+		else {
+			data[index] = chunk::Block::emptyBlock();
+		}
+	}
 		
 	genTrees(pos, data, *&start, *&end);	
 }
 
-static uint8_t calcAO(Chunks &chunks, Chunks::Move_to_neighbour_Chunk chunk, vec3i const chunkPos, vec3i const cubeCoordInChunk) {
+static uint8_t calcAO(chunk::Chunks &chunks, chunk::Move_to_neighbour_Chunk chunk, vec3i const chunkPos, vec3i const cubeCoordInChunk) {
 	uint8_t cubes{};
 	for(int j{}; j < 8; j ++) {
-		auto const offsetcubeCoordInChunk_unnormalized{ cubeCoordInChunk + Chunks::ChunkAO::dirsForIndex(j).min(0) };
+		auto const offsetcubeCoordInChunk_unnormalized{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0) };
 		ChunkCoord const offsetCubePos{ chunkPos, ChunkCoord::Cube{vec3l(offsetcubeCoordInChunk_unnormalized)} };
 		
 		auto const offsetCubeChunkIndex{ chunk.move(offsetCubePos.chunk()) };
@@ -1248,7 +1236,7 @@ static uint8_t calcAO(Chunks &chunks, Chunks::Move_to_neighbour_Chunk chunk, vec
 		
 		auto offsetCubeChunk{ chunks[offsetCubeChunkIndex.get()] };
 		
-		auto const solidCube{ offsetCubeChunk.data()[Chunks::blockIndex(offsetCubeBlockCoord)].cube(offsetCubeLocalCoord) };
+		auto const solidCube{ offsetCubeChunk.data()[chunk::blockIndex(offsetCubeBlockCoord)].cube(vec3i(offsetCubeLocalCoord)) };
 		
 		if(solidCube) cubes |= 1 << j;
 	}
@@ -1256,23 +1244,23 @@ static uint8_t calcAO(Chunks &chunks, Chunks::Move_to_neighbour_Chunk chunk, vec
 	return cubes;
 }
 
-static void fillChunkData(double const (&heights)[Chunks::chunkDim * Chunks::chunkDim], Chunks::Chunk chunk) {
+static void fillChunkData(double const (&heights)[chunk::blocksInChunkDim * chunk::blocksInChunkDim], chunk::Chunk chunk) {
 	auto const &index{ chunk.chunkIndex() };
 	auto const &pos{ chunk.position() };
 	auto &chunks{ chunk.chunks() };
 	auto &data{ chunk.data() };
 	auto &aabb{ chunk.aabb() };
 	
-	vec3i start{15};
+	vec3i start{chunk::blocksInChunkDim-1};
 	vec3i end  {0 };
 	
 	if(loadChunks) (std::cout << "loading chunks is not supported yet\n"), exit(-1);// && tryReadChunk(chunk, start, end)) chunk.modified() = false;
 	else { genChunkData(heights, chunk, start, end); chunk.modified() = true; }
 	
-	aabb = Chunks::AABB(start, end);
+	aabb = chunk::AABB(start, end);
 }
 
-static void updateChunk(Chunks::Chunk chunk) {
+static void updateChunk(chunk::Chunk chunk) {
 	auto const aabb{ chunk.aabb() };
 	auto const start{ aabb.start() };
 	auto const end{ aabb.end() };
@@ -1280,15 +1268,16 @@ static void updateChunk(Chunks::Chunk chunk) {
 	auto &ao{ chunk.ao() };
 	ao.reset();
 	
-	Chunks::Move_to_neighbour_Chunk const mtnChunk{chunk};
+	chunk::Move_to_neighbour_Chunk const mtnChunk{chunk};
 	if(!aabb.empty()) {
-		//for(int i{}; i < Chunks::ChunkAO::size; i++) 
-		for(int z{start.z*2}; z < (end.z+1)*2; z++) 
-		for(int y{start.y*2}; y < (end.y+1)*2; y++) 
-		for(int x{start.x*2}; x < (end.x+1)*2; x++) {
-			//vec3l const cubeCoordInChunk{ Chunks::ChunkAO::vertCoord(i) };
+		static constexpr int cnb{ chunk::cubesInBlockDim };
+		//for(int i{}; i < chunk::ChunkAO::size; i++) 
+		for(int z{start.z*cnb}; z < (end.z+1)*cnb; z++) 
+		for(int y{start.y*cnb}; y < (end.y+1)*cnb; y++) 
+		for(int x{start.x*cnb}; x < (end.x+1)*cnb; x++) {
+			//vec3l const cubeCoordInChunk{ chunk::ChunkAO::vertCoord(i) };
 			vec3i const cubeCoordInChunk{ x, y, z };
-			int const i{ Chunks::ChunkAO::coordVert(cubeCoordInChunk) };
+			auto const i{ chunk::cubeIndexInChunk(cubeCoordInChunk) };
 	
 			ao[i] = calcAO(chunks, mtnChunk, pos, cubeCoordInChunk);
 		}
@@ -1296,23 +1285,23 @@ static void updateChunk(Chunks::Chunk chunk) {
 }
 
 static void genChunksColumnAt(vec2i const columnPosition) {
-	double heights[Chunks::chunkDim * Chunks::chunkDim];
-	for(int z = 0; z < Chunks::chunkDim; z++) 
-	for(int x = 0; x < Chunks::chunkDim; x++) {
-		heights[z* Chunks::chunkDim + x] = heightAt(vec2i{columnPosition.x,columnPosition.y}, vec2i{x,z});
+	double heights[chunk::blocksInChunkDim * chunk::blocksInChunkDim];
+	for(int z = 0; z < chunk::blocksInChunkDim; z++) 
+	for(int x = 0; x < chunk::blocksInChunkDim; x++) {
+		heights[z* chunk::blocksInChunkDim + x] = heightAt(vec2i{columnPosition.x,columnPosition.y}, vec2i{x,z});
 	}
 	
 	vec3i const neighbourDirs[] = { 
 		vec3i{-1,0,0}, vec3i{+1,0,0}, vec3i{0,0,-1}, vec3i{0,0,+1}
 	};
 	
-	Chunks::Move_to_neighbour_Chunk neighbourChunks[] = {              
+	chunk::Move_to_neighbour_Chunk neighbourChunks[] = {              
 		{chunks, vec3i{columnPosition.x, -16, columnPosition.y} + neighbourDirs[0]},
 		{chunks, vec3i{columnPosition.x, -16, columnPosition.y} + neighbourDirs[1]},
 		{chunks, vec3i{columnPosition.x, -16, columnPosition.y} + neighbourDirs[2]},
 		{chunks, vec3i{columnPosition.x, -16, columnPosition.y} + neighbourDirs[3]}
 	};
-	Chunks::OptionalChunkIndex botNeighbourIndex{};
+	chunk::OptionalChunkIndex botNeighbourIndex{};
 	
 	for(int32_t y = -16; y < 16; y++) {
 		int32_t const usedIndex{ chunks.reserve() };
@@ -1325,7 +1314,7 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 		
 		auto chunk{ chunks[chunkIndex] };
 		auto &neighbours_{ chunk.neighbours() };
-		Chunks::Neighbours neighbours{};
+		chunk::Neighbours neighbours{};
 		
 		for(int j{}; j < 4; j++) {
 			vec3i const offset{ neighbourDirs[j] };
@@ -1333,11 +1322,11 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 			auto const neighbourIndex{ neighbourChunks[j].optChunk().get() };
 			
 			if(neighbourIndex >= 0) {
-				neighbours[offset] = Chunks::OptionalNeighbour(neighbourIndex);
-				chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(offset)] = chunkIndex;
+				neighbours[offset] = chunk::OptionalChunkIndex(neighbourIndex);
+				chunks[neighbourIndex].neighbours()[chunk::Neighbours::mirror(offset)] = chunkIndex;
 				chunks[neighbourIndex].gpuStatus().setNeedsUpdate();
 			}
-			else neighbours[offset] = Chunks::OptionalNeighbour();
+			else neighbours[offset] = chunk::OptionalChunkIndex();
 		}
 		
 		{
@@ -1345,10 +1334,10 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 			auto const neighbourIndex{ botNeighbourIndex.get() };
 			
 			if(neighbourIndex >= 0) {
-				neighbours[offset] = Chunks::OptionalNeighbour(neighbourIndex);
-				chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(offset)] = chunkIndex;
+				neighbours[offset] = chunk::OptionalChunkIndex(neighbourIndex);
+				chunks[neighbourIndex].neighbours()[chunk::Neighbours::mirror(offset)] = chunkIndex;
 			}
-			else neighbours[offset] = Chunks::OptionalNeighbour();
+			else neighbours[offset] = chunk::OptionalChunkIndex();
 		}
 		
 		neighbours_ = neighbours;
@@ -1358,7 +1347,7 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 		for(int i{}; i < 4; i ++) {
 			neighbourChunks[i].offset(vec3i{0,1,0});
 		}
-		botNeighbourIndex = Chunks::OptionalChunkIndex{ chunkIndex };
+		botNeighbourIndex = chunk::OptionalChunkIndex{ chunkIndex };
 	}
 }
 
@@ -1390,11 +1379,11 @@ static void updateChunks() {
 				chunk.modified() = false;
 			}
 			auto const &neighbours{ chunk.neighbours() };
-			for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
+			for(int i{}; i < chunk::Neighbours::neighboursCount; i++) {
 				auto const &optNeighbour{ neighbours[i] };
 				if(optNeighbour) {
 					auto const neighbourIndex{ optNeighbour.get() };
-					chunks[neighbourIndex].neighbours()[Chunks::Neighbours::mirror(i)] = Chunks::OptionalNeighbour();
+					chunks[neighbourIndex].neighbours()[chunk::Neighbours::mirror(i)] = chunk::OptionalChunkIndex{};
 					chunks[neighbourIndex].gpuStatus().reset();
 				}
 			}
@@ -1531,10 +1520,10 @@ public:
 	#undef G
 };
 
-static bool checkIntersection(Chunks &chunks, ChunkCoord const coord1, ChunkCoord const coord2) {
+static bool checkIntersection(chunk::Chunks &chunks, ChunkCoord const coord1, ChunkCoord const coord2) {
 	ChunkCoord const c1{ coord1.coord().min(coord2.coord()) };
 	ChunkCoord const c2{ coord1.coord().max(coord2.coord()) };
-	Chunks::Move_to_neighbour_Chunk chunk{chunks, c1.chunk() };
+	chunk::Move_to_neighbour_Chunk chunk{chunks, c1.chunk() };
 	
 	vec3l const c1c{ c1.cube() };
 	vec3l const c2c{ c2.cube() };
@@ -1545,8 +1534,8 @@ static bool checkIntersection(Chunks &chunks, ChunkCoord const coord1, ChunkCoor
 		vec3l const cubeCoord{x, y, z};
 		
 		auto const cubeLocalCoord{ 
-			cubeCoord.applied([](auto const coord, auto i) -> bool {
-				return bool(misc::mod(coord, 2ll));
+			cubeCoord.applied([](auto const coord, auto i) -> int32_t {
+				return int32_t(misc::mod<int64_t>(coord, chunk::cubesInBlockDim));
 			})
 		};
 		
@@ -1558,7 +1547,7 @@ static bool checkIntersection(Chunks &chunks, ChunkCoord const coord1, ChunkCoor
 		if(chunkIndex == -1) { std::cout << "checkIntersection " << coord1 << ' ' << coord2 << ": add chunk gen!" << coord << '\n'; return true; }
 		
 		auto const chunkData{ chunks.chunksData[chunkIndex] };
-		auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+		auto const index{ chunk::blockIndex(coord.blockInChunk()) };
 		auto const block{ chunkData[index] };
 		
 		if(block.id() != 0 && block.cube(cubeLocalCoord)) return true;
@@ -1585,7 +1574,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 	vec3l min{};
 	vec3l max{};
 	
-	Chunks::Move_to_neighbour_Chunk chunk{ chunks, player.chunk() };
+	chunk::Move_to_neighbour_Chunk chunk{ chunks, player.chunk() };
 	
 	auto const updateBounds = [&]() {			
 		dir = force.sign();
@@ -1654,8 +1643,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				};
 				
 				auto const cubeLocalCoord{ 
-					cubeCoord.applied([](auto const coord, auto i) -> bool {
-						return bool(misc::mod(coord, 2ll));
+					cubeCoord.applied([](auto const coord, auto i) -> int32_t {
+						return int32_t(misc::mod<int64_t>(coord, chunk::cubesInBlockDim));
 					})
 				};
 				
@@ -1667,7 +1656,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				if(chunkIndex == -1) { std::cout << "collision " << vec3i(axis) << ": add chunk gen!" << coord << '\n'; return { playerPos, false, false }; }
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
-				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+				auto const index{ chunk::blockIndex(coord.blockInChunk()) };
 				auto const block{ chunkData[index] };
 				
 				if(block.id() != 0 && block.cube(cubeLocalCoord)) {
@@ -1756,16 +1745,16 @@ bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
 }
 
 struct BlockIntersection {
-	Chunks::Chunk chunk;
+	chunk::Chunk chunk;
 	int16_t blockIndex;
 	uint8_t cubeIndex;
 };
 
-static std::optional<BlockIntersection> trace(Chunks &chunks, PosDir const pd) {
+static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir const pd) {
 	vec3i const dirSign{ pd.direction };
 	DDA checkBlock{ pd };
 		
-	Chunks::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
+	chunk::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
 		
 	vec3l intersectionAxis{0};
 	for(int i = 0;; i++) {
@@ -1777,8 +1766,8 @@ static std::optional<BlockIntersection> trace(Chunks &chunks, PosDir const pd) {
 		};
 		
 		auto const cubeLocalCoord{ 
-			cubeCoord.applied([](auto const coord, auto i) -> bool {
-				return bool(misc::mod(coord, 2ll));
+			cubeCoord.applied([](auto const coord, auto i) -> int32_t {
+				return int32_t(misc::mod<int64_t>(coord, chunk::cubesInBlockDim));
 			})
 		};
 		
@@ -1806,12 +1795,12 @@ static std::optional<BlockIntersection> trace(Chunks &chunks, PosDir const pd) {
 		auto const chunk{ chunks[chunkIndex] };
 		auto const chunkData{ chunk.data() };
 		
-		auto const blockIndex{ Chunks::blockIndex(blockCoord) };
+		auto const blockIndex{ chunk::blockIndex(blockCoord) };
 		auto &block{ chunkData[blockIndex] };
 		auto const blockId{ block.id() };
 		
 		if(blockId != 0) {
-			if(block.cube(cubeLocalCoord)) return {BlockIntersection{ chunk, blockIndex, Chunks::Block::cubePosIndex(cubeLocalCoord) }};
+			if(block.cube(cubeLocalCoord)) return {BlockIntersection{ chunk, blockIndex, chunk::Block::cubePosIndex(cubeLocalCoord) }};
 		}
 		
 		if(i >= 10000) {
@@ -1829,15 +1818,15 @@ static std::optional<BlockIntersection> trace(Chunks &chunks, PosDir const pd) {
 	return {};
 }
 
-static void markNeighboursIfAtBounds(Chunks::Chunk chunk, vec3i const blockCoord) {
-	Chunks::Move_to_neighbour_Chunk const c{ chunk };
-	for(int i{}; i < Chunks::Neighbours::neighboursCount; i++) {
-		auto const dir{ Chunks::Neighbours::indexAsDir(i) };
-		auto const bounds{ dir.max(0).mix(vec3i{0}, vec3i{Chunks::chunkDim-1}) };
+static void markNeighboursIfAtBounds(chunk::Chunk chunk, vec3i const blockCoord) {
+	chunk::Move_to_neighbour_Chunk const c{ chunk };
+	for(int i{}; i < chunk::Neighbours::neighboursCount; i++) {
+		auto const dir{ chunk::Neighbours::indexAsDir(i) };
+		auto const bounds{ dir.max(0).mix(vec3i{0}, vec3i{chunk::blocksInChunkDim-1}) };
 		
 		auto const blockAtBounds{ blockCoord.equal(bounds) };
 		if(blockAtBounds.any()) {
-			auto const neighbourChunkIndex{ Chunks::Move_to_neighbour_Chunk{c}.offset(dir) };
+			auto const neighbourChunkIndex{ chunk::Move_to_neighbour_Chunk{c}.offset(dir) };
 			if(neighbourChunkIndex.is()) {
 				chunks[neighbourChunkIndex.get()].gpuStatus().setNeedsUpdate();
 			}
@@ -1876,7 +1865,7 @@ static void update() {
 		vec3i const dirSign{ pd.direction };
 		DDA checkBlock{ pd };
 		
-		Chunks::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
+		chunk::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
 	
 		if(blockAction == BlockAction::BREAK) {
 			auto optionalResult{ trace(chunks, pd) };
@@ -1889,8 +1878,8 @@ static void update() {
 				auto const chunkIndex{ chunk.chunkIndex() };
 				auto &block{ chunk.data()[result.blockIndex] };
 				
-				if(breakFullBlock) block = Chunks::Block::emptyBlock();
-				else block = Chunks::Block{ block.id(), uint8_t( block.cubes() & (~Chunks::Block::blockCubeMask(result.cubeIndex)) ) };
+				if(breakFullBlock) block = chunk::Block::emptyBlock();
+				else block = chunk::Block{ block.id(), uint8_t( block.cubes() & (~chunk::Block::blockCubeMask(result.cubeIndex)) ) };
 				
 				chunks.gpuChunksStatus[chunkIndex].setNeedsUpdate();//reset();
 				chunks.modified[chunkIndex] = true;
@@ -1900,22 +1889,22 @@ static void update() {
 				vec3i const start_{ aabb.start() };
 				vec3i const end_  { aabb.end  () };
 				
-				vec3i start{ Chunks::chunkDim-1 };
+				vec3i start{ chunk::blocksInChunkDim-1 };
 				vec3i end  { 0 };
 				
 				for(int32_t x = start_.x; x <= end_.x; x++)
 				for(int32_t y = start_.y; y <= end_.y; y++)
 				for(int32_t z = start_.z; z <= end_.z; z++) {
 					vec3i const blk{x, y, z};
-					if(chunkData[Chunks::blockIndex(blk)].id() != 0) {
+					if(chunkData[chunk::blockIndex(blk)].id() != 0) {
 						start = start.min(blk);
 						end   = end  .max(blk);
 					}
 				}
 				
-				aabb = Chunks::AABB(start, end);
+				aabb = chunk::AABB(start, end);
 				
-				auto const blockCoord{ Chunks::indexBlock(result.blockIndex) };
+				auto const blockCoord{ chunk::indexBlock(result.blockIndex) };
 				markNeighboursIfAtBounds(chunk, blockCoord);
 			}
 		}
@@ -1947,7 +1936,7 @@ static void update() {
 				}
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
-				auto const index{ Chunks::blockIndex(coord.blockInChunk()) };
+				auto const index{ chunk::blockIndex(coord.blockInChunk()) };
 				auto const blockId{ chunkData[index].id() };
 				
 				if(blockId != 0) {
@@ -1957,12 +1946,12 @@ static void update() {
 			
 					int chunkIndex{ chunk.move(blockChunk).get() };
 				
-					auto const index{ Chunks::blockIndex(blockCoord) };
+					auto const index{ chunk::blockIndex(blockCoord) };
 					auto &block{ chunks.chunksData[chunkIndex][index] };
 					
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() != 0) { std::cout << "!\n"; } 
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() == 0) {
-						block = Chunks::Block::fullBlock(blockPlaceId);
+						block = chunk::Block::fullBlock(blockPlaceId);
 						chunks.gpuChunksStatus[chunkIndex].reset();
 						chunks.modified[chunkIndex] = true;
 						isAction = true;
@@ -1974,7 +1963,7 @@ static void update() {
 						start = start.min(blockCoord);
 						end   = end  .max(blockCoord);
 					
-						aabb = Chunks::AABB(start, end);
+						aabb = chunk::AABB(start, end);
 						
 						markNeighboursIfAtBounds(chunks[chunkIndex], blockCoord);
 					}
@@ -2254,7 +2243,7 @@ int main(void) {
 		glProgramUniform3i(debugProgram, db_playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
 		glProgramUniform3f(debugProgram, db_playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
 		
-		auto const playerChunkCand{ Chunks::Move_to_neighbour_Chunk(chunks, cameraChunk).optChunk().get() };
+		auto const playerChunkCand{ chunk::Move_to_neighbour_Chunk(chunks, cameraChunk).optChunk().get() };
 		if(playerChunkCand != -1) {
 			int playerChunkIndex = playerChunkCand;
 			glUniform1i(startChunkIndex_u, playerChunkIndex);
@@ -2267,7 +2256,7 @@ int main(void) {
 			int sentCount{};
 			for(auto const chunkIndex : chunks.used) {
 				auto const chunk{ chunks[chunkIndex] };
-				Chunks::ChunkData &chunkData{ chunks.chunksData[chunkIndex] };
+				chunk::ChunkData &chunkData{ chunks.chunksData[chunkIndex] };
 				vec3i const chunkPosition{ chunks[chunkIndex].position() };
 				auto &gpuStatus = chunks.gpuChunksStatus[chunkIndex];
 				
@@ -2280,13 +2269,13 @@ int main(void) {
 						if(gpuStatus.isStubLoaded()) continue;
 						if(gpuStatus.isFullyLoaded() && gpuStatus.needsUpdate()) continue;
 						
-						Chunks::Neighbours const neighbours{};
-						static_assert(sizeof(neighbours) == sizeof(int32_t) * Chunks::Neighbours::neighboursCount);
+						chunk::Neighbours const neighbours{};
+						static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
 						glBufferSubData(
 							GL_SHADER_STORAGE_BUFFER, 
-							sizeof(int32_t) * Chunks::Neighbours::neighboursCount * chunkIndex, 
-							Chunks::Neighbours::neighboursCount * sizeof(uint32_t), 
+							sizeof(int32_t) * chunk::Neighbours::neighboursCount * chunkIndex, 
+							chunk::Neighbours::neighboursCount * sizeof(uint32_t), 
 							&neighbours
 						);
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
@@ -2317,19 +2306,19 @@ int main(void) {
 					glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(vec3i) * chunkIndex, sizeof(vec3i), &chunkPosition);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-					static_assert(sizeof(neighbours) == sizeof(int32_t) * Chunks::Neighbours::neighboursCount);
+					static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
 					glBufferSubData(
 						GL_SHADER_STORAGE_BUFFER, 
-						sizeof(int32_t) * Chunks::Neighbours::neighboursCount * chunkIndex, 
-						Chunks::Neighbours::neighboursCount * sizeof(uint32_t), 
+						sizeof(int32_t) * chunk::Neighbours::neighboursCount * chunkIndex, 
+						chunk::Neighbours::neighboursCount * sizeof(uint32_t), 
 						&neighbours
 					);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 					
-					static_assert(sizeof(Chunks::ChunkAO) == sizeof(uint8_t) * Chunks::ChunkAO::size);
+					static_assert(sizeof(chunk::ChunkAO) == sizeof(uint8_t) * chunk::ChunkAO::size);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
-					glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(Chunks::ChunkAO), sizeof(Chunks::ChunkAO), &ao);
+					glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkAO), sizeof(chunk::ChunkAO), &ao);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 					
 					sentCount ++;
@@ -2350,11 +2339,11 @@ int main(void) {
 				auto const result{ *optionalResult };
 				auto const chunk { result.chunk };
 				
-				ChunkCoord const blockCoord{ chunk.position(), ChunkCoord::Block{vec3l(Chunks::indexBlock(result.blockIndex))} };
+				ChunkCoord const blockCoord{ chunk.position(), ChunkCoord::Block{vec3l(chunk::indexBlock(result.blockIndex))} };
 				
 				auto const blockRelativePos{ 
 					vec3f((blockCoord - cameraCoord).position()) +  
-					(breakFullBlock ? vec3f{0} : (vec3f{Chunks::Block::cubeIndexPos(result.cubeIndex)} * 0.5))
+					(breakFullBlock ? vec3f{0} : (vec3f{chunk::Block::cubeIndexPos(result.cubeIndex)} * 0.5))
 				};
 				float const size{ breakFullBlock ? 1.0f : 0.5f };
 				float const translation4[4][4] = {
