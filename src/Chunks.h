@@ -388,8 +388,8 @@ namespace chunk {
 		}
 		
 		OptionalChunkIndex move(vec3i const otherChunk) {
-			if(otherChunk == chunk.position()) return optChunk();
 			if(valid && Neighbours::checkDirValid(otherChunk - chunk.position())) return offset(otherChunk - chunk.position());
+			if(valid && otherChunk == chunk.position()) return optChunk();
 			*this = Move_to_neighbour_Chunk(chunk.chunks(), otherChunk);
 			return optChunk();
 		}

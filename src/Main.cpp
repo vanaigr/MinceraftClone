@@ -1544,7 +1544,7 @@ static bool checkIntersection(chunk::Chunks &chunks, ChunkCoord const coord1, Ch
 		vec3i const blockChunk = coord.chunk();
 		
 		auto const chunkIndex{ chunk.move(blockChunk).get() };
-		if(chunkIndex == -1) { std::cout << "checkIntersection " << coord1 << ' ' << coord2 << ": add chunk gen!" << coord << '\n'; return true; }
+		if(chunkIndex == -1) return true;
 		
 		auto const chunkData{ chunks.chunksData[chunkIndex] };
 		auto const index{ chunk::blockIndex(coord.blockInChunk()) };
@@ -1634,6 +1634,10 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			
 			auto const upStepPossible{ upStep && !checkIntersection(chunks, upStepMin, upStepMax)};
 			
+			auto const newCoordBigger{
+				axisPositive ? (axisNewCoord >= axisPlayerPos) : (axisNewCoord <= axisPlayerPos)
+			};
+			
 			for(int64_t o1{ min.dot(vec3l(otherAxis1)) }; o1 <= max.dot(vec3l(otherAxis1)); o1++)
 			for(int64_t o2{ min.dot(vec3l(otherAxis2)) }; o2 <= max.dot(vec3l(otherAxis2)); o2++) {
 				vec3l const cubeCoord{
@@ -1653,17 +1657,14 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				vec3i const blockChunk = coord.chunk();
 				
 				auto const chunkIndex{ chunk.move(blockChunk).get() };
-				if(chunkIndex == -1) { std::cout << "collision " << vec3i(axis) << ": add chunk gen!" << coord << '\n'; return { playerPos, false, false }; }
+				if(chunkIndex == -1) return { newCoord, false, false };
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ chunk::blockIndex(coord.blockInChunk()) };
 				auto const block{ chunkData[index] };
 				
 				if(block.id() != 0 && block.cube(cubeLocalCoord)) {
-					if(axisPositive ? 
-						(axisNewCoord >= axisPlayerPos)
-					: (axisNewCoord <= axisPlayerPos)
-					) {
+					if(newCoordBigger) {
 						auto const diff{ playerPos.y - coord.coord().y };
 						if(upStepPossible && diff <= ChunkCoord::fracCubeDim && diff >= 0) return { upStepCoord, false, true };
 						else return { newCoord, true, false };
@@ -1787,10 +1788,7 @@ static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir cons
 		
 		int chunkIndex{ chunk.move(blockChunk).get() };
 		
-		if(chunkIndex == -1) {
-			std::cout << __FILE__ << ':' << __LINE__ << " error: add chunk gen!" << coord << '\n'; 
-			break;
-		}
+		if(chunkIndex == -1) break;
 		
 		auto const chunk{ chunks[chunkIndex] };
 		auto const chunkData{ chunk.data() };
@@ -1928,12 +1926,7 @@ static void update() {
 				
 				int chunkIndex{ chunk.move(blockChunk).get() }; 
 				
-				if(chunkIndex == -1) { 
-					//auto const usedIndex{ genChunkAt(blockChunk) }; //generates every frame
-					//chunkIndex = chunks.usedChunks()[usedIndex];
-					std::cout << "block pl: add chunk gen!" << coord << '\n'; 
-					break;
-				}
+				if(chunkIndex == -1) break;
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ chunk::blockIndex(coord.blockInChunk()) };
