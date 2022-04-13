@@ -1275,7 +1275,6 @@ static void updateChunk(chunk::Chunk chunk) {
 	auto &ao{ chunk.ao() };
 	auto &lighting{ chunk.lighting() };
 	ao.reset();
-	lighting.reset();
 	
 	chunk::Move_to_neighbour_Chunk const mtnChunk{chunk};
 	if(!aabb.empty()) {
@@ -1289,8 +1288,6 @@ static void updateChunk(chunk::Chunk chunk) {
 			auto const i{ chunk::cubeIndexInChunk(cubeCoordInChunk) };
 	
 			ao[i] = calcAO(chunks, mtnChunk, pos, cubeCoordInChunk);
-			
-			lighting[i] = 255u;
 		}
 	}
 }
@@ -1314,10 +1311,14 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 	};
 	chunk::OptionalChunkIndex botNeighbourIndex{};
 	
+	int chunksIndices[16-1 - (-16)];
+	
 	for(int32_t y = -16; y < 16; y++) {
 		int32_t const usedIndex{ chunks.reserve() };
 		auto const chunkIndex{ chunks.used[usedIndex] };
 		vec3i chunkPosition{ vec3i{columnPosition.x, y, columnPosition.y} };
+		
+		chunksIndices[y + 16] = chunkIndex;
 		
 		chunks.chunksPos[chunkIndex] = chunkPosition;
 		chunks.chunksIndex_position[chunkPosition] = chunkIndex;
@@ -1359,6 +1360,38 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 			neighbourChunks[i].offset(vec3i{0,1,0});
 		}
 		botNeighbourIndex = chunk::OptionalChunkIndex{ chunkIndex };
+	}
+	
+	static /*not constexpr*/ chunk::ChunkLighting const skyLighting{ 255u };
+
+	chunk::ChunkLighting const *lightingAbove = &skyLighting;
+	for(int32_t chunkY = 15; chunkY >= -16; chunkY--)  {
+		auto const chunkIndex{ chunksIndices[chunkY + 16] };
+		auto chunk{ chunks[chunkIndex] };
+		auto &lighting{ chunk.lighting() };
+		lighting.reset();
+
+		for(int y{chunk::cubesInChunkDim-1}; y >= 0; y--) {
+			for(int z{}; z < chunk::cubesInChunkDim; z++)
+			for(int x{}; x < chunk::cubesInChunkDim; x++) {
+				vec3i const cubeCoord{ x, y, z };
+				
+				chunk::checkCubeCoordInChunkValid(cubeCoord);
+			
+				auto const blockIndex{ chunk::blockIndex(cubeCoord / chunk::cubesInBlockDim) };
+				auto const block{ chunk.data()[blockIndex] };
+				auto const blockId{ block.id() };
+				
+				if(block.cube(cubeCoord % chunk::cubesInBlockDim) && !(blockId == 5 || blockId == 7)) /*corrseponding cube is already set to zero*/;
+				else {
+					vec3i const cubeCoordAbove{ cubeCoord.x, (cubeCoord.y+1) % chunk::cubesInChunkDim, cubeCoord.z }; /*
+						if y+1 == chunk::cubesInChunkDim, we are in a new chunk
+					*/
+					lighting[chunk::cubeIndexInChunk(cubeCoord)] = (*lightingAbove)[chunk::cubeIndexInChunk(cubeCoordAbove)];
+				}
+			}
+			lightingAbove = &lighting; 
+		}
 	}
 }
 
@@ -1766,7 +1799,7 @@ static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir cons
 	vec3i const dirSign{ pd.direction };
 	DDA checkBlock{ pd };
 		
-	chunk::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
+	chunk::Move_to_neighbour_Chunk mtnChunk{ chunks, pd.chunk };
 		
 	vec3l intersectionAxis{0};
 	for(int i = 0;; i++) {
@@ -1786,7 +1819,7 @@ static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir cons
 		ChunkCoord const blockAt { 
 			vec3i{},
 			ChunkCoord::Fractional{ 
-				(cubeCoord - vec3l(cubeLocalCoord)) * ChunkCoord::fracCubeDim
+				cubeCoord * ChunkCoord::fracCubeDim
 			}  
 		};
 		ChunkCoord const coord{ 
@@ -1797,7 +1830,7 @@ static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir cons
 		vec3i const blockCoord = coord.blockInChunk();
 		vec3i const blockChunk = coord.chunk();
 		
-		int chunkIndex{ chunk.move(blockChunk).get() };
+		int chunkIndex{ mtnChunk.move(blockChunk).get() };
 		
 		if(chunkIndex == -1) break;
 		

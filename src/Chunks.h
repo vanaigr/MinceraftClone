@@ -286,12 +286,16 @@ namespace chunk {
 	private:
 		std::array<uint8_t, size> lighting;
 	public:
-		//ChunkLighting() = default;
+		ChunkLighting() = default;
+		ChunkLighting(uint8_t const val) {
+			fill(val);
+		}
 		
 		uint8_t       &operator[](int const cubeIndex)       { return lighting[cubeIndex]; }
 		uint8_t const &operator[](int const cubeIndex) const { return lighting[cubeIndex]; }
 		
-		void reset() { lighting.fill(0); }
+		void fill(uint8_t const val) { lighting.fill(val); }
+		void reset() { fill(0); }
 	};
 	
 	
@@ -387,7 +391,9 @@ namespace chunk {
 		Chunk chunk;
 		bool valid;
 	public:
-		Move_to_neighbour_Chunk() = default;
+		Move_to_neighbour_Chunk() = delete;
+		
+		Move_to_neighbour_Chunk(Chunks &chunks) : chunk{chunks[0]}, valid{ true } {}/*index 0 may be out of bounds but we need to keep Chunks&*/
 		Move_to_neighbour_Chunk(Chunk &src) : chunk{src}, valid{ true } {}
 			
 		Move_to_neighbour_Chunk(Chunks &chunks, vec3i const chunkCoord) {

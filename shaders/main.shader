@@ -291,7 +291,16 @@ layout(binding = 7) restrict readonly buffer ChunksLighting {
     uint data[];
 } lighting;
 
-float lightingAtCube(const int chunkIndex, const ivec3 cubeCoord) {
+float lightingAtCube(int chunkIndex, ivec3 cubeCoord) {
+	const ivec3 outDir = testBounds(shr3i(cubeCoord, 1));
+	if( !all(equal(outDir, ivec3(0))) ) {
+		const int candChunkIndex = chunkNeighbourIndex(chunkIndex, outDir);
+		if(candChunkIndex < 0) return 1;
+		
+		chunkIndex = candChunkIndex;
+		cubeCoord -= outDir * cubesInChunkDim;
+	}
+	
 	const int startIndex = chunkIndex * cubesInChunkCount;
 	const int offset = cubeIndexInChunk(cubeCoord);
 	const int index = startIndex + offset;
@@ -780,7 +789,7 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkInd
 										else {
 											const ivec3 otherAxis1 = cubesMinAxisB.x ? ivec3(0,1,0) : ivec3(1,0,0);
 											const ivec3 otherAxis2 = cubesMinAxisB.z ? ivec3(0,1,0) : ivec3(0,0,1);
-											const ivec3 vertexCoord = ivec3(floor(cubesCoordAt * 2)) - relativeToChunk * cubesInChunkDim;
+											const ivec3 vertexCoord = ivec3(floor(cubesCoordAt * cubesInBlockDim)) - relativeToChunk * cubesInChunkDim;
 											
 											float ambient = 0;
 											if(info.frontface) {
@@ -798,7 +807,7 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkInd
 											}
 											else ambient = 0.5;
 											
-											const float light = lightingAtCube(curChunkIndex, vertexCoord);
+											const float light = lightingAtCube(curChunkIndex, vertexCoord - negative_ * cubesMinAxis - dir_ * cubesMinAxis);
 											
 											return BlockIntersection(
 												info.normal,

@@ -200,6 +200,9 @@ public:
 	inline constexpr vec3<C> operator*(const vec3<C> o) const {
 		return vec3(x * o.x, y * o.y, z * o.z);
 	}
+	inline constexpr vec3<C> operator%(const vec3<C> o) const {
+		return vec3(x % o.x, y % o.y, z % o.z);
+	}
 	
 	inline constexpr vec3<C>& operator+=(const vec3<C> o) {
 		x += o.x;
@@ -218,6 +221,7 @@ public:
 	inline constexpr vec3<C> operator!() const {
 		return vec3(!x, !y, !z);
 	}
+	
 
 	inline constexpr vec3<C>& operator-=(const vec3<C> o) {
 		x -= o.x;
