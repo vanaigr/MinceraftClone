@@ -79,6 +79,7 @@ namespace chunk {
 			gs(data, chunksData)
 			gs(neighbours, chunksNeighbours)
 			gs(ao, chunksAO)
+			gs(lighting, chunksLighting)
 		#undef gs
 	};
 	
@@ -280,6 +281,20 @@ namespace chunk {
 	};
 
 	
+	struct ChunkLighting {
+		static constexpr int size = chunk::cubesInChunkCount;
+	private:
+		std::array<uint8_t, size> lighting;
+	public:
+		//ChunkLighting() = default;
+		
+		uint8_t       &operator[](int const cubeIndex)       { return lighting[cubeIndex]; }
+		uint8_t const &operator[](int const cubeIndex) const { return lighting[cubeIndex]; }
+		
+		void reset() { lighting.fill(0); }
+	};
+	
+	
 	using ChunkData = std::array<Block, chunk::blocksInChunkCount>;
 	
 	
@@ -302,6 +317,7 @@ namespace chunk {
 		std::vector<bool> modified{};
 		std::vector<ChunkData> chunksData{};
 		std::vector<ChunkAO> chunksAO;
+		std::vector<ChunkLighting> chunksLighting;
 		std::vector<Neighbours> chunksNeighbours{};
 		std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
 		
@@ -323,6 +339,7 @@ namespace chunk {
 				modified.resize(index+1);
 				chunksData.resize(index+1);
 				chunksAO.resize(index+1);
+				chunksLighting.resize(index+1);
 				chunksNeighbours.resize(index+1);
 			}
 			used.push_back(index);

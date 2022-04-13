@@ -286,6 +286,23 @@ float lightForChunkVertexDir(const int chunkIndex, const ivec3 vertex, const ive
 	return (maxLight - float(blocks)) / maxLight;
 }
 
+
+layout(binding = 7) restrict readonly buffer ChunksLighting {
+    uint data[];
+} lighting;
+
+float lightingAtCube(const int chunkIndex, const ivec3 cubeCoord) {
+	const int startIndex = chunkIndex * cubesInChunkCount;
+	const int offset = cubeIndexInChunk(cubeCoord);
+	const int index = startIndex + offset;
+	
+	const int el = index / 4;
+	const int sh = (index % 4) * 8;
+	
+	return float((lighting.data[el] >> sh) & 255) / 255.0;
+}
+
+
 vec3 rgb2hsv(const vec3 c) {
     vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
     vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
@@ -362,7 +379,6 @@ struct BlockIntersection {
 	float t;
 	int chunkIndex;
 	Surface surface;
-	float ao;
 };
 
 BlockIntersection noBlockIntersection() {
@@ -759,15 +775,14 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkInd
 											playerIntersection.at,
 											playerIntersection.t,
 											curChunkIndex,
-											playerIntersection.surface,
-											1
+											playerIntersection.surface
 										);
 										else {
 											const ivec3 otherAxis1 = cubesMinAxisB.x ? ivec3(0,1,0) : ivec3(1,0,0);
 											const ivec3 otherAxis2 = cubesMinAxisB.z ? ivec3(0,1,0) : ivec3(0,0,1);
 											const ivec3 vertexCoord = ivec3(floor(cubesCoordAt * 2)) - relativeToChunk * cubesInChunkDim;
 											
-											float light = 0;
+											float ambient = 0;
 											if(info.frontface) {
 												for(int i = 0 ; i < 4; i++) {
 													const ivec2 offset_ = ivec2(i%2, i/2);
@@ -778,20 +793,21 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkInd
 													
 													const float diffX = abs(offset_.x - mod(dot(localCubesCoordAt, otherAxis1)*2, 1));
 													const float diffY = abs(offset_.y - mod(dot(localCubesCoordAt, otherAxis2)*2, 1));
-													light += mix(mix(vertexLight, 0, diffY), 0, diffX);
+													ambient += mix(mix(vertexLight, 0, diffY), 0, diffX);
 												}
 											}
-											else light = 0.5;
+											else ambient = 0.5;
+											
+											const float light = lightingAtCube(curChunkIndex, vertexCoord);
 											
 											return BlockIntersection(
 												info.normal,
 												info.newRayDir,
-												info.color,
+												info.color * mix(info.block == 7 ? 0.7 : 0.45, 1.0, pow(ambient, 2)) * light,
 												cubesCoordAt,
 												currentLength,
 												curChunkIndex,
-												surfaceBlock(info.block),
-												light
+												surfaceBlock(info.block)
 											);
 										}
 									}
@@ -827,8 +843,7 @@ BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkInd
 			playerIntersection.at,
 			playerIntersection.t,
 			curChunkIndex,
-			playerIntersection.surface,
-			1
+			playerIntersection.surface
 		);
 		
 		if(nextChunkIndex < 0 || nextNotLoaded) break;
@@ -888,20 +903,18 @@ Trace trace(Ray ray, int chunkIndex) {
 			const vec3 col = i.color;
 			const vec3 at = i.at;
 			
-			const float light = i.ao;
-			
 			if(blockId == 7) {
 				ray = Ray( i.at - 0 + i.newDir * 0.0001, i.newDir );
 				chunkIndex = intersectionChunkIndex;
 				
-				steps[curSteps++] = Step( col * mix(0.7, 1.0, pow(light, 2)), t, surfaceBlock(blockId) );
+				steps[curSteps++] = Step( col, t, surfaceBlock(blockId) );
 				continue;
 			}
 			if(blockId == 8) {
 				ray = Ray( i.at - 0 + i.newDir * 0.0001, i.newDir );
 				chunkIndex = intersectionChunkIndex;
 				
-				steps[curSteps++] = Step( col * mix(0.45, 1.0, pow(light, 2)), t, surfaceBlock(blockId) );
+				steps[curSteps++] = Step( col, t, surfaceBlock(blockId) );
 				continue;
 			}
 			
@@ -940,7 +953,7 @@ Trace trace(Ray ray, int chunkIndex) {
 				chunkIndex = intersectionChunkIndex;
 				
 				shadowIndex = curSteps++;
-				steps[shadowIndex] = Step( col * mix(0.45, 1.0, pow(light, 2)), t, surfaceBlock(blockId) );
+				steps[shadowIndex] = Step( col, t, surfaceBlock(blockId) );
 				continue;
 			}
 		}

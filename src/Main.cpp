@@ -300,7 +300,7 @@ static GLuint mainProgram = 0;
   static GLuint time_u;
   static GLuint mouseX_u, mouseY_u;
   static GLuint projection_u, toLocal_matrix_u;
-  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo, chunksNeighbours_ssbo, chunksAO_ssbo;
+  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo, chunksNeighbours_ssbo, chunksAO_ssbo, chunksLighting_ssbo;
 
 static GLuint mapChunks_p;
 
@@ -358,6 +358,12 @@ void resizeBuffer() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::ChunkAO), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, chunksAO_ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+	
+	static_assert(sizeof(chunk::ChunkLighting) == sizeof(uint8_t) * chunk::ChunkLighting::size);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksLighting_ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::ChunkLighting), NULL, GL_DYNAMIC_DRAW);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, chunksLighting_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
@@ -516,13 +522,14 @@ static void reloadShaders() {
 		glGenBuffers(1, &chunkIndex_u);
 		glDeleteBuffers(1, &chunksPostions_ssbo);
 		glGenBuffers(1, &chunksPostions_ssbo);
-		
 		glDeleteBuffers(1, &chunksBounds_ssbo);
 		glGenBuffers(1, &chunksBounds_ssbo);
 		glDeleteBuffers(1, &chunksNeighbours_ssbo);
 		glGenBuffers(1, &chunksNeighbours_ssbo);	
 		glDeleteBuffers(1, &chunksAO_ssbo);
-		glGenBuffers(1, &chunksAO_ssbo);
+		glGenBuffers(1, &chunksAO_ssbo);		
+		glDeleteBuffers(1, &chunksLighting_ssbo);
+		glGenBuffers(1, &chunksLighting_ssbo);
 
 		resizeBuffer();
 	}
@@ -1266,7 +1273,9 @@ static void updateChunk(chunk::Chunk chunk) {
 	auto const end{ aabb.end() };
 	auto const pos{ chunk.position() };
 	auto &ao{ chunk.ao() };
+	auto &lighting{ chunk.lighting() };
 	ao.reset();
+	lighting.reset();
 	
 	chunk::Move_to_neighbour_Chunk const mtnChunk{chunk};
 	if(!aabb.empty()) {
@@ -1280,6 +1289,8 @@ static void updateChunk(chunk::Chunk chunk) {
 			auto const i{ chunk::cubeIndexInChunk(cubeCoordInChunk) };
 	
 			ao[i] = calcAO(chunks, mtnChunk, pos, cubeCoordInChunk);
+			
+			lighting[i] = 255u;
 		}
 	}
 }
@@ -2285,6 +2296,7 @@ int main(void) {
 					uint32_t const aabbData{ chunks[chunkIndex].aabb().getData() };
 					auto const &neighbours{ chunks[chunkIndex].neighbours() };
 					auto const &ao{ chunk.ao() };
+					auto const &lighting{ chunk.lighting() };
 					
 					static_assert(sizeof chunkData == 16384);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
@@ -2312,6 +2324,10 @@ int main(void) {
 					static_assert(sizeof(chunk::ChunkAO) == sizeof(uint8_t) * chunk::ChunkAO::size);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
 					glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkAO), sizeof(chunk::ChunkAO), &ao);
+					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);					
+					
+					glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksLighting_ssbo);
+					glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkLighting), sizeof(chunk::ChunkLighting), &lighting);
 					glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 					
 					sentCount ++;
