@@ -64,6 +64,10 @@ namespace chunk {
 		Chunk_() = default;
 		
 		Chunk_(Chunks &chunks, int const chunkIndex) : chunks_{ &chunks }, chunk_index{ chunkIndex } {}
+		
+		bool operator!=(Chunk_<Chunks> const other) const {
+			return chunks_ != other.chunks_ || chunk_index != other.chunk_index;
+		}
 			
 		auto &chunks() { return *chunks_; }	
 		auto const &chunks() const { return *chunks_; }
@@ -283,6 +287,38 @@ namespace chunk {
 	
 	struct ChunkLighting {
 		static constexpr int size = chunk::cubesInChunkCount;
+		
+		static constexpr int dirsCount{ 6 };
+		
+		static constexpr bool checkIndexValid(uint8_t const index) {
+			return index < dirsCount;
+		}
+		
+		static constexpr bool checkDirValid(vec3i const dir) {
+			return vec3i(dir.notEqual(0)).dot(1) == 1;
+		}
+		
+		static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
+			assert(checkIndexValid(neighbourIndex));
+			vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
+			return dirs[neighbourIndex];
+		}
+		static constexpr uint8_t dirAsIndex(vec3i dir) {
+			assert(checkDirValid(dir));
+			auto const result{ (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) };
+			if(indexAsDir(result) != dir) {
+				std::cerr << "err: " << dir << ' ' << result << '\n';
+				assert(false);
+			}
+			return result; 
+		}
+		static constexpr uint8_t lightForDirIndex(uint8_t const light, uint8_t const index) {
+			return index == 2 /*(0, -1, 0)*/  ? light : uint8_t(misc::max(int(light) - 1, 0));
+		}
+			
+		static constexpr uint8_t lightForDir(uint8_t const light, vec3i const dir) {
+			return lightForDirIndex(light, dirAsIndex(dir));
+		}
 	private:
 		std::array<uint8_t, size> lighting;
 	public:
@@ -292,7 +328,10 @@ namespace chunk {
 		}
 		
 		uint8_t       &operator[](int const cubeIndex)       { return lighting[cubeIndex]; }
-		uint8_t const &operator[](int const cubeIndex) const { return lighting[cubeIndex]; }
+		uint8_t const &operator[](int const cubeIndex) const { return lighting[cubeIndex]; }		
+		
+		uint8_t       &operator[](vec3i const cubeCoord)       { return lighting[cubeIndexInChunk(cubeCoord)]; }
+		uint8_t const &operator[](vec3i const cubeCoord) const { return lighting[cubeIndexInChunk(cubeCoord)]; }
 		
 		void fill(uint8_t const val) { lighting.fill(val); }
 		void reset() { fill(0); }
