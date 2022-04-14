@@ -329,9 +329,10 @@ chunk::Chunks chunks{};
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
 	gpuChunksCount = chunks.used.size();
-	auto &it = chunks.gpuChunksStatus;
+	auto &it = chunks.chunksStatus;
 	
-	it.assign(it.size(), chunk::GPUChunkStatus{});
+	for(auto &status : it) status.resetStatus();
+	
 	
 	static_assert(sizeof(chunk::ChunkData{}) == 16384);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u);
@@ -1290,7 +1291,7 @@ static void updateNeighbouringCubeLighting(chunk::Chunk const chunkToUpdate, chu
 		auto const neighbourCubeLight{ chunk::ChunkLighting::lightForDirIndex(lighting, i) };
 		auto &neighbourCubeCurLighting{ neighbourCubeChunk.lighting()[neighbourCubeCoord] };
 		if(neighbourCubeLight > neighbourCubeCurLighting) {
-			if(neighbourCubeChunk != chunkToUpdate) neighbourCubeChunk.gpuStatus().setNeedsUpdate();
+			if(neighbourCubeChunk != chunkToUpdate) neighbourCubeChunk.status().setNeedsUpdate();
 			else {
 				neighbourCubeCurLighting = neighbourCubeLight;
 				updateNeighbouringCubeLighting(chunkToUpdate, neighbourCubeChunk, neighbourCubeCoord, neighbourCubeLight);	
@@ -1350,7 +1351,7 @@ static void updateLighting(chunk::Chunk chunk) {
 		if(cubeChunkIndex == -1) continue;
 
 		auto cubeChunk{ chunks[cubeChunkIndex] };
-		if(cubeChunk != chunk && cubeChunk.gpuStatus().needsUpdate()) continue;//not calculate light from invalidated chunks
+		if(cubeChunk != chunk && cubeChunk.status().needsUpdate()) continue;//not calculate light from invalidated chunks
 		
 		auto const level{ cubeChunk.lighting()[chunk::cubeIndexInChunk(cubeCoord)] };
 		
@@ -1416,8 +1417,8 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 		
 		chunks.chunksPos[chunkIndex] = chunkPosition;
 		chunks.chunksIndex_position[chunkPosition] = chunkIndex;
-		chunks.gpuChunksStatus[chunkIndex].reset();
-		chunks.gpuChunksStatus[chunkIndex].setNeedsUpdate();
+		chunks.chunksStatus[chunkIndex] = chunk::ChunkStatus{};
+		chunks.chunksStatus[chunkIndex].setNeedsUpdate();
 		
 		auto chunk{ chunks[chunkIndex] };
 		auto &neighbours_{ chunk.neighbours() };
@@ -1431,7 +1432,7 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 			if(neighbourIndex >= 0) {
 				neighbours[offset] = chunk::OptionalChunkIndex(neighbourIndex);
 				chunks[neighbourIndex].neighbours()[chunk::Neighbours::mirror(offset)] = chunkIndex;
-				chunks[neighbourIndex].gpuStatus().setNeedsUpdate();
+				chunks[neighbourIndex].status().setNeedsUpdate();
 			}
 			else neighbours[offset] = chunk::OptionalChunkIndex();
 		}
@@ -1497,7 +1498,7 @@ static void updateChunks() {
 				if(optNeighbour) {
 					auto const neighbourIndex{ optNeighbour.get() };
 					chunks[neighbourIndex].neighbours()[chunk::Neighbours::mirror(i)] = chunk::OptionalChunkIndex{};
-					chunks[neighbourIndex].gpuStatus().reset();
+					chunks[neighbourIndex].status().setNeedsUpdate();
 				}
 			}
 		}
@@ -1930,6 +1931,7 @@ static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir cons
 }
 
 static void markNeighboursIfAtBounds(chunk::Chunk chunk, vec3i const blockCoord) {
+	//setNeedsUpdate for neighbouring chunks if their boundaries touch block at blockCoord
 	chunk::Move_to_neighbour_Chunk const c{ chunk };
 	for(int i{}; i < chunk::Neighbours::neighboursCount; i++) {
 		auto const dir{ chunk::Neighbours::indexAsDir(i) };
@@ -1939,7 +1941,7 @@ static void markNeighboursIfAtBounds(chunk::Chunk chunk, vec3i const blockCoord)
 		if(blockAtBounds.any()) {
 			auto const neighbourChunkIndex{ chunk::Move_to_neighbour_Chunk{c}.offset(dir) };
 			if(neighbourChunkIndex.is()) {
-				chunks[neighbourChunkIndex.get()].gpuStatus().setNeedsUpdate();
+				chunks[neighbourChunkIndex.get()].status().setNeedsUpdate();
 			}
 		}
 	}
@@ -1991,8 +1993,7 @@ static void update() {
 				
 				if(breakFullBlock) block = chunk::Block::emptyBlock();
 				else block = chunk::Block{ block.id(), uint8_t( block.cubes() & (~chunk::Block::blockCubeMask(result.cubeIndex)) ) };
-				
-				chunks.gpuChunksStatus[chunkIndex].setNeedsUpdate();
+				chunks.chunksStatus[chunkIndex].setNeedsUpdate();
 				chunks.modified[chunkIndex] = true;
 				isAction = true;
 				
@@ -2058,7 +2059,7 @@ static void update() {
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() != 0) { std::cout << "!\n"; } 
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() == 0) {
 						block = chunk::Block::fullBlock(blockPlaceId);
-						chunks.gpuChunksStatus[chunkIndex].setNeedsUpdate();
+						chunks.chunksStatus[chunkIndex].setNeedsUpdate();
 						chunks.modified[chunkIndex] = true;
 						chunks.chunksLighting[chunkIndex][blockCoord * chunk::cubesInBlockDim] = 0;
 						isAction = true;
@@ -2365,17 +2366,17 @@ int main(void) {
 				auto const chunk{ chunks[chunkIndex] };
 				chunk::ChunkData &chunkData{ chunks.chunksData[chunkIndex] };
 				vec3i const &chunkPosition{ chunks[chunkIndex].position() };
-				auto &gpuStatus = chunks.gpuChunksStatus[chunkIndex];
+				auto &status = chunks.chunksStatus[chunkIndex];
 				
-				if(gpuStatus.needsUpdate() || !gpuStatus.isFullyLoaded()) {
+				if(status.needsUpdate() || !status.isFullyLoadedGPU()) {
 					while(true) {
 						if(chunkIndex >= gpuChunksCount) {
 							std::cout << "Error: gpu buffer was not properly resized. size=" << gpuChunksCount << " expected=" << (chunkIndex+1);
 							exit(-1);
 						}
 						if(playerChunkIndex != chunkIndex && ((sentCount > 2) || (chunkPosition - cameraChunk).in(vec3i{-viewDistance}, vec3i{viewDistance}).anyNot())) {
-							if(gpuStatus.isStubLoaded()) break;
-							if(gpuStatus.isFullyLoaded() && gpuStatus.needsUpdate()) break;
+							if(status.isStubLoadedGPU()) break;
+							if(status.isFullyLoadedGPU() && status.needsUpdate()) break;
 							
 							chunk::Neighbours const neighbours{};
 							static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
@@ -2388,20 +2389,19 @@ int main(void) {
 							);
 							glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 							
-							gpuStatus.markStubLoaded();
+							status.markStubLoadedGPU();
 							break;
 						}
-								
-						gpuStatus.markFullyLoaded();
 						
 						sentCount ++;
 						
-						if(gpuStatus.needsUpdate()) {
-							gpuStatus.resetNeedsUpdate();
+						if(status.needsUpdate()) {
+							status.resetNeedsUpdate();
 							updateChunk(chunk);
-							continue; //several updates may be needed
+							if(status.needsUpdate()) continue; //several updates may be needed
 						}
 						
+						status.markFullyLoadedGPU();
 						
 						uint32_t const aabbData{ chunks[chunkIndex].aabb().getData() };
 						auto const &neighbours{ chunks[chunkIndex].neighbours() };
@@ -2416,6 +2416,7 @@ int main(void) {
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
 						glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t) * chunkIndex, sizeof(uint32_t), &aabbData);
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
 						
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksPostions_ssbo); 
 						glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(vec3i) * chunkIndex, sizeof(vec3i), &chunkPosition);
@@ -2435,7 +2436,8 @@ int main(void) {
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
 						glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkAO), sizeof(chunk::ChunkAO), &ao);
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);					
-						
+
+
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksLighting_ssbo);
 						glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkLighting), sizeof(chunk::ChunkLighting), &lighting);
 						glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);

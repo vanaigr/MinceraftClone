@@ -78,7 +78,7 @@ namespace chunk {
 		#define gs(name, accessor) decltype(auto) name () { return chunks(). accessor [chunk_index]; } decltype(auto) name () const { return chunks(). accessor [chunk_index]; }	
 			gs(position, chunksPos)
 			gs(aabb, chunksAABB)
-			gs(gpuStatus, gpuChunksStatus)
+			gs(status, chunksStatus)
 			gs(modified, modified) //is this safe? (gpuPresent returns rvalue reference)
 			gs(data, chunksData)
 			gs(neighbours, chunksNeighbours)
@@ -242,24 +242,24 @@ namespace chunk {
 	};
 	
 	
-	struct GPUChunkStatus {
+	struct ChunkStatus {
 	private:
 		uint8_t status : 2;
 		uint8_t flags  : 1;
 	public:
-		GPUChunkStatus() = default;
+		ChunkStatus() = default;
 		
-		bool isFullyLoaded() const { return (status & 1) != 0; }
-		void markFullyLoaded() { reset(); status = 1; }
+		bool isFullyLoadedGPU() const { return (status & 1) != 0; }
+		void markFullyLoadedGPU() { resetStatus(); status = 1; }
 		
-		bool isStubLoaded() const { return (status & 2) != 0; }
-		void markStubLoaded() { reset(); status = 2; }
+		bool isStubLoadedGPU() const { return (status & 2) != 0; }
+		void markStubLoadedGPU() { resetStatus(); status = 2; }
 		
-		bool needsUpdate () const { return (flags & 1) == 0; }
+		bool needsUpdate() const { return (flags & 1) == 0; }
 		void setNeedsUpdate()   { flags &= ~1; }
 		void resetNeedsUpdate() { flags |=  1; }
-		
-		void reset() { status = 0; }
+	
+		void resetStatus() { status = 0; }
 	};
 	
 	
@@ -356,7 +356,7 @@ namespace chunk {
 		
 		std::vector<vec3i> chunksPos{};
 		std::vector<AABB> chunksAABB{};
-		std::vector<GPUChunkStatus> gpuChunksStatus{};
+		std::vector<ChunkStatus> chunksStatus{};
 		std::vector<bool> modified{};
 		std::vector<ChunkData> chunksData{};
 		std::vector<ChunkAO> chunksAO;
@@ -378,7 +378,7 @@ namespace chunk {
 				index = usedSize;
 				chunksPos.resize(index+1);
 				chunksAABB.resize(index+1);
-				gpuChunksStatus.resize(index+1);
+				chunksStatus.resize(index+1);
 				modified.resize(index+1);
 				chunksData.resize(index+1);
 				chunksAO.resize(index+1);
