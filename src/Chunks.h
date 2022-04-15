@@ -207,7 +207,7 @@ namespace chunk {
 		}
 		
 		static constexpr bool checkDirValid(vec3i const dir) {
-			return vec3i(dir.notEqual(0)).dot(1) == 1;
+			return vec3i(dir.abs().equal(1)).dot(1) == 1;
 		}
 		
 		//used in main.shader
@@ -245,7 +245,11 @@ namespace chunk {
 	struct ChunkStatus {
 	private:
 		uint8_t status : 2;
-		uint8_t flags  : 1;
+		uint8_t updateBlocks : 1;
+		uint8_t blocksUpdated : 1;
+		uint8_t lightingUpdated : 1;
+		uint8_t updateLightingAdd : 1;
+		uint8_t updateLightingSub : 1;
 	public:
 		ChunkStatus() = default;
 		
@@ -255,11 +259,28 @@ namespace chunk {
 		bool isStubLoadedGPU() const { return (status & 2) != 0; }
 		void markStubLoadedGPU() { resetStatus(); status = 2; }
 		
-		bool needsUpdate() const { return (flags & 1) == 0; }
-		void setNeedsUpdate()   { flags &= ~1; }
-		void resetNeedsUpdate() { flags |=  1; }
-	
 		void resetStatus() { status = 0; }
+		
+		
+		bool isInvalidated() const { return blocksUpdated || lightingUpdated; }
+		bool needsUpdate()   const { return updateBlocks || updateLightingAdd || updateLightingSub; }
+		
+		void setBlocksUpdated  (bool const val) { blocksUpdated     = val; } 
+		void setLightingUpdated(bool const val) { lightingUpdated   = val; }
+		
+		bool isBlocksUpdated  () const { return blocksUpdated  ; }
+		bool isLightingUpdated() const { return lightingUpdated; }
+		
+		
+		void setUpdateBlocks(bool const val) { updateBlocks = val; } 
+		bool isUpdateBlocks() const { return updateBlocks; }
+		
+		void setUpdateLightingAdd(bool const val) { updateLightingAdd = val; }
+		void setUpdateLightingSub(bool const val) { updateLightingSub = val; }
+
+		bool isUpdateLightingAdd() const { return updateLightingAdd; }
+		bool isUpdateLightingSub() const { return updateLightingSub; }
+		
 	};
 	
 	
@@ -426,13 +447,21 @@ namespace chunk {
 	
 	
 	struct Move_to_neighbour_Chunk {
+	public:
+		static bool diagonalNeighbourDirValid(vec3i const dir) {
+			return (dir.abs() <= vec3i{1}).all() && dir.abs().equal(1).any();
+		}
 	private:
 		Chunk chunk;
 		bool valid;
 	public:
 		Move_to_neighbour_Chunk() = delete;
 		
-		Move_to_neighbour_Chunk(Chunks &chunks) : chunk{chunks[0]}, valid{ true } {}/*index 0 may be out of bounds but we need to keep Chunks&*/
+		Move_to_neighbour_Chunk(Chunks &chunks, OptionalChunkIndex oci) :
+			chunk{ chunks[oci.get()] }, /*index -1 may be out of bounds but we need to keep Chunks&*/
+			valid{ oci.is() }
+		{}
+		Move_to_neighbour_Chunk(Chunks &chunks) : chunk{chunks[0]}, valid{ false } {}/*index 0 may be out of bounds but we need to keep Chunks&*/
 		Move_to_neighbour_Chunk(Chunk &src) : chunk{src}, valid{ true } {}
 			
 		Move_to_neighbour_Chunk(Chunks &chunks, vec3i const chunkCoord) {
@@ -450,7 +479,9 @@ namespace chunk {
 		}
 		
 		OptionalChunkIndex move(vec3i const otherChunk) {
-			if(valid && Neighbours::checkDirValid(otherChunk - chunk.position())) return offset(otherChunk - chunk.position());
+			auto const dir{ otherChunk - chunk.position() };
+			if(valid && Neighbours::checkDirValid(dir)) return offset(dir);
+			if(valid && diagonalNeighbourDirValid(dir)) return offsetDiagonal(dir);
 			if(valid && otherChunk == chunk.position()) return optChunk();
 			*this = Move_to_neighbour_Chunk(chunk.chunks(), otherChunk);
 			return optChunk();
@@ -462,17 +493,27 @@ namespace chunk {
 		}
 			
 		OptionalChunkIndex offset(vec3i const dir) {
-			if(!Neighbours::checkDirValid(dir)) {
-				std::cerr << "dir is invalid:" << dir << '\n';
-				assert(false);
-				exit(-1);
-			}
-			if(!valid) return {};
 			if(dir == 0) return { chunk.chunkIndex() };
+			if(!valid) return {};
+			assert(Neighbours::checkDirValid(dir));
+			
 			auto const optChunkIndex{ chunk.neighbours()[dir] };
 			valid = optChunkIndex.is();
 			if(valid) chunk = chunk.chunks()[optChunkIndex.get()];
 			return optChunkIndex;
+		}
+		
+		OptionalChunkIndex offsetDiagonal(vec3i const dir) {
+			if(dir == 0) return { chunk.chunkIndex() };
+			if(!valid) return {};
+			assert(diagonalNeighbourDirValid(dir));
+			
+			OptionalChunkIndex outChunkIndex{ chunk.chunkIndex() };
+			auto &chunks{ chunk.chunks() };
+			if(dir.x != 0) outChunkIndex = Move_to_neighbour_Chunk{ chunks, outChunkIndex }.offset(vec3i(dir.x,0,0));
+			if(dir.y != 0) outChunkIndex = Move_to_neighbour_Chunk{ chunks, outChunkIndex }.offset(vec3i(0,dir.y,0));
+			if(dir.z != 0) outChunkIndex = Move_to_neighbour_Chunk{ chunks, outChunkIndex }.offset(vec3i(0,0,dir.z));
+			return outChunkIndex;
 		}
 		
 		bool is() const { return valid; }

@@ -308,7 +308,7 @@ float lightingAtCube(int chunkIndex, ivec3 cubeCoord) {
 	const int el = index / 4;
 	const int sh = (index % 4) * 8;
 	
-	const float light = mix(1.0, float((lighting.data[el] >> sh) & 255) / 32.0, 0.9);
+	const float light = 0.1 + float((lighting.data[el] >> sh) & 255) / 31.0 * 0.9;
 	return pow(light, 2.2);
 }
 
