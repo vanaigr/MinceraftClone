@@ -331,7 +331,11 @@ void resizeBuffer() {
 	gpuChunksCount = chunks.used.size();
 	auto &it = chunks.chunksStatus;
 	
-	for(auto &status : it) status.resetStatus();
+	for(auto &status : it) {
+		status.resetStatus();
+		status.setBlocksUpdated(true);
+		status.setLightingUpdated(true);
+	}
 	
 	
 	static_assert(sizeof(chunk::ChunkData{}) == 16384);
