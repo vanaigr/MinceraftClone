@@ -29,7 +29,6 @@ namespace chunk {
 	static constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
 		return index < blocksInChunkCount;
 	}
-	
 	inline static constexpr int16_t blockIndex(vec3i const coord) {
 		assert(checkBlockCoordInChunkValid(coord));
 		return coord.x + coord.y*chunk::blocksInChunkDim + coord.z*chunk::blocksInChunkDim*chunk::blocksInChunkDim;
@@ -207,7 +206,7 @@ namespace chunk {
 		}
 		
 		static constexpr bool checkDirValid(vec3i const dir) {
-			return vec3i(dir.abs().equal(1)).dot(1) == 1;
+			return vec3i(dir.notEqual(0)).dot(1) == 1 && dir.abs().equal(1).any();
 		}
 		
 		//used in main.shader
@@ -216,7 +215,8 @@ namespace chunk {
 				vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
 				return dirs[neighbourIndex];
 			}
-			static constexpr uint8_t dirAsIndex(vec3i dir) {
+			
+			static constexpr uint8_t dirAsIndex(vec3i const dir) {
 				assert(checkDirValid(dir));
 				auto const result{ (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) };
 				if(indexAsDir(result) != dir) {
@@ -226,10 +226,10 @@ namespace chunk {
 				return result; 
 			}
 			static constexpr uint8_t mirror(uint8_t index) {
-				return dirAsIndex( -indexAsDir(index) );
+				return dirAsIndex(-indexAsDir(index));
 			}
 			static constexpr uint8_t mirror(vec3i const dir) {
-				return dirAsIndex( -dir );
+				return dirAsIndex(-dir);
 			}
 		
 		std::array<OptionalChunkIndex, neighboursCount> n;
@@ -249,7 +249,7 @@ namespace chunk {
 		uint8_t blocksUpdated : 1;
 		uint8_t lightingUpdated : 1;
 		uint8_t updateLightingAdd : 1;
-		uint8_t updateLightingSub : 1;
+		//uint8_t updateLightingSub : 1;
 	public:
 		ChunkStatus() = default;
 		
@@ -263,7 +263,7 @@ namespace chunk {
 		
 		
 		bool isInvalidated() const { return blocksUpdated || lightingUpdated; }
-		bool needsUpdate()   const { return updateBlocks || updateLightingAdd || updateLightingSub; }
+		bool needsUpdate()   const { return updateBlocks || updateLightingAdd/* || updateLightingSub*/; }
 		
 		void setBlocksUpdated  (bool const val) { blocksUpdated     = val; } 
 		void setLightingUpdated(bool const val) { lightingUpdated   = val; }
@@ -276,10 +276,10 @@ namespace chunk {
 		bool isUpdateBlocks() const { return updateBlocks; }
 		
 		void setUpdateLightingAdd(bool const val) { updateLightingAdd = val; }
-		void setUpdateLightingSub(bool const val) { updateLightingSub = val; }
+		//void setUpdateLightingSub(bool const val) { updateLightingSub = val; }
 
 		bool isUpdateLightingAdd() const { return updateLightingAdd; }
-		bool isUpdateLightingSub() const { return updateLightingSub; }
+		//bool isUpdateLightingSub() const { return updateLightingSub; }
 		
 	};
 	
@@ -316,7 +316,7 @@ namespace chunk {
 		}
 		
 		static constexpr bool checkDirValid(vec3i const dir) {
-			return vec3i(dir.notEqual(0)).dot(1) == 1;
+			return vec3i(dir.notEqual(0)).dot(1) == 1 && dir.abs().equal(1).any();
 		}
 		
 		static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
@@ -324,7 +324,7 @@ namespace chunk {
 			vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
 			return dirs[neighbourIndex];
 		}
-		static constexpr uint8_t dirAsIndex(vec3i dir) {
+		static constexpr uint8_t dirAsIndex(vec3i const dir) {
 			assert(checkDirValid(dir));
 			auto const result{ (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) };
 			if(indexAsDir(result) != dir) {
@@ -359,7 +359,31 @@ namespace chunk {
 	};
 	
 	
-	using ChunkData = std::array<Block, chunk::blocksInChunkCount>;
+	//using ChunkData = std::array<Block, chunk::blocksInChunkCount>;
+	struct ChunkData {
+		static constexpr int size = chunk::blocksInChunkCount;
+	private:
+		 std::array<Block, size> blocks;
+	 public:
+		Block &operator[](int const index) { 
+			assert(checkBlockIndexInChunkValid(index));
+			return blocks[index];
+		}
+		Block const &operator[](int const index) const { 
+			assert(checkBlockIndexInChunkValid(index));
+			return blocks[index];
+		}
+		
+		Block &operator[](vec3i const coord) { 
+			assert(checkBlockCoordInChunkValid(coord));
+			return blocks[blockIndex(coord)];
+		}
+		
+		Block const &operator[](vec3i const coord) const { 
+			assert(checkBlockCoordInChunkValid(coord));
+			return blocks[blockIndex(coord)];
+		}
+	};
 	
 	
 	struct Chunks {	
