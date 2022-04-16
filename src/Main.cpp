@@ -1339,16 +1339,18 @@ static void updateNeighbouringCubeLightingExpand(/*std::vector<int> &visitedChun
 		
 		auto const blockIndex{ chunk::blockIndex(neighbourCubeCoord / chunk::cubesInBlockDim) };
 		auto const block{ neighbourCubeChunk.data()[blockIndex] };
-		auto const blockId{ block.id() };		
-		if(block.cube(neighbourCubeCoord % chunk::cubesInBlockDim) && !(blockId == 5 || blockId == 7)) continue;
+		auto const blockId{ block.id() };	
+		auto const isCube{ block.cube(neighbourCubeCoord % chunk::cubesInBlockDim) };
+		auto const emitter{ blockId == 14 || blockId == 13 };
+		auto const emitting{ emitter && isCube };		
 		
+		if(isCube && !(blockId == 5 || blockId == 7 || emitter)) continue;
 			
 		auto const neighbourCubeLight{ chunk::ChunkLighting::lightForDirIndex(cubeLight, i) };
 		auto &neighbourCubeCurLighting{ neighbourCubeChunk.lighting()[neighbourCubeCoord] };
 		auto const neighbourCurContracts{neighbourCubeCurLighting!= 0};
 		
-		
-		if((neighbourCubeCurLighting != 0 && neighbourCubeLight >= neighbourCubeCurLighting) || first) 
+		if(((neighbourCubeCurLighting != 0 && neighbourCubeLight >= neighbourCubeCurLighting) || first) && !emitting) 
 			updateNeighbouringCubeLightingExpand(endCubes, neighbourCubeChunk, neighbourCubeCoord, false);	
 		else if(neighbourCubeCurLighting != 0)
 			endCubes.push_back({neighbourCubeCoord, neighbourCubeChunkIndex});
@@ -1378,19 +1380,37 @@ static void updateNeighbouringCubeLightingContract(chunk::Chunks &chunks, CubeIn
 		
 		auto const blockIndex{ chunk::blockIndex(neighbourCubeCoord / chunk::cubesInBlockDim) };
 		auto const block{ neighbourCubeChunk.data()[blockIndex] };
-		auto const blockId{ block.id() };		
-		if(block.cube(neighbourCubeCoord % chunk::cubesInBlockDim) && !(blockId == 5 || blockId == 7)) continue;
+		auto const blockId{ block.id() };
+		auto const isCube{ block.cube(neighbourCubeCoord % chunk::cubesInBlockDim) };
+		auto const emitter{ blockId == 14 || blockId == 13 };
+		auto const emitting{ emitter && isCube };
 		
-			
+		if(isCube && !(blockId == 5 || blockId == 7 || emitter)) continue;
+		
 		auto const neighbourCubeLight{ chunk::ChunkLighting::lightForDirIndex(cubeLight, i) };
 		auto &neighbourCubeCurLighting{ neighbourCubeChunk.lighting()[neighbourCubeCoord] };
 		auto const neighbourCurContracts{neighbourCubeCurLighting != 0};
 		
-		if(neighbourCubeLight > neighbourCubeCurLighting) {
+		if(neighbourCubeLight > neighbourCubeCurLighting && !emitting) {
 			neighbourCubeCurLighting = neighbourCubeLight;
 			updateNeighbouringCubeLightingContract(chunks, CubeInfo{neighbourCubeCoord, neighbourCubeChunkIndex});	
 		}
 	}
+}
+
+void updateLightSub(chunk::Chunk chunk, vec3i const cubeStartInChunkCoord, vec3i const cubeEndInChunkCoord) {
+	static std::vector<CubeInfo> endBlocks{};
+	endBlocks.clear();
+	
+	auto &chunks{ chunk.chunks() };
+	for(int32_t z{cubeStartInChunkCoord.z}; z <= cubeEndInChunkCoord.z; z++)
+	for(int32_t y{cubeStartInChunkCoord.y}; y <= cubeEndInChunkCoord.y; y++)
+	for(int32_t x{cubeStartInChunkCoord.x}; x <= cubeEndInChunkCoord.x; x++) {
+		vec3i const cubeCoord{ x, y, z };
+		updateNeighbouringCubeLightingExpand(endBlocks, chunk, cubeCoord, true);
+	}
+	
+	for(auto const ci : endBlocks) updateNeighbouringCubeLightingContract(chunks, ci);
 }
 
 static void updateNeighbouringCubeLightingAdd(chunk::Chunk cubeChunk, vec3i const cubeCoord, uint8_t const lighting, bool const first) {
@@ -1411,13 +1431,18 @@ static void updateNeighbouringCubeLightingAdd(chunk::Chunk cubeChunk, vec3i cons
 		
 		auto const blockIndex{ chunk::blockIndex(neighbourCubeCoord / chunk::cubesInBlockDim) };
 		auto const block{ neighbourCubeChunk.data()[blockIndex] };
-		auto const blockId{ block.id() };		
-		if(block.cube(neighbourCubeCoord % chunk::cubesInBlockDim) && !(blockId == 5 || blockId == 7)) continue;
+		auto const blockId{ block.id() };
+		auto const isCube{ block.cube(neighbourCubeCoord % chunk::cubesInBlockDim) };
+		auto const emitter{ blockId == 14 || blockId == 13 };
+		auto const emitting{ emitter && isCube };
+		
+		if(isCube && !(blockId == 5 || blockId == 7 || emitter)) continue;
 			
 		auto const neighbourCubeLight{ chunk::ChunkLighting::lightForDirIndex(lighting, i) };
 		auto &neighbourCubeCurLighting{ neighbourCubeChunk.lighting()[neighbourCubeCoord] };
-		if(neighbourCubeLight > neighbourCubeCurLighting || first) {
-			if(neighbourCubeLight > neighbourCubeCurLighting) neighbourCubeCurLighting = neighbourCubeLight;
+		
+		if((neighbourCubeLight > neighbourCubeCurLighting && !emitting) || first) {
+			if((neighbourCubeLight > neighbourCubeCurLighting && !emitting)) neighbourCubeCurLighting = neighbourCubeLight;
 			updateNeighbouringCubeLightingAdd(neighbourCubeChunk, neighbourCubeCoord, neighbourCubeCurLighting, false);	
 
 			neighbourCubeChunk.status().setLightingUpdated(true);
@@ -1444,14 +1469,19 @@ static void updateNeighbouringCubeLighting(chunk::Chunk cubeChunk, vec3i const u
 		auto const blockIndex{ chunk::blockIndex(neighbourCubeCoord / chunk::cubesInBlockDim) };
 		auto const block{ neighbourCubeChunk.data()[blockIndex] };
 		auto const blockId{ block.id() };		
-		if(block.cube(neighbourCubeCoord % chunk::cubesInBlockDim) && !(blockId == 5 || blockId == 7)) continue;
+		auto const isCube{ block.cube(neighbourCubeCoord % chunk::cubesInBlockDim) };
+		auto const emitter{ blockId == 14 || blockId == 13 };
+		auto const emitting{ emitter && isCube };
+		
+		if(isCube && !(blockId == 5 || blockId == 7 || emitter)) continue;
 			
 		auto const neighbourCubeLight{ chunk::ChunkLighting::lightForDirIndex(lighting, i) };
 		auto &neighbourCubeCurLighting{ neighbourCubeChunk.lighting()[neighbourCubeCoord] };
-		if(neighbourCubeLight > neighbourCubeCurLighting) {
+		
+		if(neighbourCubeLight > neighbourCubeCurLighting && !emitting) {
 			if(neighbourCubeChunkCoord.in(updateMinPos, updateMaxPos).all()) {
 				neighbourCubeCurLighting = neighbourCubeLight;
-				updateNeighbouringCubeLighting(neighbourCubeChunk, updateMinPos, updateMaxPos, neighbourCubeCoord, neighbourCubeLight);	
+				updateNeighbouringCubeLighting(neighbourCubeChunk, updateMinPos, updateMaxPos, neighbourCubeCoord, neighbourCubeCurLighting);	
 			}
 			else neighbourCubeChunk.status().setUpdateLightingAdd(true);
 		}
@@ -1492,20 +1522,23 @@ static void fastUpdateLightingInDir(chunk::Chunk chunk, vec3i const dir, vec3i c
 			auto const block{ chunk.data()[blockIndex] };
 			auto const blockId{ block.id() };
 			
-			if(block.cube(cubeInChunkCoord % chunk::cubesInBlockDim) && !(blockId == 5 || blockId == 7)) {
+			auto const emitter{ blockId == 14 || blockId == 13 };
+			
+			if(block.cube(cubeInChunkCoord % chunk::cubesInBlockDim) && !(blockId == 5 || blockId == 7 || emitter)) {
 				ChunkCoord const cubePos{ pos, ChunkCoord::Cube{vec3l(cubeInChunkCoord)} };
 				vec3i cubeCoord{ cubePos.cube() };
 				minCube = minCube.min(cubeCoord);
 				maxCube = maxCube.max(cubeCoord);
+				if(!emitter) continue;
 			}
-			else {
-				vec3i const cubeCoordBefore{ (cubeInChunkCoord - dir).mod(chunk::cubesInChunkDim) };
-				
-				lighting[cubeInChunkCoord] = misc::max(
-					lighting[cubeInChunkCoord],
-					chunk::ChunkLighting::lightForDir((*lightingBefore)[cubeCoordBefore], dir)
-				);
-			}
+			
+			vec3i const cubeCoordBefore{ (cubeInChunkCoord - dir).mod(chunk::cubesInChunkDim) };
+			
+			lighting[cubeInChunkCoord] = std::max<uint8_t>({
+				lighting[cubeInChunkCoord],
+				chunk::ChunkLighting::lightForDir((*lightingBefore)[cubeCoordBefore], dir),
+				uint8_t(emitter ? 31u : 0u)
+			});
 		}
 		
 		lightingBefore = &lighting;
@@ -2308,20 +2341,29 @@ static void update() {
 				auto const &chunkData{ chunk.data() };
 				auto const chunkIndex{ chunk.chunkIndex() };
 				auto &block{ chunk.data()[result.blockIndex] };
+				auto const blockId{ block.id() };
+				auto const emitter{ blockId == 14 || blockId == 13 };
 				
 				if(breakFullBlock) {
 					block = chunk::Block::emptyBlock();
+					
+					if(emitter) {
+						auto const cubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim };
+						updateLightSub(chunk, cubeCoord, cubeCoord + 1);
+					}
+					
 					for(int i{}; i < chunk::cubesInBlockCount; i++) {
 						auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
-						chunk.lighting()[curCubeCoord] = 0u;
 						updateNeighbouringCubeLightingAdd(chunk, curCubeCoord, 0, true);
 					}
 				}
 				else {
 					auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex) };
 					block = chunk::Block{ block.id(), uint8_t( block.cubes() & (~chunk::Block::blockCubeMask(result.cubeIndex)) ) };
-					chunk.lighting()[curCubeCoord] = 0u;
 					
+					if(emitter) {
+						updateLightSub(chunk, curCubeCoord, curCubeCoord);
+					}
 					updateNeighbouringCubeLightingAdd(chunk, curCubeCoord, 0, true);
 				}
 				
@@ -2390,6 +2432,7 @@ static void update() {
 					auto const index{ chunk::blockIndex(blockCoord) };
 					auto &block{ chunks.chunksData[chunkIndex][index] };
 					
+					
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() != 0) { std::cout << "!\n"; } 
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() == 0) {
 						block = chunk::Block::fullBlock(blockPlaceId);
@@ -2410,24 +2453,20 @@ static void update() {
 						
 						markNeighboursIfAtBounds(chunks[chunkIndex], blockCoord);
 						
-						{
-							static std::vector<CubeInfo> endBlocks{};
-							//static std::vector<int> visitedChunks{};
-							endBlocks.clear();
-							//visitedChunks.clear();
-							
+						auto const emitter{ blockPlaceId == 14 || blockPlaceId == 13 };
+						
+						updateLightSub(chunks[chunkIndex], blockCoord * chunk::cubesInBlockDim, blockCoord * chunk::cubesInBlockDim+1);
+						
+						if(emitter) {
 							for(int i{}; i < chunk::cubesInBlockCount; i++) {
-								auto const cubeCoord{ blockCoord * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
-								updateNeighbouringCubeLightingExpand(endBlocks, chunks[chunkIndex], cubeCoord, true);
+								auto const curCubeCoord{ blockCoord * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
+								chunks[chunkIndex].lighting()[curCubeCoord] = 31u;		
 							}
-							for(auto const ci : endBlocks) updateNeighbouringCubeLightingContract(chunks, ci);
-							
-							//for(int ci : visitedChunks) {
-							//	auto visitedChunk{ chunks[ci] };
-							//	auto &lighting{ visitedChunk.lighting() };
-							//	
-							//	visitedChunk.status().setLightingUpdated(true);
-							//}
+								
+							for(int i{}; i < chunk::cubesInBlockCount; i++) {
+								auto const curCubeCoord{ blockCoord * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
+								updateNeighbouringCubeLightingAdd(chunks[chunkIndex], curCubeCoord, 31u, true);
+							}
 						}
 					}
 					break;
@@ -2796,7 +2835,7 @@ int main(void) {
 		
 		
 		{ 
-			/*PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
+			PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
 			auto const optionalResult{ trace(chunks, pd) };
 				
 			int value = 0;
@@ -2805,7 +2844,7 @@ int main(void) {
 				auto const chunk { result.chunk };
 				
 				value = chunk.lighting()[chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex)];
-			};*/
+			};
 		
 		
 			glEnable(GL_BLEND);
@@ -2815,8 +2854,8 @@ int main(void) {
 			    
 			std::stringstream ss{};
 			ss.precision(1);
-			//ss << value;
-			ss << std::fixed << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";
+			ss << value;
+			//ss << std::fixed << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";
 			std::string const text{ ss.str() };
 	
 			auto const textCount{ std::min(text.size(), 15ull) };
