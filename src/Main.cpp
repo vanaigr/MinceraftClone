@@ -547,7 +547,7 @@ static void reloadShaders() {
 		ShaderLoader sl{};
 		
 		sl.addShaderFromCode(
-		R"(#version 300 es
+		R"(#version 420
 			precision mediump float;
 			
 			layout(location = 0) in vec2 pos_s;
@@ -919,11 +919,12 @@ static void reloadShaders() {
 		ShaderLoader sl{};
 		
 		sl.addShaderFromCode(
-		R"(#version 430		
+		R"(#version 430
+			precision mediump float;
+			
 			uniform vec2 startPos;
 			uniform vec2 endPos;
 			
-			out vec2 uv;
 			void main(void){
 				const vec2 verts[] = {
 					vec2(0),
@@ -931,15 +932,23 @@ static void reloadShaders() {
 					vec2(0, 1),
 					vec2(1)
 				};
-				
-				gl_Position = vec4( mix(startPos, endPos, verts[gl_VertexID]), 0.0, 1 );
-				//gl_Position = vec4(  verts[gl_VertexID], 0.0, 1 );
-				uv = verts[gl_VertexID];
+				vec2 interp = verts[gl_VertexID];
+				gl_Position = vec4(mix(startPos, endPos, interp), 0, 1);
 			}
-		)", GL_VERTEX_SHADER,"current block vertex");
+		)", GL_VERTEX_SHADER,"cur block vertex");
 		
 		sl.addShaderFromCode(
 		R"(#version 430
+			in vec4 gl_FragCoord;
+
+			uniform vec2 startPos;
+			uniform vec2 endPos;
+			
+			uniform sampler2D font;
+			uniform vec2 screenSize;
+			
+			out vec4 color;
+			
 			uniform uint block;
 			uniform vec2 atlasTileCount;
 			uniform sampler2D atlas;
@@ -953,7 +962,7 @@ static void reloadShaders() {
 					coord.x + offset.x,
 					coord.y + atlasTileCount.y - (offset.y + 1)
 				) / atlasTileCount;
-				return pow(texture2D(atlas, uv).rgb, vec3(2.2));
+				return pow(texture(atlas, uv).rgb, vec3(2.2));
 			}
 			
 			vec2 atlasAt(const uint id, const ivec3 side) {
@@ -963,17 +972,46 @@ static void reloadShaders() {
 				const int bit16 = 65535;
 				return vec2( pos&bit16, (pos>>16)&bit16 );
 			}
-
-			in vec2 uv;
 			
-			out vec4 color;
-			void main() {
+			vec3 col(vec2 coord) {
+				const vec2 pos = (coord / screenSize) * 2 - 1;
+				const vec2 uv = (pos - startPos) / (endPos - startPos);
+				
 				const vec2 offset = atlasAt(block, ivec3(1,0,0));
-				color = vec4(sampleAtlas(offset, uv), 1);
+				return sampleAtlas(offset, clamp(uv, 0.0001, 0.9999));
+			}
+			
+			float rand(const vec2 co) {
+				return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+			}
+			
+			vec3 sampleN(const vec2 coord, const uint n, const vec2 startRand) {
+				const vec2 pixelCoord = floor(coord);
+				const float fn = float(n);
+			
+				vec3 result = vec3(0);
+				for (int i = 0; i < n; i++) {
+					for (int j = 0; j < n; j++) {
+						const vec2 curCoord = pixelCoord + vec2(i / fn, j / fn);
+						const vec2 offset = vec2(rand(startRand + curCoord.xy), rand(startRand + curCoord.xy + i+1)) / fn;
+						const vec2 offsetedCoord = curCoord + offset;
+			
+						const vec3 sampl = col(offsetedCoord);
+						result += sampl;
+					}
+				}
+			
+				return result / (fn * fn);
+			}
+
+			void main() {
+				const vec3 col = sampleN(gl_FragCoord.xy, 6, vec2(block));
+				
+				color = vec4(col, 1);
 			}
 		)",
 		GL_FRAGMENT_SHADER,
-		"current block shader");
+		"current block fragment");
 		
 		sl.attachShaders(currentBlockProgram);
 	
@@ -987,13 +1025,17 @@ static void reloadShaders() {
 		glUniform1i(glGetUniformLocation(currentBlockProgram, "atlas"), atlas_it);
 		cb_blockIndex_u = glGetUniformLocation(currentBlockProgram, "block");
 		
-		double const size{ 0.12 };
-		vec2d const end{ 1 - 0.04*aspect, 1-0.04 };
-		vec2d const start{ end - vec2d{aspect,1}*size };
+		vec2d const size{ vec2d{aspect,1} * 0.06 };
+		vec2d const end_ { 1 - 0.02*aspect, 1-0.02 };
+		vec2d const start_{ end_ - size };
+		
+		vec2d const end  { (end_   * windowSize_d).floor() / windowSize_d * 2 - 1 };
+		vec2d const start{ (start_ * windowSize_d).floor() / windowSize_d * 2 - 1 };
 
 		glUniform2f(glGetUniformLocation(currentBlockProgram, "startPos"), start.x, start.y);
 		glUniform2f(glGetUniformLocation(currentBlockProgram, "endPos"), end.x, end.y);
 		glUniform2f(glGetUniformLocation(currentBlockProgram, "atlasTileCount"), 512 / 16, 512 / 16);
+		glUniform2f(glGetUniformLocation(currentBlockProgram, "screenSize"), windowSize_d.x, windowSize_d.y);
 	}
 }
 
@@ -1471,7 +1513,7 @@ static void fastUpdateLightingInDir(chunk::Chunk chunk, vec3i const dir, vec3i c
 }
 
 static void updateLightingIn(chunk::Chunks &chunks, vec3i const minChunkPos, vec3i const maxChunkPos) {	
-	std::cout << "l:" << minChunkPos << ' ' << (maxChunkPos - minChunkPos) << '\n';
+	//std::cout << "l:" << minChunkPos << ' ' << (maxChunkPos - minChunkPos) << '\n';
 	
 	static std::vector<int> chunkIndices{};
 	chunkIndices.resize(0);
@@ -1533,7 +1575,7 @@ static void updateLightingIn(chunk::Chunks &chunks, vec3i const minChunkPos, vec
 }
 
 static void updateAO(chunk::Chunk chunk) {
-	std::cout << "a:" << chunk.position() << '\n';
+	//std::cout << "a:" << chunk.position() << '\n';
 	
 	auto &chunks{ chunk.chunks() };
 	auto const aabb{ chunk.aabb() };
@@ -1591,7 +1633,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			if(status.isStubLoadedGPU()) return modified;
 			if(status.isFullyLoadedGPU() && status.isInvalidated()) return modified;
 			
-			std::cout << "s:" << chunkCoord << '\n';
+			//std::cout << "s:" << chunkCoord << '\n';
 			
 			chunk::Neighbours const neighbours{};
 			static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
@@ -1613,7 +1655,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		auto const &ao{ chunk.ao() };
 		
 		if(status.isBlocksUpdated()) {
-			std::cout << "b:" << chunkCoord << '\n';
+			//std::cout << "b:" << chunkCoord << '\n';
 			static_assert(sizeof chunkData == 16384);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(chunkData) * chunkIndex, sizeof(chunkData), &chunkData);
@@ -1645,7 +1687,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		}					
 
 		if(status.isLightingUpdated()) {
-			std::cout << "l:" << chunkCoord << '\n';
+			//std::cout << "l:" << chunkCoord << '\n';
 			auto const &lighting{ chunk.lighting() };
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksLighting_ssbo);
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkLighting), sizeof(chunk::ChunkLighting), &lighting);
