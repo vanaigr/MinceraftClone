@@ -271,7 +271,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 }
 
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 12);
+	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 14);
 }
 
 static const Font font{ ".\\assets\\font.txt" };
@@ -499,6 +499,8 @@ static void reloadShaders() {
 				c(13, 0), c(13, 0), c(13, 0), //rainbow?
 				c(14, 0), c(14, 0), c(14, 0), //brick
 				c(15, 0), c(15, 0), c(15, 0), //stone brick
+				c(16, 0), c(16, 0), c(16, 0), //lamp 1
+				c(17, 0), c(17, 0), c(17, 0), //lamp 2
 			};
 			glGenBuffers(1, &blockSides_u);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, blockSides_u);
