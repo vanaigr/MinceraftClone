@@ -66,7 +66,7 @@ static double const fixedDeltaTime{ 16.0/1000.0 };
 
 static double speedModifier = 2.5;
 static double playerSpeed{ 2.7 };
-static double spectatorSpeed{ 0.2 };
+static double spectatorSpeed{ 0.1 };
 
 static double const aspect{ windowSize_d.y / windowSize_d.x };
 
@@ -438,7 +438,18 @@ static void reloadShaders() {
 	
 		sl.attachShaders(mainProgram);
 	
-		glLinkProgram(mainProgram);		
+		glLinkProgram(mainProgram);	
+
+		{
+			int length;
+			glGetProgramiv(mainProgram, GL_INFO_LOG_LENGTH, &length);
+			GLchar *msg = new GLchar[length + 1];
+			msg[0] = '\0';
+			glGetProgramInfoLog(mainProgram, length, &length, msg);
+			std::cout << "Program error:\n" << msg;
+			delete[] msg;
+		}
+	
 		glValidateProgram(mainProgram);
 	
 		sl.deleteShaders();
@@ -2835,16 +2846,16 @@ int main(void) {
 		
 		
 		{ 
-			PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
-			auto const optionalResult{ trace(chunks, pd) };
-				
-			int value = 0;
-			if(optionalResult) {
-				auto const result{ *optionalResult };
-				auto const chunk { result.chunk };
-				
-				value = chunk.lighting()[chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex)];
-			};
+			//PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
+			//auto const optionalResult{ trace(chunks, pd) };
+			//	
+			//int value = 0;
+			//if(optionalResult) {
+			//	auto const result{ *optionalResult };
+			//	auto const chunk { result.chunk };
+			//	
+			//	value = chunk.lighting()[chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex)];
+			//};
 		
 		
 			glEnable(GL_BLEND);
@@ -2854,8 +2865,8 @@ int main(void) {
 			    
 			std::stringstream ss{};
 			ss.precision(1);
-			ss << value;
-			//ss << std::fixed << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";
+			//ss << value;
+			ss << std::fixed << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";
 			std::string const text{ ss.str() };
 	
 			auto const textCount{ std::min(text.size(), 15ull) };

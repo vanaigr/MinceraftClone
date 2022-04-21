@@ -2,6 +2,7 @@
 
 //#extension GL_ARB_conservative_depth: warn
 //#define GL_ARB_conservative_depth 1
+#extension GL_ARB_shader_group_vote : enable
 
 #ifdef GL_ES
 precision mediump float;
@@ -77,6 +78,9 @@ ivec3 start(const uint data) { return indexBlock(data&65535u); } //copied from C
 ivec3 end(const uint data) { return indexBlock((data>>16)&65535u); } //copied from Chunks.h
 ivec3 onePastEnd(const uint data) { return end(data) + 1; } //copied from Chunks.h
 bool emptyBounds(const ivec3 start, const ivec3 onePastEnd) {
+	return any(lessThanEqual(onePastEnd, start));
+}
+bool emptyBoundsF(const vec3 start, const vec3 onePastEnd) {
 	return any(lessThanEqual(onePastEnd, start));
 }
 bool emptyBounds(const int chunkIndex) {
@@ -381,22 +385,6 @@ Surface surfaceEntity(const uint type) {
 	return Surface(type | (1u << 31));
 }
 
-struct BlockIntersection {
-	vec3 normal;
-	vec3 newDir;
-	vec3 color;
-	vec3 at;
-	float t;
-	int chunkIndex;
-	Surface surface;
-};
-
-BlockIntersection noBlockIntersection() {
-	BlockIntersection i;
-	i.surface = noSurface();
-	return i;
-}
-
 //https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
 vec3 reflect(const vec3 incoming, const vec3 normal)  { 
     return incoming - 2 * dot(incoming, normal) * normal; 
@@ -433,15 +421,15 @@ float intersectPlane(const Ray r, const vec3 center, const vec3 n) {
     return dot(n, center - r.orig) / dot(n, r.dir);
 }
 
-float intersectSquare(const Ray r, const vec3 center, const vec3 n, const vec3 up, const vec3 left, inout vec2 uv) {
+float intersectSquare(const Ray r, const vec3 center, const vec3 n, const vec3 up, const vec3 left) {
     const vec3 c = center + n; //plane center
     const float t = intersectPlane(r, c, n);
     const vec3 p = at(r, t); //point
-    vec3 l = p - c; //point local to plane
+    const vec3 l = p - c; //point local to plane
     float u_ = dot(l, up);
     float v_ = dot(l, left);
     if (abs(u_) <= 1 && abs(v_) <= 1) {
-        uv = (vec2(u_, v_) / 2 + 0.5);
+        //const vec2 uv = (vec2(u_, v_) / 2 + 0.5);
         return t;
     }
     return 1.0 / 0.0;
@@ -449,20 +437,23 @@ float intersectSquare(const Ray r, const vec3 center, const vec3 n, const vec3 u
 
 struct Intersection {
 	vec3 normal;
-	vec3 newRayDir;
-	vec3 color;
 	vec3 at;
-	float t;
-	Surface surface;
+	bool is;
 	bool frontface;
 };
-//float intersectCube(const Ray ray, const vec3 center, const vec3 n1, const vec3 n2, const vec3 size, out vec3 n_out, out vec2 uv_out) {
-Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, const vec3 n1, const vec3 n2) {
-	const vec3 size = (end - start) / 2;
-	const vec3 center = (end + start) / 2; 
-	const int frontface = int(all(equal(ray.orig, clamp(ray.orig, start, end)))) * -2 + 1;
-    const vec3 n3 = cross(n2, n1);
 
+Intersection noIntersection() {
+	 Intersection i;
+	 i.is = false;
+	 return i;
+}
+
+Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, const vec3 n1, const vec3 n2) {
+	const vec3 size = (end - start) / 2 * 0.999;
+	const vec3 center = (end + start) / 2; 
+	const float frontface = float(all(equal(ray.orig, clamp(ray.orig, start, end)))) * -2 + 1;
+    const vec3 n3 = cross(n2, n1);
+	
 	const vec3 nn[3] = { 
          n1 * -sign( dot(n1, ray.dir) ) * frontface
         ,n2 * -sign( dot(n2, ray.dir) ) * frontface
@@ -474,395 +465,293 @@ Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, cons
         ,nn[1] / size.y
         ,nn[2] / size.z
     };
-
-    vec2 uvs[3];
-
+	
     const uint sides = 3;
     const float arr[sides] = {
-         intersectSquare(ray, center, nn[0] * size.x, ns[2], ns[1], uvs[0])
-        ,intersectSquare(ray, center, nn[1] * size.y, ns[0], ns[2], uvs[1])
-        ,intersectSquare(ray, center, nn[2] * size.z, ns[0], ns[1], uvs[2])
+         intersectSquare(ray, center, nn[0] * size.x, ns[2], ns[1])
+        ,intersectSquare(ray, center, nn[1] * size.y, ns[0], ns[2])
+        ,intersectSquare(ray, center, nn[2] * size.z, ns[0], ns[1])
     };
-
+	
     float shortestT = 1.0 / 0.0;
 	vec3 normal;
-	//vec2 uv;
 	
-    for (uint i = 0; i < sides; i++) {
-        float t = arr[i];
-        if (t >= 0 && t < shortestT) {
-            shortestT = t;
-            normal = nn[i];
-            //uv = uvs[i];
-        }
-    }
-
+	for (uint i = 0; i < sides; i++) {
+		float t = arr[i];
+		if (t > 0 && t < shortestT) {
+			shortestT = t;
+			normal = nn[i];
+		}
+	}
+	
 	return Intersection(
-		normal,
-		vec3(0),
-		vec3(1),
-		mix(center + normal * size * frontface, at(ray, shortestT), equal(normal, vec3(0))),
-		shortestT,
-		surfaceEntity(1),
+		normal * frontface,
+		mix(center + normal * size, at(ray, shortestT), equal(normal, vec3(0))),
+		shortestT < 1.0 / 0.0,
 		frontface > 0
 	);
 }
 
-struct BlockInfo {
-	ivec3 normal;
-	vec3 newRayDir;
-	vec3 color;
-	uint block;
-	bool frontface;
+struct IntersectionInfo {
+	vec3 coord;
+	vec3 localSpaceCoord;
+	uint blockId;
+	int chunkIndex;
+	int bias;
 };
 
-BlockInfo testFace(
-	const Ray ray,
-	const vec3 fromBlockCoord, const uint fromBlock, 
-	const vec3 toBlockCoord, const uint toBlock, 
-	const vec3 curCoordF, const ivec3 intersectionSide
-) {
-	const vec3 dir = ray.dir;
-	const ivec3 dir_ = ivec3(sign(dir));
-	
-	const uint blocks[] = {
-		fromBlock,
-		toBlock
-	};
-	const vec3 blockCoords[] = {
-		fromBlockCoord,
-		toBlockCoord
-	};
-			
-	BlockInfo glass = BlockInfo(ivec3(0), vec3(0), vec3(1), 0, false);
-	for(int s = 0; s < 2; s ++) {
-		const uint blockId = blocks[s];
-		const vec3 blockCoord = blockCoords[s];
-		
-		if(blockId != 0) { 
-			const vec3 blockCoord = curCoordF - blockCoord;
-			vec2 uv = clamp(vec2(
-				dot(intersectionSide, blockCoord.zxx),
-				dot(intersectionSide, blockCoord.yzy)
-			), 0.0001, 0.9999);
-			
-			const ivec3 side = intersectionSide * ((1-s) * 2 - 1) * dir_;
-			const bool backside = dot(vec3(side), ray.dir) > 0;
-			const ivec3 normal = side * ( backside ? -1 : 1 );
-			
-			const vec2 offset = atlasAt(blockId, side);
-			const vec3 color = sampleAtlas(offset, uv) * glass.color;
-			
-			if(blockId == 5) { //leaves
-				if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue; 
-			}
-			if(blockId == 7) { //glass
-				if(glass.block != 0) { glass = BlockInfo(ivec3(0), vec3(0), vec3(1), 0, false); continue; }
-				
-				const vec3 glassOffset = vec3( 
-					sin(blockCoord.x*9)/2, 
-					sin(blockCoord.z*9)/8, 
-					sin(blockCoord.y*6 + blockCoord.x*4)/8
-				) / 100;
-				
-				const vec3 glassBlockCoord = blockCoord - glassOffset;
-				
-				vec2 glassUv = vec2(
-					dot(intersectionSide, glassBlockCoord.zxx),
-					dot(intersectionSide, glassBlockCoord.yzy)
-				);
-				const vec2 offset = atlasAt(blockId, side);
-				const vec3 color = sampleAtlas(offset, clamp(glassUv, 0.0001, 0.9999));
-	
-				const vec3 incoming = ray.dir - glassOffset * vec3(1-intersectionSide);
-				const vec3 refracted = refract2(normalize(incoming), normalize(vec3(side)), 1.1 );
-				
-				glass = BlockInfo(
-					normal,
-					normalize(refracted),
-					color,
-					blockId,
-					!backside
-				);
-				continue;
-			}
-			if(blockId == 8) { //diamond						
-				const vec3 offset = normalize(texture2D(noise, uv/5).xyz - 0.5) * 0.01;
-				const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
-				const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
-				
-				return BlockInfo(
-					normal,
-					reflected,
-					color,
-					blockId,
-					!backside
-				);
-			}
-			
-			//other blocks
-			return BlockInfo(
-				normal,
-				vec3(0),
-				color,
-				blockId,
-				!backside
-			);
-		}
-	}	
-		
-	return glass; //glass may have block id = 0 - empty block
+IntersectionInfo noIntersectionInfo() {
+	IntersectionInfo i;
+	i.blockId = 0;
+	i.chunkIndex = -1;
+	return i;
 }
 
-BlockIntersection isInters(const Ray ray, ivec3 relativeToChunk, int curChunkIndex, const bool drawPlayer) { 	
+IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*must be loaded*/ startChunkIndex, const int startBias, const float stopAtLen /*and return no intersection with chunkIndex*/) { 
 	const vec3 dir = ray.dir;
-	const ivec3 dir_ = ivec3(sign(dir));
-	const ivec3 positive_ = max(+dir_, ivec3(0,0,0));
-	const ivec3 negative_ = max(-dir_, ivec3(0,0,0));
+	const vec3 dirSign = (sign(dir));
+	const ivec3 dirSignI = ivec3(dirSign);
+	const vec3 positive_ = max(+dirSign, vec3(0));
+	const vec3 negative_ = max(-dirSign, vec3(0));
 	
 	const vec3 stepLength = 1 / abs(dir);
 	
-	const  vec3 firstCellRow_f = vec3(positive_) * (floor(ray.orig)+1) + vec3(negative_) * (ceil(ray.orig)-1);
-	const ivec3 firstCellRow   = ivec3(firstCellRow_f); 
-	const  vec3 firstCellDiff  = abs(ray.orig-firstCellRow_f); //distance to the frist block side
+	Block fromBlock;
+	vec3 curCoord = ray.orig;
+	int curChunkIndex = startChunkIndex;
+	int bias = startBias;
+	vec3 relativeTo = relativeToChunk_ * blocksInChunkDim;
 	
-	ivec3 lastSteps = ivec3(0);
-	//uint lastBlock = blockAt_unnormalized(...);
+	{ //calculate first intersection
+		const ivec3 startBlockRalativeCoord = ivec3(floor(curCoord) - positive_ * vec3(equal(curCoord, floor(curCoord))) - relativeTo);
+		const ivec3 startBlockNeighbourChunkDir = testBounds(startBlockRalativeCoord);
+		const int startBlockNeighbourChunk = chunkNeighbourIndex(curChunkIndex, startBlockNeighbourChunkDir);
+		fromBlock = startBlockNeighbourChunk == -1 ? blockAir() : blockAt( //not loaded chunks are unaccounted
+			startBlockNeighbourChunk,
+			startBlockRalativeCoord - startBlockNeighbourChunkDir * blocksInChunkDim
+		);
+		//fromBlock = blockAir();
+		
+		const vec3 candCoords = 
+			blockId(fromBlock) == 0 ?
+				mix(
+					floor(curCoord), 
+					ceil(curCoord), 
+					positive_
+				)
+			:
+				mix(
+					floor(curCoord*cubesInBlockDim)/cubesInBlockDim, 
+					ceil (curCoord*cubesInBlockDim)/cubesInBlockDim, 
+					positive_
+				);
+			
+		
+		const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
+		const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
+		const bvec3 nextMinAxisB = equal(nextLenghts, vec3(nextMinLen));
+		const  vec3 nextMinAxis  = vec3(nextMinAxisB);
+				
+		if(!any(equal(curCoord, candCoords) && nextMinAxisB)) bias = -1;
+		
+		curCoord = mix(
+			at(ray, nextMinLen), 
+			candCoords, 
+			nextMinAxis
+		);
+		
+	}
 	
-	const vec3 startP = playerRelativePosition - (vec3(0.3, 1.95/2, 0.3) - 0.001);
-	const vec3 endP   = playerRelativePosition + (vec3(0.3, 1.95/2, 0.3) - 0.001);
-	
-	const Intersection playerIntersection = intersectCube(ray, startP, endP, vec3(1,0,0), vec3(0,1,0));
-	
-	float prevMinLen = 0;
+	int steps = 0;
 	while(true) {
-		const uint  bounds = chunkBounds(curChunkIndex);
-		const ivec3 startBorder = start(bounds);
-		const ivec3 endBorder = onePastEnd(bounds);
-		const bool  empty = emptyBounds(startBorder, endBorder);
-		const ivec3 nearBoundaries = mix3i(endBorder, startBorder, positive_);
-		const ivec3 farBoundaries = mix3i(startBorder, endBorder, positive_);
+		if(curChunkIndex == -1) return noIntersectionInfo();
 		
-		const vec3  relativeOrig = ray.orig - relativeToChunk * blocksInChunkDim;
-		  
 		//calculate next chunk
-		  const vec3 maxOutBorderDiff = mix(relativeOrig, blocksInChunkDim - relativeOrig, positive_);
-		  const vec3 minOutLen_vec = maxOutBorderDiff*stepLength;
-		  
-		  const float minOutLen = min(min(minOutLen_vec.x, minOutLen_vec.y), minOutLen_vec.z); //minimum length for any ray to get outside of chunk bounds
-		  const bvec3 firstOut = equal(minOutLen_vec, vec3(minOutLen));
-
-		  const ivec3 outNeighbourDir = ivec3(firstOut) * dir_;
-		  const int candChunkIndex = chunkNeighbourIndex(curChunkIndex, outNeighbourDir);
-		  //
-		  const int nextChunkIndex = candChunkIndex;
-		  const ivec3 nextRelativeToChunk = relativeToChunk + outNeighbourDir;
-		  const bool nextNotLoaded = chunkNotLoaded(nextChunkIndex);
-
+		const vec3 relativeOrig = ray.orig - relativeTo;
+		const vec3 maxOutBorderDiff = mix(relativeOrig, blocksInChunkDim - relativeOrig, positive_);
+		const vec3 minOutLen_vec = maxOutBorderDiff*stepLength;
 		
-		if(!empty) {
-			//find starting position for current chunk
-			  const vec3 maxBorderDiff = max(mix(relativeOrig - endBorder, startBorder - relativeOrig, positive_), 0);//max(borderStartDist, borderEndDist);
-			  const ivec3 minSteps_vec = ivec3(floor(maxBorderDiff));
-			  const vec3 minLen_vec = maxBorderDiff*stepLength;
-			  
-			  const float minLen = max(max(minLen_vec.x, minLen_vec.y), minLen_vec.z); //minimum length for all rays to get inside of chunk bounds
-			  const bvec3 outside = lessThan(minLen_vec, vec3(minLen));
-			  //
-			  ivec3 curSteps = max(lastSteps, 
-			    ivec3(not(outside)) * ivec3(minSteps_vec) +
-			    ivec3(   (outside)) * ivec3(max(ceil(minLen * abs(dir) - firstCellDiff),0)));
-			  	
-			//test if calculated starting position is in chunk boundaries
-			  const ivec3 testMinAxis = ivec3(not(outside));
-			  const ivec3 testOtherAxis = ivec3(outside);
-			  
-			  const  vec3 testCoordF = at(ray, minLen);
-			  
-			  const  vec3 testCoordAt = testMinAxis * (firstCellRow + curSteps*dir_) + testOtherAxis * testCoordF;
-			  const ivec3 testBlockAt = ivec3(floor(testCoordAt)) - testMinAxis * negative_;
-
+		const float minOutLen = min(min(minOutLen_vec.x, minOutLen_vec.y), minOutLen_vec.z); //minimum length for any ray axis to get outside of chunk bounds
+		const bvec3 firstOut = equal(minOutLen_vec, vec3(minOutLen));
+	
+		const ivec3 outNeighbourDir = ivec3(firstOut) * ivec3(dirSign);
+		const int candChunkIndex = chunkNeighbourIndex(curChunkIndex, outNeighbourDir);
+		//
+		const int nextChunkIndex = candChunkIndex;
+		const vec3 nextRelativeTo = relativeTo + outNeighbourDir * blocksInChunkDim;
+		const bool nextNotLoaded = chunkNotLoaded(nextChunkIndex);
+		
+		//calculate first intersection with current chunk
+		const uint bounds = chunkBounds(curChunkIndex);
+		const vec3 startBorder = vec3(start(bounds));
+		const vec3 endBorder   = vec3(onePastEnd(bounds));
+		const bool empty = emptyBoundsF(startBorder, endBorder);
+		
+		const vec3 farBoundaries  = mix(startBorder, endBorder, positive_);
+		const vec3 nearBoundaries = mix(startBorder, endBorder, negative_);
+		
+		const bool pastNearBounds = all(greaterThanEqual((curCoord - relativeTo - nearBoundaries)*dirSign, vec3(0)));
+		
+		const vec3  nearBoundsCandCoords = nearBoundaries + relativeTo;
+		const vec3  nearBoundsCandLenghts = (nearBoundsCandCoords - ray.orig) * dirSign * stepLength;
+		const float nearBoundsCandMinLen = max(max(nearBoundsCandLenghts.x, nearBoundsCandLenghts.y), nearBoundsCandLenghts.z);  //minimum length for all ray axis to get inside of chunk bounds
+		const bvec3 nearBoundCandMinB = equal(nearBoundsCandLenghts, vec3(nearBoundsCandMinLen));
+		const  vec3 nearBoundCandMin  = vec3(nearBoundCandMinB);
+		
+		const vec3 candCoord = pastNearBounds ? curCoord : mix(at(ray, nearBoundsCandMinLen), nearBoundsCandCoords, nearBoundCandMin);
+		
+		const bvec3 inChunkBounds = lessThanEqual((candCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0));
+		if(!all(inChunkBounds) || empty) {
+			curChunkIndex = nextNotLoaded ? -1 : nextChunkIndex;
+			relativeTo = nextRelativeTo;
+			continue;
+		}
+		
+		const bool stopInThisChunk = stopAtLen <= minOutLen;
+		
+		const vec3 candFromBlockCoord = floor(candCoord) - positive_ * vec3(equal(candCoord, floor(candCoord)));
+		const vec3 curFromBlockCoord  = floor(curCoord ) - positive_ * vec3(equal(curCoord , floor(curCoord) ));
+		
+		if(candFromBlockCoord != curFromBlockCoord) fromBlock = blockAir();
+		curCoord = candCoord;
+		if(!pastNearBounds) bias = -1;
+		
+		//step through blocks/cubes of the current chunk
+		while(true) {
+			const bvec3 blockBounds = equal(curCoord, floor(curCoord));
+			const bool atBlockBounds = any(blockBounds);
 			
-			const bvec3 inChunkBounds = lessThanEqual((testCoordAt - relativeToChunk * blocksInChunkDim - farBoundaries) * dir_, vec3(0,0,0));
-			if(all(inChunkBounds)) {
-				//if(any(notEqual(nearBoundaries, mix3i(ivec3(blocksInChunkDim), ivec3(0), positive_)) && !outside)) lastBlock = 0;
-				Block fromBlock; 
-				{
-					const ivec3 checks = ivec3(testMinAxis);
-					fromBlock = blockAt_unnormalized(
-						curChunkIndex,
-						testBlockAt - checks*dir_ - relativeToChunk * blocksInChunkDim
-					);
-				}
+			const bool inChunkBounds = all(lessThan((curCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0)) );
 			
-				while(true) {
-					const vec3 curLen = stepLength * curSteps + stepLength * firstCellDiff;
+			const vec3 fromBlockCoord = floor(curCoord - positive_ * vec3(blockBounds));
+			const vec3 toBlockCoord   = floor(curCoord - negative_ * vec3(blockBounds));
+			
+			Block toBlock;
+			if(!atBlockBounds) toBlock = fromBlock;
+			else {
+				const ivec3 relativeToBlockCoordI = ivec3(toBlockCoord - relativeTo);
+				if(checkBoundaries(relativeToBlockCoordI)) toBlock = blockAt(
+					curChunkIndex,
+					relativeToBlockCoordI
+				);
+				else if(nextNotLoaded) toBlock = blockAir();
+				else toBlock = blockAt(
+					nextChunkIndex,
+					ivec3(toBlockCoord - nextRelativeTo) //and3i(relativeToBlockCoordI + blocksInChunkDim, blocksInChunkDim-1)
+				);
+			}
+			
+			const Block biasedFromBlock = bias < 0 ? fromBlock : blockAir();
+			const Block biasedToBlock   = bias < 1 ? toBlock   : blockAir();
+			
+			const uint fromBlockCubes = blockCubes(biasedFromBlock);
+			const uint    fromBlockId = blockId   (biasedFromBlock);
+			const uint   toBlockCubes = blockCubes(  biasedToBlock);
+			const uint      toBlockId = blockId   (  biasedToBlock);
+			
+			if(fromBlockId != 0 || toBlockId != 0) {
+				const bvec3 cubeBounds = equal(curCoord*cubesInBlockDim, floor(curCoord*cubesInBlockDim));
+				const vec3 localCubesCoordAt = curCoord - fromBlockCoord;
+				
+				const ivec3 fUpperCubes = ivec3(mod(localCubesCoordAt*cubesInBlockDim - positive_ * vec3(cubeBounds), cubesInBlockDim));
+				const ivec3 tUpperCubes = ivec3(mod(localCubesCoordAt*cubesInBlockDim - negative_ * vec3(cubeBounds), cubesInBlockDim));
+				
+				const bvec2 cubes = bvec2(
+					cubeAt(fromBlockCubes, fUpperCubes),
+					cubeAt(toBlockCubes  , tUpperCubes)
+				);
+				
+				const uint fBlockUsedId = cubes.x ? fromBlockId : 0;
+				const uint tBlockUsedId = cubes.y ? toBlockId   : 0;
+				
+				
+				if(!(all(cubes) || all(not(cubes))) || (atBlockBounds && !(fBlockUsedId == tBlockUsedId && fBlockUsedId == 7))) {
+					const ivec3 intersectionSide = ivec3(cubeBounds);
 					
-					const float curMinLen   = min(min(curLen.x, curLen.y), curLen.z);
-					const bvec3 minAxis_b   = equal(curLen, vec3(curMinLen));
-					const ivec3 minAxis     = ivec3(minAxis_b);
+					const uint blocks[] = { fBlockUsedId, tBlockUsedId };
+					const vec3 blocksCoord[] = { fromBlockCoord, toBlockCoord };
 					
-					const bvec3 otherAxis_b = not(minAxis_b);
-					const ivec3 otherAxis = ivec3(not(minAxis_b));
-					
-					const  vec3 curCoordF   = at(ray, curMinLen);
-					//
-					const vec3 coordAt =  minAxis * (firstCellRow + curSteps*dir_) + otherAxis * curCoordF;
-					const ivec3 cellAt = ivec3(floor(coordAt - minAxis * negative_));
-							
-					const bool inBounds = all(
-						lessThan((firstCellRow + curSteps*dir_ - relativeToChunk * blocksInChunkDim - farBoundaries) * dir_, ivec3(0,0,0)) 
-						|| otherAxis_b
-					);
-					
-					const ivec3 fromBlockCoord = cellAt - minAxis*dir_;
-					const ivec3 toBlockCoord = cellAt;
-					
-					
-					Block toBlock;
-					if(checkBoundaries(toBlockCoord - relativeToChunk * blocksInChunkDim)) toBlock = blockAt(
-						curChunkIndex,
-						toBlockCoord - relativeToChunk * blocksInChunkDim
-					);
-					else if(nextNotLoaded) toBlock = blockAir();
-					else toBlock = blockAt(
-						nextChunkIndex,
-						toBlockCoord - nextRelativeToChunk * blocksInChunkDim
-					);	
-					
-					const uint fromBlockCubes = blockCubes(fromBlock);
-					const uint    fromBlockId = blockId   (fromBlock);
-					const uint   toBlockCubes = blockCubes(  toBlock);
-					const uint      toBlockId = blockId   (  toBlock);
-					
-					if(fromBlockId != 0 || toBlockId != 0) {
-						vec3 steps = (fromBlockCoord + negative_ - firstCellRow)*dir_+0.5;
+					for(bias = max(bias, -1 + int(blocks[0]==0)); bias < 1 - int(blocks[1]==0); bias ++) {
+						const uint blockId = blocks[bias+1];
+						const vec3 blockCoord = blocksCoord[bias+1];
 						
-						if(fromBlockId == 0 || fullBlock(fromBlockCubes)) steps = curSteps;
+						if(blockId != 0) { 
+							const vec3 localBlockCoord = curCoord - blockCoord;
+							const vec2 uv = clamp(vec2(
+								dot(intersectionSide, localBlockCoord.zxx),
+								dot(intersectionSide, localBlockCoord.yzy)
+							), 0.0001, 0.9999);
+			
+							if(blockId == 5) { //leaves
+								if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue;
+							}
 						
-						for(int i = 0; i < 4; i++) {					
-							const vec3  lengths = steps * stepLength + firstCellDiff * stepLength;
-							const float currentLength = min(lengths.x, min(lengths.y, lengths.z));
-							const bvec3 cubesMinAxisB = equal(lengths, vec3(currentLength));
-							const ivec3 cubesMinAxis   = ivec3(    cubesMinAxisB );
-							const ivec3 cubesOtherAxis = ivec3(not(cubesMinAxisB)); 
+							if(stopAtLen <= length(curCoord - ray.orig)) return IntersectionInfo(
+								vec3(0),
+								vec3(0),
+								0u,
+								curChunkIndex,
+								0
+							);
 							
-							const bool last = any(equal(steps, vec3(curSteps)) && cubesMinAxisB);
-							
-							if(currentLength >= prevMinLen) {
-								const vec3 coordF = at(ray, currentLength);
-								const vec3 cubesCoordAt = cubesMinAxis * (firstCellRow + steps*dir_) + cubesOtherAxis * coordF;
-								const vec3 localCubesCoordAt = cubesCoordAt - fromBlockCoord;
-								
-								const ivec3 fUpperCubes = ivec3(mod(localCubesCoordAt*2 - positive_ * cubesMinAxis, 2));
-								const ivec3 sUpperCubes = ivec3(mod(localCubesCoordAt*2 - negative_ * cubesMinAxis, 2));
-								
-								const  uint sBlockCubes = last ? toBlockCubes : fromBlockCubes;
-								const  uint sBlockId    = last ? toBlockId    : fromBlockId   ;
-								const ivec3 sBlockCoord = last ? toBlockCoord : fromBlockCoord;
-								
-								const bvec2 cubes = bvec2(
-									cubeAt(fromBlockCubes, fUpperCubes),
-									cubeAt(sBlockCubes   , sUpperCubes)
-								);
-								
-								const uint fBlockUsedId = cubes.x ? fromBlockId : 0;
-								const uint sBlockUsedId = cubes.y ? sBlockId    : 0;
-								
-								if( (!(all(cubes) || all(not(cubes))) || last)) {
-									const BlockInfo info = testFace(
-										ray,
-										fromBlockCoord, fBlockUsedId,
-										sBlockCoord   , sBlockUsedId,
-										cubesCoordAt, cubesMinAxis
-									);
-									
-									if(info.block != 0) {
-										if(drawPlayer && !isNoSurface(playerIntersection.surface) && currentLength >= playerIntersection.t) return BlockIntersection(
-											playerIntersection.normal,
-											playerIntersection.newRayDir,
-											playerIntersection.color,
-											playerIntersection.at,
-											playerIntersection.t,
-											curChunkIndex,
-											playerIntersection.surface
-										);
-										else {
-											const ivec3 otherAxis1 = cubesMinAxisB.x ? ivec3(0,1,0) : ivec3(1,0,0);
-											const ivec3 otherAxis2 = cubesMinAxisB.z ? ivec3(0,1,0) : ivec3(0,0,1);
-											const ivec3 vertexCoord = ivec3(floor(cubesCoordAt * cubesInBlockDim)) - relativeToChunk * cubesInChunkDim;
-											
-											float ambient = 0;
-											if(info.frontface) {
-												for(int i = 0 ; i < 4; i++) {
-													const ivec2 offset_ = ivec2(i%2, i/2);
-													const ivec3 offset = offset_.x * otherAxis1 + offset_.y * otherAxis2;
-													const ivec3 curVertexCoord = vertexCoord + offset;
-																		
-													const float vertexLight = lightForChunkVertexDir(curChunkIndex, curVertexCoord, info.normal);
-													
-													const float diffX = abs(offset_.x - mod(dot(localCubesCoordAt, otherAxis1)*2, 1));
-													const float diffY = abs(offset_.y - mod(dot(localCubesCoordAt, otherAxis2)*2, 1));
-													ambient += mix(mix(vertexLight, 0, diffY), 0, diffX);
-												}
-											}
-											else ambient = 0.5;
-											
-											const float light = lightingAtCube(curChunkIndex, vertexCoord - negative_ * cubesMinAxis - dir_ * cubesMinAxis);
-											
-											return BlockIntersection(
-												info.normal,
-												info.newRayDir,
-												info.color * mix(info.block == 7 ? 0.7 : 0.45, 1.0, pow(ambient, 2)) * light,
-												cubesCoordAt,
-												currentLength,
-												curChunkIndex,
-												surfaceBlock(info.block)
-											);
-										}
-									}
-								}
-							}				
-							
-							if(last) break; 
-							
-							steps += vec3(cubesMinAxis) / 2.0;
+							return IntersectionInfo(
+								curCoord,
+								localBlockCoord,
+								blockId,
+								curChunkIndex,
+								bias
+							);
 						}
 					}
-					
-					fromBlock = toBlock;
-					curSteps += minAxis;
-					prevMinLen = curMinLen;
-					
-					lastSteps = curSteps;
-					
-					if(!inBounds) break;
-				}
+				}		
+			}
+			
+			
+			fromBlock = toBlock;
+			const vec3 candCoords = 
+				blockId(fromBlock) == 0 ?
+					mix(
+						(ceil (curCoord)-1), 
+						(floor(curCoord)+1), 
+						positive_
+					)
+				:
+					mix(
+						(ceil (curCoord*cubesInBlockDim)-1)/cubesInBlockDim, 
+						(floor(curCoord*cubesInBlockDim)+1)/cubesInBlockDim, 
+						positive_
+					);
+				
+			
+			const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
+			const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
+			const bvec3 nextMinAxisB = equal(nextLenghts, vec3(nextMinLen));
+			const  vec3 nextMinAxis  = vec3(nextMinAxisB);
+			
+			curCoord = mix(
+				max(curCoord*dirSign, at(ray, nextMinLen)*dirSign)*dirSign, 
+				candCoords, 
+				nextMinAxis
+			);
+			steps++;
+			bias = -1;
+			
+			if(!inChunkBounds) {
+				if(stopInThisChunk) break;
+				curChunkIndex = nextNotLoaded ? -1 : nextChunkIndex;
+				relativeTo = nextRelativeTo;
+				break;
 			}
 		}
 		
-		
-		//if(empty || any(notEqual(farBoundaries, mix3i(ivec3(0), ivec3(chunkDim), positive_)) && !outOutside)) lastBlock = 0;
-		
-		//update current chunk
-		
-		if(drawPlayer && !isNoSurface(playerIntersection.surface) && minOutLen >= playerIntersection.t) return BlockIntersection(
-			playerIntersection.normal,
-			playerIntersection.newRayDir,
-			playerIntersection.color,
-			playerIntersection.at,
-			playerIntersection.t,
+		if(stopInThisChunk) return IntersectionInfo(
+			vec3(0),
+			vec3(0),
+			0u,
 			curChunkIndex,
-			playerIntersection.surface
+			0
 		);
-		
-		if(nextChunkIndex < 0 || nextNotLoaded) break;
-		
-		curChunkIndex = nextChunkIndex;
-		relativeToChunk = nextRelativeToChunk;	
 	}
-
-	return noBlockIntersection();
 }
 
 vec3 background(const vec3 dir) {
@@ -897,79 +786,183 @@ Trace trace(Ray ray, int chunkIndex) {
 	bool shadow = false;
 	int shadowIndex;
 	int curSteps = 0;
+	int curBias = 0;
 	
 	const ivec3 startChunkPosition = chunkPosition(chunkIndex);
 	
 	while(true) {
 		if(curSteps == maxSteps) { curSteps--; break; }
 		
-		const BlockIntersection i = isInters(ray, chunkPosition(chunkIndex) - startChunkPosition, chunkIndex, drawPlayer || curSteps != 0);
+		const vec3 startP = playerRelativePosition - (vec3(0.3, 1.95/2, 0.3));
+		const vec3 endP   = playerRelativePosition + (vec3(0.3, 1.95/2, 0.3));
 		
-		if(!isNoSurface(i.surface)) {
-			const float t = i.t;
-			const uint blockId = surfaceType(i.surface);
-			
+		const Intersection playerIntersection = intersectCube(ray, startP, endP, vec3(1,0,0), vec3(0,1,0));
+		const bool isPlayer = (drawPlayer || curSteps != 0) && playerIntersection.is;
+		const float playerT = isPlayer ? length(playerIntersection.at - ray.orig) : 1.0 / 0.0;
+		
+		const IntersectionInfo i = isInters(ray, chunkPosition(chunkIndex) - startChunkPosition, chunkIndex, curBias, playerT);
+		
+		if(i.blockId != 0) { //block
+			const vec3 coord = i.coord;        
+			const vec3 localSpaceCoord = i.localSpaceCoord;
+			const uint blockId = i.blockId;
 			const int intersectionChunkIndex = i.chunkIndex;
-			const vec3 col = i.color;
-			const vec3 at = i.at;
+			const int bias = i.bias;
 			
-			if(blockId == 7) {
-				ray = Ray( i.at - 0 + i.newDir * 0.0001, i.newDir );
-				chunkIndex = intersectionChunkIndex;
+			const bvec3 intersectionSideB = equal(localSpaceCoord * cubesInBlockDim, floor(localSpaceCoord * cubesInBlockDim));
+			const ivec3 intersectionSide = ivec3(intersectionSideB);
+			
+			const ivec3 side = intersectionSide * (-bias*2 - 1) * ivec3(sign(ray.dir));
+			const bool backside = dot(vec3(side), ray.dir) > 0;
+			const ivec3 normal = side * ( backside ? -1 : 1 );
+			
+			const vec2 uv = clamp(vec2(
+				dot(intersectionSide, localSpaceCoord.zxx),
+				dot(intersectionSide, localSpaceCoord.yzy)
+			), 0.0001, 0.9999);
+			
+			const vec2 atlasOffset = atlasAt(blockId, side);
+			
+			const float t = length(coord - ray.orig);
+			
+			float light = 1;
+			float ambient = 1;
+			
+			if(!shadow) {
+				const ivec3 relativeToChunk = chunkPosition(intersectionChunkIndex) - startChunkPosition;
 				
-				steps[curSteps++] = Step( col, t, surfaceBlock(blockId) );
-				continue;
-			}
-			if(blockId == 8) {
-				ray = Ray( i.at - 0 + i.newDir * 0.0001, i.newDir );
-				chunkIndex = intersectionChunkIndex;
+				const ivec3 otherAxis1 = intersectionSideB.x ? ivec3(0,1,0) : ivec3(1,0,0);
+				const ivec3 otherAxis2 = intersectionSideB.z ? ivec3(0,1,0) : ivec3(0,0,1);
+				const ivec3 vertexCoord = ivec3(floor(coord * cubesInBlockDim)) - relativeToChunk * cubesInChunkDim;
 				
-				steps[curSteps++] = Step( col, t, surfaceBlock(blockId) );
-				continue;
-			}
-			
-			{
-				if(shadow) {
-					steps[curSteps] = Step( col, t, surfaceBlock(blockId) );
-			
-					break;
+				ambient = 0;
+				if(!backside) {
+					for(int i = 0 ; i < 4; i++) {
+						const ivec2 offset_ = ivec2(i%2, i/2);
+						const ivec3 offset = offset_.x * otherAxis1 + offset_.y * otherAxis2;
+						const ivec3 curVertexCoord = vertexCoord + offset;
+											
+						const float vertexLight = lightForChunkVertexDir(intersectionChunkIndex, curVertexCoord, normal);
+						
+						const float diffX = abs(offset_.x - mod(dot(localSpaceCoord, otherAxis1)*2, 1));
+						const float diffY = abs(offset_.y - mod(dot(localSpaceCoord, otherAxis2)*2, 1));
+						ambient += mix(mix(vertexLight, 0, diffY), 0, diffX);
+					}
 				}
-				shadow = true;
+				else ambient = 0.5;
 				
-				const vec3 startRelativeAt = at - 0;
+				light = lightingAtCube(intersectionChunkIndex, vertexCoord - max(ivec3(sign(ray.dir)), ivec3(0)) * intersectionSide);
+			}
+			
+			
+			if(blockId == 7) {	
+				const vec3 glassOffset = vec3( 
+					sin(localSpaceCoord.x*9)/2, 
+					sin(localSpaceCoord.z*9)/8, 
+					sin(localSpaceCoord.y*6 + localSpaceCoord.x*4)/8
+				) / 100;
 				
-				const int shadowOffsetsCount = 4;
-				const float shadowOffsets[] = { -1, 0, 1, 0 };
+				const vec3 glassBlockCoord = localSpaceCoord - glassOffset;
 				
-				const float shadowSubdiv = 32;
-				const float shadowSmoothness = 32;
-				
-				const vec3 offset_ = vec3(
-					shadowOffsets[ int(mod(floor(startRelativeAt.x * shadowSubdiv), shadowOffsetsCount)) ],
-					shadowOffsets[ int(mod(floor(startRelativeAt.y * shadowSubdiv), shadowOffsetsCount)) ],
-					shadowOffsets[ int(mod(floor(startRelativeAt.z * shadowSubdiv), shadowOffsetsCount)) ]
+				vec2 glassUv = vec2(
+					dot(intersectionSide, glassBlockCoord.zxx),
+					dot(intersectionSide, glassBlockCoord.yzy)
 				);
-				const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness * int(isSurfaceBlock(i.surface));
+				const vec2 offset = atlasAt(blockId, side);
+				const vec3 color = sampleAtlas(atlasOffset, clamp(glassUv, 0.0001, 0.9999)) * light * mix(0.6, 1.0, ambient);
+			
+				const vec3 incoming = ray.dir - glassOffset * vec3(1-intersectionSide);
 				
-				const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
-				const vec3 v = normalize(vec3(-1, 4, 2) + offset);
-				const vec3 temp = cross(q.xyz, v) + q.w * v;
-				const vec3 rotated = v + 2.0*cross(q.xyz, temp);
+				const vec3 refracted_ = refract(normalize(incoming), normalize(normal), 1 );
+				const bool isRefracted = refracted_ != 0;
+				const vec3 newDir = isRefracted ? refracted_ : reflect(incoming, normalize(vec3(side)));
 				
-				const vec3 dir = normalize(rotated);
-				
-				const vec3 position = isSurfaceBlock(i.surface) ? ( floor(startRelativeAt * shadowSubdiv) + (1-abs(i.normal))*0.5 )/shadowSubdiv : i.at;
-				ray = Ray( position + normalize(i.normal) * 0.0001, dir );
+				curBias = sign( isRefracted ? bias + 1 : -bias );
+				ray = Ray( coord, newDir );
 				chunkIndex = intersectionChunkIndex;
 				
-				shadowIndex = curSteps++;
-				steps[shadowIndex] = Step( col, t, surfaceBlock(blockId) );
+				steps[curSteps] = Step( color, t, surfaceBlock(blockId) );
+
+				curSteps++;
 				continue;
+			}
+			else if(blockId == 8) {
+				const vec3 color = sampleAtlas(atlasOffset, uv) * light * mix(0.5, 1.0, ambient);
+				const vec3 offset = normalize(texture2D(noise, uv/5).xyz - 0.5) * 0.01;
+				const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
+				const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
+			
+				curBias = -bias;
+				ray = Ray( coord, reflected );
+				chunkIndex = intersectionChunkIndex;
+				
+				steps[curSteps] = Step( color, t, surfaceBlock(blockId) );
+
+				curSteps++;
+				continue;
+			}			
+			else {
+				const ivec3 relativeToChunk = chunkPosition(intersectionChunkIndex) - startChunkPosition;
+				const vec3 color = sampleAtlas(atlasOffset, uv) * light * mix(0.4, 1.0, ambient);
+				
+				steps[curSteps] = Step( color, t, surfaceBlock(blockId) );
+				
+				if(shadow) break;
+				else {
+					const int shadowOffsetsCount = 4;
+					const float shadowOffsets[] = { -1, 0, 1, 0 };
+					
+					const float shadowSubdiv = 32;
+					const float shadowSmoothness = 32;
+					
+					const vec3 offset_ = vec3(
+						shadowOffsets[ int(mod(floor(coord.x * shadowSubdiv), shadowOffsetsCount)) ],
+						shadowOffsets[ int(mod(floor(coord.y * shadowSubdiv), shadowOffsetsCount)) ],
+						shadowOffsets[ int(mod(floor(coord.z * shadowSubdiv), shadowOffsetsCount)) ]
+					);
+					const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
+					
+					const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
+					const vec3 v = normalize(vec3(-1, 4, 2) + offset);
+					const vec3 temp = cross(q.xyz, v) + q.w * v;
+					const vec3 rotated = v + 2.0*cross(q.xyz, temp);
+					
+					const vec3 dir = normalize(rotated);
+					
+					const vec3 position = /*isSurfaceBlock(surface) ? */( floor(coord * shadowSubdiv) + (1-abs(normal))*0.5 )/shadowSubdiv/* : at*/;
+					ray = Ray( position, dir );
+					chunkIndex = intersectionChunkIndex;
+					
+					shadowIndex = curSteps;
+					
+					curSteps++;
+					shadow = true;
+					continue;
+				}
 			}
 		}
-		else {
+		else if(isPlayer && i.chunkIndex != -1) { //player
+			steps[curSteps] = Step( vec3(1), playerT, surfaceEntity(1) );
+			if(shadow) break;
+			
+			const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
+			const vec3 v = normalize(vec3(-1, 4, 2));
+			const vec3 temp = cross(q.xyz, v) + q.w * v;
+			const vec3 rotated = v + 2.0*cross(q.xyz, temp);
+			
+			const vec3 dir = normalize(rotated);
+			
+			ray = Ray( playerIntersection.at + playerIntersection.normal * 0.001, dir );
+			chunkIndex = i.chunkIndex;
+			
+			shadowIndex = curSteps;
+					
+			curSteps++;
+			shadow = true;
+			continue;
+		}
+		else { //sky
 			steps[curSteps] = Step( background(ray.dir), far, noSurface() );
-				
 			break;
 		}
 	}
@@ -996,7 +989,7 @@ Trace trace(Ray ray, int chunkIndex) {
 			previous = Step( current.color * 0.4, current.depth, current.surface );
 		}
 	}
-	//else if(!isNoSurface(last.surface)) previous = Step( vec3(0), 1, noSurface() );
+	else if(!isNoSurface(last.surface)) previous = Step( vec3(0), 1, noSurface() );
 	
 	for(; curSteps >= 0; curSteps--) {
 		const Step current = steps[curSteps];
