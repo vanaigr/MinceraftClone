@@ -27,6 +27,16 @@ SOURCES=$(addprefix $(SOURCE_DIR)/,$(SOURCES_LOC))
 OBJECT_FILES_0=$(addprefix $(OBJECT_DIR)/,$(SOURCES_LOC))
 OBJECT_FILES=$(OBJECT_FILES_0:.cpp=.o)
 
+GCH:=$(shell git log --format=%H -n1)
+GCM=$(shell git log --format=%s -n1)
+GCB=$(shell git branch --show current)
+GCD=$(shell git log --format=%ad -n1 --date=iso)
+
+PPFLAGS+= -DCOMMIT_HASH="\"$(GCH)\"" -DCOMMIT_NAME="\"$(GCM)\"" -DCOMMIT_BRANCH="\"$(GCB)\"" -DCOMMIT_DATE="\"$(GCD)\""
+
+.PHONY: test
+test:
+	@echo $(PPFLAGS)
 
 build-run: $(EXECUTABLE)
 	$(EXECUTABLE)

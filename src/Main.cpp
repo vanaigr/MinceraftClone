@@ -136,7 +136,7 @@ Input &currentInput() {
 
 static void reloadShaders();
 
-static bool testInfo = false;
+static bool testInfo = false, debugInfo = false;
 static bool debugBtn0 = false, debugBtn1 = false, debugBtn2 = false;
 
 
@@ -194,7 +194,8 @@ void handleKey(int const key) {
 	if(key == '-' && isPress) zoom = 1 + (zoom - 1) * 0.95;
 	else if(key == '=' && isPress) zoom = 1 + (zoom - 1) * (1/0.95);
 		
-	     if(key == GLFW_KEY_KP_0 && !isPress) debugBtn0 = !debugBtn0;
+	     if(key == GLFW_KEY_F2   && !isPress) debugInfo = !debugInfo;
+	else if(key == GLFW_KEY_KP_0 && !isPress) debugBtn0 = !debugBtn0;
 	else if(key == GLFW_KEY_KP_1 && !isPress) debugBtn1 = !debugBtn1;	
 	else if(key == GLFW_KEY_KP_2 && !isPress) debugBtn2 = !debugBtn2;
 
@@ -2605,10 +2606,11 @@ int main(void) {
 	reloadShaders();
 	
 	
+	int constexpr charsCount{ 512 };
 	GLuint fontVB;
 	glGenBuffers(1, &fontVB);
 	glBindBuffer(GL_ARRAY_BUFFER, fontVB);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(std::array<std::array<vec2f, 4>, 15>{}), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(std::array<std::array<vec2f, 4>, charsCount>{}), NULL, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	
 	GLuint fontVA;
@@ -2835,16 +2837,7 @@ int main(void) {
 		
 		
 		{ 
-			PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
-			auto const optionalResult{ trace(chunks, pd) };
-				
-			int value = 0;
-			if(optionalResult) {
-				auto const result{ *optionalResult };
-				auto const chunk { result.chunk };
-				
-				value = chunk.lighting()[chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex)];
-			};
+
 		
 		
 			glEnable(GL_BLEND);
@@ -2853,27 +2846,61 @@ int main(void) {
 			vec2f const textPos(10, 10);
 			    
 			std::stringstream ss{};
+			ss << std::fixed;
+			
+			if(debugInfo) {
+				/* COMMIT_HASH COMMIT_NAME COMMIT_BRANCH COMMIT_DATE */
+	
+				ss  << COMMIT_HASH << " - " << COMMIT_BRANCH << " : " << COMMIT_NAME << " (" << COMMIT_DATE << ")" << '\n';
+				
+				PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
+				auto const optionalResult{ trace(chunks, pd) };
+				if(optionalResult) {
+					auto const result{ *optionalResult };
+					auto const chunk { result.chunk };
+					
+					auto const blockInChunkCoord{ chunk::indexBlock(result.blockIndex) };
+					auto const cubeInBlockCoord{ chunk::Block::cubeIndexPos(result.cubeIndex) };
+					
+					auto const block{ chunk.data()[blockInChunkCoord] };
+					auto const lighting{ chunk.lighting()[blockInChunkCoord * chunk::cubesInBlockDim + cubeInBlockCoord] };
+					ss.precision(1);
+					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << (vec3f(blockInChunkCoord*chunk::cubesInBlockDim + cubeInBlockCoord)/chunk::cubesInBlockDim)  << " : block id=" << block.id() << " lighting=" << int(lighting) << '\n';
+				};
+				
+				ss.precision(4);
+				ss << "camera in: chunk=" << currentCoord().chunk() << " inside chunk=" << currentCoord().positionInChunk() << '\n';
+				ss << "camera forward=" << forwardDir << '\n';
+			}
 			ss.precision(1);
-			ss << value;
-			//ss << std::fixed << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";
+			ss << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";
+			
 			std::string const text{ ss.str() };
 	
-			auto const textCount{ std::min(text.size(), 15ull) };
+			auto const textCount{ std::min<unsigned long long>(text.size(), charsCount) };
 			
-			std::array<std::array<vec2f, 4>, 15> data;
+			std::array<std::array<vec2f, 4>, charsCount> data;
 			
-			vec2f currentPoint( textPos.x / windowSize_d.x * 2 - 1, 1 - textPos.y / windowSize_d.y * 2 );
+			vec2f const startPoint(textPos.x / windowSize_d.x * 2 - 1, 1 - textPos.y / windowSize_d.y * 2);
 			
 			auto const lineH = font.base();
+			auto const lineHeight = font.lineHeight();
 			float const scale = 5;
 			
+			vec2f currentPoint(startPoint);
 			for(uint64_t i{}; i != textCount; i++) {
-				auto const &fc{ font[text[i]] };
+				auto const ch{ text[i] };
+				if(ch == '\n') {
+					currentPoint = vec2f(startPoint.x, currentPoint.y - lineHeight / scale);
+					continue;
+				}
+				auto const &fc{ font[ch] };
 				
-				data[i] = {
+				auto const charOffset{ vec2f(fc.xOffset, -fc.yOffset - lineHeight) / scale };
+				if(ch != ' ') data[i] = {
 					//pos
-					currentPoint + vec2f(0, 0 - lineH) / scale,
-					currentPoint + vec2f(fc.width*aspect, fc.height - lineH) / scale, 
+					currentPoint + vec2f(0, -fc.height + lineH) / scale + charOffset,
+					currentPoint + vec2f(fc.width*aspect, 0 + lineH) / scale + charOffset, 
 					//uv
 					vec2f{fc.x, 1-fc.y-fc.height},
 					vec2f{fc.x+fc.width,1-fc.y},
