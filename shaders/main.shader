@@ -730,7 +730,7 @@ struct Frame {
 	int parent;
 };
 
-const int maxFrames = 6;
+const int maxFrames = 10;
 Frame frames[maxFrames];
 
 void setFrame(const int frameIndex, const Frame frame) {
@@ -841,11 +841,7 @@ Result combineSteps(const Result current, const Result inner) {
 	else return Result(current.color, current.depth, resultingSurface, current.type);
 }
 
-struct Trace {
-	vec3 color;
-	float depth;
-};
-Trace trace(const Ray startRay, const int startChunkIndex) {
+vec3 trace(const Ray startRay, const int startChunkIndex) {
 	int curFrame = -1;
 	int newFrame = curFrame+1;
 	
@@ -1026,57 +1022,20 @@ Trace trace(const Ray startRay, const int startChunkIndex) {
 		}
 	}
 	
-	//const Frame first = frames[1];
-	//const Result result = unpackResult(first);
-	
-	//return Trace(result.color, result.depth);
-	
-	const Frame lastFrame = getFrame(curFrame);
-	int parent = lastFrame.parent;
-	Result current = unpackResult(lastFrame);
-	
-	while(true) {
-		if(parent == -1) break;
-		const Frame outerFrame = getFrame(parent);
-		const int outerParent = outerFrame.parent;
-		const Result outer = unpackResult(outerFrame);
+	for(;curFrame >= 0; curFrame--) {
+		const Frame current = getFrame(curFrame);
+		const int currentParent = current.parent;
+		if(currentParent == -1) break;
+		const Result currentResult = unpackResult(current);
 		
-		current = combineSteps(outer, current);
-		parent = outerParent;
+		const Frame outer = getFrame(currentParent);
+		const Result outerResult = unpackResult(outer);
+		const int outertParent = outer.parent;
+		
+		putFrame(currentParent, packResult(combineSteps(outerResult, currentResult), outertParent));
 	}
 	
-	return Trace(current.color, 0);
-	
-	//const Step last = steps[curSteps--];
-	//
-	//Step previous = last;
-	//
-	//if(shadow) {
-	//	if(isNoSurface(last.surface)) {
-	//		previous = Step(vec3(1), 1, noSurface());
-	//		for(; curSteps > shadowIndex; curSteps--) {
-	//			const Step current = steps[curSteps];
-	//			previous = combineSteps(current, previous);
-	//		}
-	//		//curSteps == shadowIndex
-	//		const Step current = steps[curSteps--]; 
-	//		
-	//		previous = Step( current.color * previous.color, current.depth, current.surface );
-	//	}
-	//	else {
-	//		curSteps = shadowIndex;
-	//		const Step current = steps[curSteps--]; 
-	//		previous = Step( current.color * 0.4, current.depth, current.surface );
-	//	}
-	//}
-	//else if(!isNoSurface(last.surface)) previous = Step( vec3(0), 1, noSurface() );
-	//
-	//for(; curSteps >= 0; curSteps--) {
-	//	const Step current = steps[curSteps];
-	//	previous = combineSteps(current, previous);
-	//}
-	//
-	//return Trace(previous.color, previous.depth);
+	return unpackResult(getFrame(0)).color;
 }
 
 void main() {
@@ -1090,12 +1049,8 @@ void main() {
 	const vec3 relativeChunkPos = relativeChunkPosition(startChunkIndex);
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
 
-	const Trace trc = trace(ray, startChunkIndex);
-	
-	const vec3 col = trc.color;
-	const float t = clamp(trc.depth, near, far);
+	const vec3 col = trace(ray, startChunkIndex);
 	
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) color = vec4(vec3(0.98), 1);
-	else 
-		color = vec4(col, 1);
+	else color = vec4(col, 1);
 }	
