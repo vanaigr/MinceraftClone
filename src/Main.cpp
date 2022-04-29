@@ -66,7 +66,7 @@ static double const fixedDeltaTime{ 16.0/1000.0 };
 
 static double speedModifier = 2.5;
 static double playerSpeed{ 2.7 };
-static double spectatorSpeed{ 0.2 };
+static double spectatorSpeed{ 0.1 };
 
 static double const aspect{ windowSize_d.y / windowSize_d.x };
 
@@ -370,7 +370,7 @@ void resizeBuffer() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksLighting_ssbo);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::ChunkLighting), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, chunksLighting_ssbo);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 }
 
 static void reloadShaders() {
@@ -439,7 +439,18 @@ static void reloadShaders() {
 	
 		sl.attachShaders(mainProgram);
 	
-		glLinkProgram(mainProgram);		
+		glLinkProgram(mainProgram);	
+
+		{
+			int length;
+			glGetProgramiv(mainProgram, GL_INFO_LOG_LENGTH, &length);
+			GLchar *msg = new GLchar[length + 1];
+			msg[0] = '\0';
+			glGetProgramInfoLog(mainProgram, length, &length, msg);
+			std::cout << "Program error:\n" << msg;
+			delete[] msg;
+		}
+	
 		glValidateProgram(mainProgram);
 	
 		sl.deleteShaders();
@@ -537,8 +548,8 @@ static void reloadShaders() {
 		glDeleteBuffers(1, &chunksAO_ssbo);
 		glGenBuffers(1, &chunksAO_ssbo);		
 		glDeleteBuffers(1, &chunksLighting_ssbo);
-		glGenBuffers(1, &chunksLighting_ssbo);
-
+		glGenBuffers(1, &chunksLighting_ssbo);		
+		
 		resizeBuffer();
 	}
 	
@@ -2560,6 +2571,11 @@ static void update() {
 	playerCamPos = playerCamPos + vec3lerp(vec3d{}, vec3d(diff), vec3d(0.4));
 }
 
+void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id, GLenum severity, 
+							GLsizei length, const char *message, const void *userParam) {
+	if(id == 131169 || id == 131185 || id == 131218 || id == 131204) return; 
+	//std::cout << message << '\n';
+}
 	
 int main(void) {	
     if (!glfwInit()) return -1;
@@ -2572,6 +2588,7 @@ int main(void) {
 #else
     monitor = NULL;
 #endif // !FULLSCREEN
+	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);  
     window = glfwCreateWindow(windowSize.x, windowSize.y, "VMC", monitor, NULL);
 
     if (!window)
@@ -2593,6 +2610,15 @@ int main(void) {
     }
 
     fprintf(stdout, "Using GLEW %s\n", glewGetString(GLEW_VERSION));
+	
+	
+	int flags; glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+	if (flags & GL_CONTEXT_FLAG_DEBUG_BIT) {
+		glEnable(GL_DEBUG_OUTPUT);
+		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); 
+		glDebugMessageCallback(glDebugOutput, nullptr);
+		glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
+	} 
 
     //callbacks
     glfwSetKeyCallback(window, key_callback);
@@ -2662,7 +2688,8 @@ int main(void) {
 	
 	MeanCounter<150> mc{};
 	int _i_ = 50;
-
+	
+	
     while (!glfwWindowShouldClose(window))
     {
 		auto startFrame = std::chrono::steady_clock::now();
@@ -2836,10 +2863,7 @@ int main(void) {
 	
 		
 		
-		{ 
-
-		
-		
+		{
 			glEnable(GL_BLEND);
 			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			

@@ -4,8 +4,8 @@
 void main() {
 	const vec2 verts[] = {
 		vec2(-1),
-		vec2(1, -1),
-		vec2(-1, 1),
+		vec2(3, -1),
+		vec2(-1, 3),
 		vec2(1)
 	};
 	
