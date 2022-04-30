@@ -301,7 +301,7 @@ static GLuint mainProgram = 0;
   static GLuint time_u;
   static GLuint mouseX_u, mouseY_u;
   static GLuint projection_u, toLocal_matrix_u;
-  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo, chunksNeighbours_ssbo, chunksAO_ssbo, chunksLighting_ssbo;
+  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo, chunksNeighbours_ssbo, chunksAO_ssbo, chunksLighting_ssbo, chunksEmitters_ssbo;
 
 static GLuint mapChunks_p;
 
@@ -371,6 +371,12 @@ void resizeBuffer() {
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::ChunkLighting), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, chunksLighting_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+	
+	static_assert(sizeof(chunk::Emitters) == sizeof(uint32_t) * 8);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksEmitters_ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::Emitters), NULL, GL_DYNAMIC_DRAW);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, chunksEmitters_ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
 static void reloadShaders() {
@@ -549,7 +555,9 @@ static void reloadShaders() {
 		glGenBuffers(1, &chunksAO_ssbo);		
 		glDeleteBuffers(1, &chunksLighting_ssbo);
 		glGenBuffers(1, &chunksLighting_ssbo);		
-		
+		glDeleteBuffers(1, &chunksEmitters_ssbo);
+		glGenBuffers(1, &chunksEmitters_ssbo);
+
 		resizeBuffer();
 	}
 	
@@ -1726,11 +1734,12 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			return modified;
 		}
 		
-		uint32_t const aabbData{ chunk.aabb().getData() };
-		auto const &neighbours{ chunk.neighbours() };
-		auto const &ao{ chunk.ao() };
 		
 		if(status.isBlocksUpdated()) {
+			uint32_t const aabbData{ chunk.aabb().getData() };
+			auto const &neighbours{ chunk.neighbours() };
+			auto const &ao{ chunk.ao() };
+			auto const &emitters{ chunk.emitters() };
 			//std::cout << "b:" << chunkCoord << '\n';
 			static_assert(sizeof chunkData == 16384);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
@@ -1759,7 +1768,12 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			static_assert(sizeof(chunk::ChunkAO) == sizeof(uint8_t) * chunk::ChunkAO::size);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkAO), sizeof(chunk::ChunkAO), &ao);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);		
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+
+			static_assert(sizeof(chunk::Emitters) == sizeof(uint32_t)*8);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksEmitters_ssbo);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::Emitters), sizeof(chunk::Emitters), &emitters);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 		}					
 
 		if(status.isLightingUpdated()) {
@@ -2371,8 +2385,6 @@ static void update() {
 		PosDir const pd{ PosDir(viewport, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
 		vec3i const dirSign{ pd.direction };
 		DDA checkBlock{ pd };
-		
-		chunk::Move_to_neighbour_Chunk chunk{ chunks, pd.chunk };
 	
 		if(blockAction == BlockAction::BREAK) {
 			auto optionalResult{ trace(chunks, pd) };
@@ -2399,15 +2411,19 @@ static void update() {
 						auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
 						updateNeighbouringCubeLightingAdd(chunk, curCubeCoord, 0, true);
 					}
+					
+					chunk.emitters().remove(result.blockIndex);
 				}
 				else {
 					auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex) };
 					block = chunk::Block{ block.id(), uint8_t( block.cubes() & (~chunk::Block::blockCubeMask(result.cubeIndex)) ) };
-					
+						
 					if(emitter) {
 						updateLightSub(chunk, curCubeCoord, curCubeCoord);
 					}
 					updateNeighbouringCubeLightingAdd(chunk, curCubeCoord, 0, true);
+					
+					if(block.empty()) chunk.emitters().remove(result.blockIndex);
 				}
 				
 				
@@ -2440,6 +2456,8 @@ static void update() {
 			}
 		}
 		else {
+			chunk::Move_to_neighbour_Chunk mtnChunk{ chunks, pd.chunk };
+			
 			for(int i = 0;; i++) {
 				vec3b const intersectionAxis{ checkBlock.next() };
 				vec3l const intersection{ checkBlock.get_current() };
@@ -2457,7 +2475,7 @@ static void update() {
 				vec3i const blockCoord = coord.blockInChunk();
 				vec3i const blockChunk = coord.chunk();
 				
-				int chunkIndex{ chunk.move(blockChunk).get() }; 
+				int chunkIndex{ mtnChunk.move(blockChunk).get() }; 
 				
 				if(chunkIndex == -1) break;
 				
@@ -2470,22 +2488,23 @@ static void update() {
 					vec3i const blockCoord = bc.blockInChunk();
 					vec3i const blockChunk = bc.chunk();
 			
-					int chunkIndex{ chunk.move(blockChunk).get() };
+					int chunkIndex{ mtnChunk.move(blockChunk).get() };
 				
-					auto const index{ chunk::blockIndex(blockCoord) };
-					auto &block{ chunks.chunksData[chunkIndex][index] };
+					auto const blockIndex{ chunk::blockIndex(blockCoord) };
+					auto &block{ chunks.chunksData[chunkIndex][blockIndex] };
 					
 					
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() != 0) { std::cout << "!\n"; } 
 					if(checkCanPlaceBlock(blockChunk, blockCoord) && block.id() == 0) {
+						auto chunk{ chunks[chunkIndex] };
 						block = chunk::Block::fullBlock(blockPlaceId);
-						chunks.chunksStatus[chunkIndex].setUpdateBlocks(true);
+						chunk.status().setUpdateBlocks(true);
 						//chunks.chunksStatus[chunkIndex].setUpdateLightingSub(true);
-						chunks.modified[chunkIndex] = true;
-						chunks.chunksLighting[chunkIndex][blockCoord * chunk::cubesInBlockDim] = 0;
+						chunk.modified() = true;
+						chunk.lighting()[blockCoord * chunk::cubesInBlockDim] = 0;
 						isAction = true;
 						
-						auto &aabb{ chunks.chunksAABB[chunkIndex] };
+						auto &aabb{ chunk.aabb() };
 						vec3i start{ aabb.start() };
 						vec3i end  { aabb.end  () };
 						
@@ -2494,22 +2513,24 @@ static void update() {
 					
 						aabb = chunk::AABB(start, end);
 						
-						markNeighboursIfAtBounds(chunks[chunkIndex], blockCoord);
+						markNeighboursIfAtBounds(chunk, blockCoord);
 						
 						auto const emitter{ blockPlaceId == 14 || blockPlaceId == 13 };
 						
-						updateLightSub(chunks[chunkIndex], blockCoord * chunk::cubesInBlockDim, blockCoord * chunk::cubesInBlockDim+1);
+						updateLightSub(chunk, blockCoord * chunk::cubesInBlockDim, blockCoord * chunk::cubesInBlockDim+1);
 						
 						if(emitter) {
 							for(int i{}; i < chunk::cubesInBlockCount; i++) {
 								auto const curCubeCoord{ blockCoord * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
-								chunks[chunkIndex].lighting()[curCubeCoord] = 31u;		
+								chunk.lighting()[curCubeCoord] = 31u;		
 							}
 								
 							for(int i{}; i < chunk::cubesInBlockCount; i++) {
 								auto const curCubeCoord{ blockCoord * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
-								updateNeighbouringCubeLightingAdd(chunks[chunkIndex], curCubeCoord, 31u, true);
+								updateNeighbouringCubeLightingAdd(chunk, curCubeCoord, 31u, true);
 							}
+							
+							chunk.emitters().tryAdd(blockIndex);
 						}
 					}
 					break;
@@ -2892,8 +2913,6 @@ int main(void) {
 			glBindVertexArray(0);
 		}*/
 	
-		
-		
 		{
 			glEnable(GL_BLEND);
 			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

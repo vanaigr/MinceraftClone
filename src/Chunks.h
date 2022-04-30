@@ -6,6 +6,7 @@
 #include<array>
 #include<tuple>
 #include<utility>
+#include<algorithm>
 
 #include"Vector.h"
 
@@ -29,6 +30,8 @@ namespace chunk {
 	static constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
 		return index < blocksInChunkCount;
 	}
+	
+	//used in main.shader
 	inline static constexpr int16_t blockIndex(vec3i const coord) {
 		assert(checkBlockCoordInChunkValid(coord));
 		return coord.x + coord.y*chunk::blocksInChunkDim + coord.z*chunk::blocksInChunkDim*chunk::blocksInChunkDim;
@@ -83,6 +86,7 @@ namespace chunk {
 			gs(neighbours, chunksNeighbours)
 			gs(ao, chunksAO)
 			gs(lighting, chunksLighting)
+			gs(emitters, chunkEmittersIndices)
 		#undef gs
 	};
 	
@@ -400,6 +404,46 @@ namespace chunk {
 		}
 	};
 	
+	template<uint16_t maxSize>
+	struct BlocksSet {
+	private:
+		std::array<uint16_t, 1+size_t(maxSize)> data;
+	public:
+		BlocksSet() = default;
+		
+		uint16_t &size() { return data[0]; }
+		uint16_t const &size() const { return data[0]; }
+		
+		uint16_t *begin() { return &data[1]; }
+		uint16_t *end() { return begin() + size(); }
+				
+		uint16_t const *cbegin() const { return &data[1]; }
+		uint16_t const *cend() const { return begin() + size(); }
+		
+		bool checkIndexValid(int const index) const { return index < size() && index >= 0; }
+		
+		uint16_t &operator[](int const index) { assert(checkIndexValid(index)); return data[1+index]; }
+		uint16_t const &operator[](int const index) const { assert(checkIndexValid(index)); return data[1+index]; }
+		
+		uint16_t *tryAdd(uint16_t const blockIndex) {
+			auto &curSize{ size() };
+			if(curSize < maxSize && std::find(begin(), end(), blockIndex) == end()) {
+				return &( (*this)[curSize++] = blockIndex );
+			}
+			else return NULL;
+		}
+		
+		void remove(uint16_t const blockIndex) {
+			uint16_t *const cur{ std::find(begin(), end(), blockIndex) };
+			if(cur != end()) {
+				for(uint16_t *next{cur+1}; next < end(); next++) *(next-1) = *next;
+				size()--;
+			}
+		}
+	private:
+	};
+	
+	using Emitters = BlocksSet<15>;
 	
 	struct Chunks {	
 	private:
@@ -422,6 +466,7 @@ namespace chunk {
 		std::vector<ChunkAO> chunksAO;
 		std::vector<ChunkLighting> chunksLighting;
 		std::vector<Neighbours> chunksNeighbours{};
+		std::vector<Emitters> chunkEmittersIndices; //at most 15. used for rendering
 		std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
 		
 		//returns used[] position 
@@ -444,6 +489,7 @@ namespace chunk {
 				chunksAO.resize(index+1);
 				chunksLighting.resize(index+1);
 				chunksNeighbours.resize(index+1);
+				chunkEmittersIndices.resize(index+1);
 			}
 			used.push_back(index);
 			
@@ -452,7 +498,6 @@ namespace chunk {
 	
 		inline void recycle(int const index) {
 			auto chunkIndex = used[index];
-			chunksNeighbours[chunkIndex] = Neighbours();
 			used.erase(used.begin()+index);
 			vacant.push_back(chunkIndex);
 		}
