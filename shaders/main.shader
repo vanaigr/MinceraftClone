@@ -486,14 +486,14 @@ Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, cons
 struct IntersectionInfo {
 	vec3 coord;
 	vec3 localSpaceCoord;
-	uint blockId;
 	int chunkIndex;
 	int bias;
+	uint fromBlockId_toBlockId;
 };
 
 IntersectionInfo noIntersectionInfo() {
 	IntersectionInfo i;
-	i.blockId = 0;
+	i.fromBlockId_toBlockId = 0;
 	i.chunkIndex = -1;
 	return i;
 }
@@ -664,17 +664,17 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 							if(stopAtLen <= length(curCoord - ray.orig)) return IntersectionInfo(
 								vec3(0),
 								vec3(0),
-								0u,
 								curChunkIndex,
-								0
+								0,
+								0u
 							);
 							
 							return IntersectionInfo(
 								curCoord,
 								localBlockCoord,
-								blockId,
 								curChunkIndex,
-								bias
+								bias,
+								(fBlockUsedId & 0xffff) | ((tBlockUsedId & 0xffff) << 16)
 							);
 						}
 					}
@@ -709,9 +709,9 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 		if(stopInThisChunk) return IntersectionInfo(
 			vec3(0),
 			vec3(0),
-			0u,
 			curChunkIndex,
-			0
+			0,
+			0u
 		);
 	}
 	return noIntersectionInfo();
@@ -858,7 +858,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 		const Ray ray = p.ray;
 		const int chunkIndex = p.chunkIndex;
 		const uint type = p.type;
-		const int curBias = p.bias;
+		const int startBias = p.bias;
 		const int parent = curentFrame.parent;
 		
 		const bool shadow = type == 1;
@@ -870,14 +870,16 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 		const bool isPlayer = (drawPlayer || curFrame != 0) && playerIntersection.is;
 		const float playerT = isPlayer ? length(playerIntersection.at - ray.orig) : 1.0 / 0.0;
 		
-		const IntersectionInfo i = isInters(ray, chunkPosition(chunkIndex) - startChunkPosition, chunkIndex, curBias, playerT);
+		const IntersectionInfo i = isInters(ray, chunkPosition(chunkIndex) - startChunkPosition, chunkIndex, startBias, playerT);
 		
-		if(i.blockId != 0) { //block
+		if(i.fromBlockId_toBlockId != 0) { //block
 			const vec3 coord = i.coord;        
 			const vec3 localSpaceCoord = i.localSpaceCoord;
-			const uint blockId = i.blockId;
 			const int intersectionChunkIndex = i.chunkIndex;
 			const int bias = i.bias;
+			const uint fromBlockId = i.fromBlockId_toBlockId & 0xffff;
+			const uint toBlockId = (i.fromBlockId_toBlockId >> 16) & 0xffff;
+			const uint blockId = bias < 0 ? fromBlockId : toBlockId;
 			
 			const bvec3 intersectionSideB = equal(localSpaceCoord * cubesInBlockDim, floor(localSpaceCoord * cubesInBlockDim));
 			const ivec3 intersectionSide = ivec3(intersectionSideB);
@@ -921,7 +923,14 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				}
 				else ambient = 0.5;
 				
-				light = lightingAtCube(intersectionChunkIndex, vertexCoord - max(ivec3(sign(ray.dir)), ivec3(0)) * intersectionSide);
+				const ivec3 dirSignI = ivec3(sign(ray.dir));
+				const ivec3 positive_ = max(dirSignI, ivec3(0));
+				const ivec3 negative_ = max(-dirSignI, ivec3(0));
+				
+				light = max(
+					float(bias >= 0) * lightingAtCube(intersectionChunkIndex, vertexCoord - negative_ * intersectionSide),
+					float(bias <= 0) * lightingAtCube(intersectionChunkIndex, vertexCoord - positive_ * intersectionSide)
+				);
 			}
 			
 			
