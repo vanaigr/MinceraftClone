@@ -1619,29 +1619,60 @@ static void updateLightingIn(chunk::Chunks &chunks, vec3i const minChunkPos, vec
 	}
 }
 
-static void updateAO(chunk::Chunk chunk) {
+static void updateBlocks(chunk::Chunk chunk) {
 	//std::cout << "a:" << chunk.position() << '\n';
 	
 	auto &chunks{ chunk.chunks() };
 	auto const aabb{ chunk.aabb() };
 	auto const start{ aabb.start() };
 	auto const end{ aabb.end() };
-	auto const pos{ chunk.position() };
+	auto const chunkCoord{ chunk.position() };
 	auto &ao{ chunk.ao() };
 	ao.reset();
 	
 	chunk::Move_to_neighbour_Chunk const mtnChunk{chunk};
 	if(!aabb.empty()) {
+		//AO
 		static constexpr int cnb{ chunk::cubesInBlockDim };
-		//for(int i{}; i < chunk::ChunkAO::size; i++) 
 		for(int z{start.z*cnb}; z < (end.z+1)*cnb; z++) 
 		for(int y{start.y*cnb}; y < (end.y+1)*cnb; y++) 
 		for(int x{start.x*cnb}; x < (end.x+1)*cnb; x++) {
-			//vec3l const cubeCoordInChunk{ chunk::ChunkAO::vertCoord(i) };
 			vec3i const cubeCoordInChunk{ x, y, z };
-			auto const i{ chunk::cubeIndexInChunk(cubeCoordInChunk) };
-	
-			ao[i] = calcAO(chunks, mtnChunk, pos, cubeCoordInChunk);
+			ao[cubeCoordInChunk] = calcAO(chunks, mtnChunk, chunkCoord, cubeCoordInChunk);
+		}
+		
+		//blocks with no neighbours
+		for(int z{start.z}; z < (end.z+1); z++) 
+		for(int y{start.y}; y < (end.y+1); y++) 
+		for(int x{start.x}; x < (end.x+1); x++) {
+			vec3i const blockInChunkCoord{ x, y, z };
+			auto &block{ chunk.data()[blockInChunkCoord] };
+			
+			bool noNeighbours{};
+			
+			if(block.isEmpty()) {
+				noNeighbours = true;
+				
+				for(int i{}; i < 27; i++) {
+					vec3i const neighbourDir{ (i%3)-1, ((i/3)%3)-1, ((i/9)%3)-1 };
+					
+					ChunkCoord const neighbourPos{ chunkCoord, ChunkCoord::Block{vec3l(blockInChunkCoord + neighbourDir)} };
+					auto const neighbourChunkCoord{ neighbourPos.chunk() };
+					auto const neighbourBlockInChunk{ neighbourPos.blockInChunk() };
+					
+					auto const neighbourChunkIndex{ chunk::Move_to_neighbour_Chunk{ mtnChunk }.move(neighbourChunkCoord) };
+					if(!neighbourChunkIndex.is()) continue;
+					
+					auto const neighbourChunk{ chunks[neighbourChunkIndex.get()] };
+					if(!neighbourChunk.data()[neighbourBlockInChunk].isEmpty()) {
+						noNeighbours = false;
+						break;
+					}
+				}
+			}
+			
+			if(noNeighbours) block = chunk::Block::noNeighboursBlock(block);
+			else             block = chunk::Block::  neighboursBlock(block);
 		}
 	}
 }
@@ -1658,7 +1689,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		auto &chunks{ chunk.chunks() };
 		
 		if(status.isUpdateBlocks()) {
-			updateAO(chunk); 
+			updateBlocks(chunk); 
 			status.setUpdateBlocks(false);
 			status.setBlocksUpdated(true);
 		}

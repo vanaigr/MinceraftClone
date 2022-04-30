@@ -198,6 +198,9 @@ struct Block {
   bool fullBlock(const uint cubes) {
 	  return cubes == 255;
   }
+  bool hasNoNeighbours(const Block block) {
+	  return ((block.data >> 17) & 1) != 0;
+  }
 
 Block blockAir() {
 	return Block(0);
@@ -595,9 +598,7 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 		while(true) {
 			const bvec3 blockBounds = equal(curCoord, floor(curCoord));
 			const bool atBlockBounds = any(blockBounds);
-			
-			const bool inChunkBounds = all(lessThan((curCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0)) );
-			
+					
 			const vec3 fromBlockCoord = floor(curCoord - positive_ * vec3(blockBounds));
 			const vec3 toBlockCoord   = floor(curCoord - negative_ * vec3(blockBounds));
 			
@@ -683,8 +684,9 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 			
 			
 			fromBlock = toBlock;
-			const float skipDistance = blockId(fromBlock) == 0 ? 1.0 : cubesInBlockDim;
-			const vec3 candCoords = floor(curCoord*skipDistance * dirSign + 1)/skipDistance*dirSign;
+			const bool hnn = hasNoNeighbours(fromBlock);
+			const float skipDistance = hnn ? 1 : (blockId(fromBlock) == 0 ? 1.0 : cubesInBlockDim);
+			const vec3 candCoords = floor(curCoord*skipDistance * dirSign + (hnn ? 2 : 1))/skipDistance*dirSign;
 
 			const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
 			const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
@@ -695,9 +697,11 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 				candCoords, 
 				nextMinAxisB
 			);
-			steps++;
+			//if(hnn) discard;//steps++;
 			bias = -1;
 			
+			const bool inChunkBounds = all(lessThan((curCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0)) );
+	
 			if(!inChunkBounds) {
 				if(stopInThisChunk) break;
 				curChunkIndex = nextNotLoaded ? -1 : nextChunkIndex;
@@ -730,7 +734,7 @@ struct Frame {
 	int parent;
 };
 
-const int maxFrames = 10;
+const int maxFrames = 5;
 Frame frames[maxFrames];
 
 void setFrame(const int frameIndex, const Frame frame) {

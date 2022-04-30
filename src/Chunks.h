@@ -137,22 +137,34 @@ namespace chunk {
 		
 		static constexpr Block fullBlock(uint16_t const id) { return Block(id, 0b1111'1111); }
 		static constexpr Block emptyBlock() { return Block(0, 0); }
+		static constexpr Block noNeighboursBlock(Block const it) { return Block(0, 0, true); }
+		static constexpr Block neighboursBlock(Block const it) { return Block(it.id(), it.cubes(), false); }
+		
+		static constexpr Block idChanged(Block const it, uint16_t const id) { return Block{id, it.cubes()}; }
+		static constexpr Block cubesChanged(Block const it, uint8_t const cubes) { return Block{it.id(), cubes}; }
 	private:
 		uint32_t data_;
 	public:
 		Block() = default;
 		explicit constexpr Block(uint32_t const data__) : data_{ data__ } {}
-		constexpr Block(uint16_t const id, uint8_t cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
+		constexpr Block(uint16_t const id, uint8_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
 			if(id == 0 || cubes == 0) data_ = 0;
+		}		
+		constexpr Block(uint16_t const id, uint8_t const cubes, bool const noNeighbours) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) | (uint32_t(noNeighbours) << 17) } {
+			if(id == 0 || cubes == 0) data_ = (uint32_t(noNeighbours) << 17);
 		}
-		
+		uint32_t data() const { return data_; }
+		uint8_t cubes() const { return uint8_t(data_ >> 24); }
 		constexpr uint16_t id() const { return uint16_t(data_ & ((1 << 16) - 1)); }
+		constexpr bool hasNoNeighbours() const { return ((data_ >> 17)&1) == 1; }
+		
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cube(uint8_t const index) const { return blockCube(cubes(), index); }
-		constexpr bool empty() const { return data_ == 0; }
 		
-		uint8_t cubes() const { return uint8_t(data_ >> 24); }
-		uint32_t data() const { return data_; }
+		operator bool() const { return id() != 0; }
+		constexpr bool isEmpty() const { return id() == 0; }
+		constexpr bool empty() const { return isEmpty(); }
+		
 	};
 	
 	
@@ -301,6 +313,9 @@ namespace chunk {
 		
 		uint8_t       &operator[](int const index)       { return vertsBlocks[index]; }
 		uint8_t const &operator[](int const index) const { return vertsBlocks[index]; }
+		
+		uint8_t       &operator[](vec3i const cubeCoord)       { return vertsBlocks[cubeIndexInChunk(cubeCoord)]; }
+		uint8_t const &operator[](vec3i const cubeCoord) const { return vertsBlocks[cubeIndexInChunk(cubeCoord)]; }
 		
 		void reset() { vertsBlocks.fill(0); }
 	};
