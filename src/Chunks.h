@@ -501,7 +501,7 @@ namespace chunk {
 			valid{ oci.is() }
 		{}
 		Move_to_neighbour_Chunk(Chunks &chunks) : chunk{chunks[0]}, valid{ false } {}/*index 0 may be out of bounds but we need to keep Chunks&*/
-		Move_to_neighbour_Chunk(Chunk &src) : chunk{src}, valid{ true } {}
+		Move_to_neighbour_Chunk(Chunk const src) : chunk{src}, valid{ true } {}
 			
 		Move_to_neighbour_Chunk(Chunks &chunks, vec3i const chunkCoord) {
 			auto const chunkIndexP{ chunks.chunksIndex_position.find(chunkCoord) };

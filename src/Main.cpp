@@ -1131,8 +1131,6 @@ std::string chunkNewFilename(chunk::Chunk const &chunk) {
 }
 
 void writeChunk(chunk::Chunk &chunk) {
-	if(!saveChunks) return;
-	else (std::cout << "not implemented\n"), (assert(false));
 	auto const &data{ chunk.data() };
 	
 	std::ofstream chunkFileOut{ chunkNewFilename(chunk), std::ios::binary };
@@ -1154,10 +1152,7 @@ void writeChunk(chunk::Chunk &chunk) {
 }
 
 bool tryReadChunk(chunk::Chunk &chunk, vec3i &start, vec3i &end) {
-	std::cout << "not implemented\n";
-	assert(false);
-	return false;
-	/*auto &data{ chunk.data() };
+	auto &data{ chunk.data() };
 	
 	auto const filename2{ chunkNewFilename(chunk) };
 	std::ifstream chunkFileIn2{ filename2, std::ios::binary };	
@@ -1215,7 +1210,7 @@ bool tryReadChunk(chunk::Chunk &chunk, vec3i &start, vec3i &end) {
 	}
 	
 	
-	return false;*/
+	return false;
 }
 
 void genTrees(vec3i const chunk, chunk::ChunkData &data, vec3i &start, vec3i &end) {	
@@ -1322,7 +1317,7 @@ static void fillChunkData(double const (&heights)[chunk::blocksInChunkDim * chun
 	vec3i start{chunk::blocksInChunkDim-1};
 	vec3i end  {0 };
 	
-	if(loadChunks) (std::cout << "loading chunks is not supported yet\n"), exit(-1);// && tryReadChunk(chunk, start, end)) chunk.modified() = false;
+	if(loadChunks && tryReadChunk(chunk, start, end)) chunk.modified() = false;
 	else { genChunkData(heights, chunk, start, end); chunk.modified() = true; }
 	
 	aabb = chunk::AABB(start, end);
@@ -1491,11 +1486,11 @@ static void updateNeighbouringCubeLighting(chunk::Chunk cubeChunk, vec3i const u
 		auto &neighbourCubeCurLighting{ neighbourCubeChunk.lighting()[neighbourCubeCoord] };
 		
 		if(neighbourCubeLight > neighbourCubeCurLighting && !emitting) {
-			if(neighbourCubeChunkCoord.in(updateMinPos, updateMaxPos).all()) {
-				neighbourCubeCurLighting = neighbourCubeLight;
-				updateNeighbouringCubeLighting(neighbourCubeChunk, updateMinPos, updateMaxPos, neighbourCubeCoord, neighbourCubeCurLighting);	
-			}
-			else neighbourCubeChunk.status().setUpdateLightingAdd(true);
+			if(!neighbourCubeChunkCoord.in(updateMinPos, updateMaxPos).all()) 
+				neighbourCubeChunk.status().setLightingUpdated(true);
+			
+			neighbourCubeCurLighting = neighbourCubeLight;
+			updateNeighbouringCubeLighting(neighbourCubeChunk, updateMinPos, updateMaxPos, neighbourCubeCoord, neighbourCubeCurLighting);	
 		}
 	}
 }
@@ -1555,12 +1550,10 @@ static void fastUpdateLightingInDir(
 	auto *lightingBefore{ 
 		chunkBeforeIndex == -1 ? 
 		  &(dir.y == -1 ? skyLighting : noLighting)
-		: &chunk.chunks()[chunkBeforeIndex].lighting() 
+		: &chunks[chunkBeforeIndex].lighting() 
 	};
 	
 	for(auto i{decltype(dirCoordDiff){}}; i <= dirCoordDiff; i++) {
-		
-		bool noLightFromBefore{ true };
 		for(auto o1{beginCoordsAxis.y}; o1 <= endCoordsAxis.y; o1++)
 		for(auto o2{beginCoordsAxis.z}; o2 <= endCoordsAxis.z; o2++) {
 			auto const cubeCoord{
@@ -1593,17 +1586,14 @@ static void fastUpdateLightingInDir(
 				
 				minCube = minCube.min(cubeCoord);
 				maxCube = maxCube.max(cubeCoord);
-				noLightFromBefore = false;
 			}
 		}
-		
-		if(noLightFromBefore) break;
 		
 		lightingBefore = &lighting;
 	}
 }
 
-static void updateLightingIn(chunk::Chunks &chunks, vec3i const minChunkPos, vec3i const maxChunkPos) {	
+static void updateLightingInside(chunk::Chunks &chunks, vec3i const minChunkPos, vec3i const maxChunkPos) {	
 	static std::vector<int> chunkIndices{};
 	chunkIndices.clear();
 	
@@ -1648,7 +1638,7 @@ static void updateLightingIn(chunk::Chunks &chunks, vec3i const minChunkPos, vec
 						curChunk, 
 						updateDirs[j]*dir, otherDirs1[j], otherDirs2[j],
 						minCube, maxCube, 
-						newMinCube, newMaxCube
+						*&newMinCube, *&newMaxCube
 					);
 				}
 			}
@@ -1658,17 +1648,16 @@ static void updateLightingIn(chunk::Chunks &chunks, vec3i const minChunkPos, vec
 		else {
 			minCube = newMinCube;
 			maxCube = newMaxCube;
-			auto const lens{ newMaxCube - newMinCube };
 		}
 	}
 	
-	std::cout << "!";
+	std::cout << '#';
 	
 	auto lastChunkIndex{ chunkIndices[0] };
 	
-	for(auto z{minCube.z - 1}; z <= maxCube.z + 1; z++)
-	for(auto y{minCube.y - 1}; y <= maxCube.y + 1; y++)
-	for(auto x{minCube.x - 1}; x <= maxCube.x + 1; x++) {
+	for(auto z{minCube.z}; z <= maxCube.z; z++)
+	for(auto y{minCube.y}; y <= maxCube.y; y++)
+	for(auto x{minCube.x}; x <= maxCube.x; x++) {
 		ChunkCoord const cubePos{ vec3i(0), ChunkCoord::Cube{vec3l(x, y, z)} };
 		auto const cubeChunkCoord{ cubePos.chunk() };
 		auto const cubeInChunkCoord{ cubePos.cubeInChunk() };
@@ -1680,6 +1669,79 @@ static void updateLightingIn(chunk::Chunks &chunks, vec3i const minChunkPos, vec
 		auto level{ chunk.lighting()[cubeInChunkCoord] };
 		
 		updateNeighbouringCubeLighting(chunk, minChunkPos, maxChunkPos, cubeInChunkCoord, level);
+	}
+}
+
+static void updateLightingIn(chunk::Chunks &chunks, vec3i const minChunkPos, vec3i const maxChunkPos) {
+	updateLightingInside(chunks, minChunkPos, maxChunkPos);
+
+	auto const minCubePos{ vec3l(minChunkPos  ) * chunk::cubesInChunkDim     };
+	auto const maxCubePos{ vec3l(maxChunkPos+1) * chunk::cubesInChunkDim - 1 };
+
+	static vec3i const sides[3]       = { {1,0,0}, {0,1,0}, {0,0,1} };
+	static vec3i const otherSides1[3] = { {0,0,1}, {0,0,1}, {0,1,0} };
+	static vec3i const otherSides2[3] = { {0,1,0}, {1,0,0}, {1,0,0} };
+	
+	for(int axisPositive{}; axisPositive < 2; axisPositive++) 
+	for(int side{}; side < 3; side++) {
+		for(auto chunkCoord1{minChunkPos.dot(otherSides1[side])}; chunkCoord1 <= maxChunkPos.dot(otherSides1[side]); chunkCoord1++)
+		for(auto chunkCoord2{minChunkPos.dot(otherSides2[side])}; chunkCoord2 <= maxChunkPos.dot(otherSides2[side]); chunkCoord2++) {
+			auto const neighbourDir{ sides[side] * (axisPositive*2 - 1) };
+			
+			auto const chunkCoord{
+				  (axisPositive ? maxChunkPos : minChunkPos) * sides[side]
+				+ otherSides1[side] * chunkCoord1
+				+ otherSides2[side] * chunkCoord2
+			};
+			auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{chunks, chunkCoord}.optChunk().get() };
+			auto const chunk{ chunks[chunkIndex] };
+			if(chunkIndex == -1) continue;
+			
+			auto const neighbourChunkCoord{ chunkCoord + neighbourDir };
+			auto const neighbourChunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.move(neighbourChunkCoord).get() };	
+			if(neighbourChunkIndex == -1) continue;
+			auto neighbourChunk{ chunks[neighbourChunkIndex] };
+			
+			auto const &lighting{ chunk.lighting() };
+			auto const &neighbourLighting{ neighbourChunk.lighting() };
+			auto const &neighbourBlocks{ neighbourChunk.data() };
+			
+			for(int coord1{}; coord1 < chunk::cubesInChunkDim; coord1++)
+			for(int coord2{}; coord2 < chunk::cubesInChunkDim; coord2++) {
+				auto const cubeInChunkCoord{
+					  sides[side] * (axisPositive ? chunk::cubesInChunkDim-1 : 0)
+					+ otherSides1[side] * coord1
+					+ otherSides2[side] * coord2
+				};
+				auto const cubeCoord{
+					  vec3l(chunkCoord) * chunk::cubesInChunkDim
+					+ vec3l(cubeInChunkCoord)
+				};
+				
+				auto const cubeLight{ lighting[cubeInChunkCoord] };
+				auto const toNeighbourCubeLightingLevel{ chunk::ChunkLighting::lightForDir(cubeLight, neighbourDir) };
+				if(toNeighbourCubeLightingLevel == 0) continue;
+				
+				auto const neighbourCubeInChunkCoord{
+					  sides[side] * (axisPositive ? 0 : chunk::cubesInChunkDim-1)
+					+ otherSides1[side] * coord1
+					+ otherSides2[side] * coord2
+				};
+				auto const neighbourBlock{ neighbourBlocks[neighbourCubeInChunkCoord / chunk::cubesInBlockDim] };
+				auto const neighbourCube{ neighbourBlock.cube(neighbourCubeInChunkCoord % chunk::cubesInBlockDim) };
+				auto const neighbourBlockId{ neighbourBlock.id() };
+				auto const emitter{ neighbourBlockId == 14 || neighbourBlockId == 13 };
+				
+				if(neighbourCube && !(neighbourBlockId == 5 || neighbourBlockId == 7 || emitter)) continue;
+				
+				auto &neighbourCubeLight{ neighbourLighting[neighbourCubeInChunkCoord] };
+				if(toNeighbourCubeLightingLevel <= neighbourCubeLight) continue;
+				
+				neighbourChunk.status().setUpdateLightingAdd(true);
+				goto nextChunk;
+			}
+			nextChunk: continue;
+		}
 	}
 }
 
@@ -1758,6 +1820,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			status.setBlocksUpdated(true);
 		}
 		if(status.isUpdateLightingAdd()) {
+			std::cout << chunkCoord << ' ';
 			updateLightingIn(chunks, chunkCoord, chunkCoord);
 			status.setUpdateLightingAdd(false);
 			status.setLightingUpdated(true);
@@ -1772,9 +1835,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		if(cameraChunkCoord != chunkCoord && (maxUpdated || !inRenderDistance)) {
 			if(status.isStubLoadedGPU()) return modified;
 			if(status.isFullyLoadedGPU() && status.isInvalidated()) return modified;
-			
-			//std::cout << "s:" << chunkCoord << '\n';
-			
+
 			chunk::Neighbours const neighbours{};
 			static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
@@ -1795,7 +1856,6 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		auto const &ao{ chunk.ao() };
 		
 		if(status.isBlocksUpdated()) {
-			//std::cout << "b:" << chunkCoord << '\n';
 			static_assert(sizeof chunkData == 16384);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(chunkData) * chunkIndex, sizeof(chunkData), &chunkData);
@@ -1956,10 +2016,9 @@ static void updateChunks() {
 		[&](int chunkIndex) -> void { //free chunk
 			auto chunk{ chunks[chunkIndex] };
 			chunks.chunksIndex_position.erase( chunk.position() );
-			if(chunk.modified()) {
-				writeChunk(chunk);
-				chunk.modified() = false;
-			}
+			if(chunk.modified() && saveChunks) writeChunk(chunk);
+			
+			chunk.modified() = false;
 			auto const &neighbours{ chunk.neighbours() };
 			for(int i{}; i < chunk::Neighbours::neighboursCount; i++) {
 				auto const &optNeighbour{ neighbours[i] };
@@ -2629,7 +2688,7 @@ static void update() {
 		) * deltaTime; 
 			
 		if(diffPhysicsMs > fixedDeltaTime * 1000) {
-			lastPhysicsUpdate += std::chrono::milliseconds(static_cast<long long>(fixedDeltaTime*1000.0));
+			lastPhysicsUpdate = now; //several updates might be skipped
 
 			if(!debugBtn0) {
 				playerForce += vec3d{0,-1,0} * fixedDeltaTime; 
@@ -3082,14 +3141,17 @@ int main(void) {
 }
 
 static void quit() {
-	for(auto const chunkIndex : chunks.used) {
+	int count = 0;
+	if(saveChunks) for(auto const chunkIndex : chunks.used) {
 		auto chunk{ chunks[chunkIndex] };
-		
 		if(chunk.modified()) {
 			writeChunk(chunk);
+			count++;
 			//chunk.modified() = false;
 		}
 	}
+	
+	std::cout << count;
 	
 	glfwSetWindowShouldClose(window, GL_TRUE);
 }
