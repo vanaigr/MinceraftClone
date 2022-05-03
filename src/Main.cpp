@@ -329,7 +329,7 @@ chunk::Chunks chunks{};
 
 void resizeBuffer() {
 	//assert(newGpuChunksCount >= 0);
-	gpuChunksCount = chunks.used.size();
+	gpuChunksCount = chunks.usedChunks().size();
 	auto &it = chunks.chunksStatus;
 	
 	for(auto &status : it) {
@@ -1130,7 +1130,16 @@ std::string chunkNewFilename(chunk::Chunk const &chunk) {
 	return ss.str();
 }
 
+static bool isBlockTranslucent(uint16_t const id) {
+	return id == 0 || id == 5 || id == 7;
+}
+
+static bool isBlockEmitter(uint16_t const id) {
+	return id == 13 || id == 14;
+}
+
 void writeChunk(chunk::Chunk &chunk) {
+	std::cout << "!";
 	auto const &data{ chunk.data() };
 	
 	std::ofstream chunkFileOut{ chunkNewFilename(chunk), std::ios::binary };
@@ -1151,8 +1160,9 @@ void writeChunk(chunk::Chunk &chunk) {
 	}
 }
 
-bool tryReadChunk(chunk::Chunk &chunk, vec3i &start, vec3i &end) {
+bool tryReadChunk(chunk::Chunk chunk, vec3i &start, vec3i &end) {
 	auto &data{ chunk.data() };
+	auto &emitters{ chunk.emitters() };
 	
 	auto const filename2{ chunkNewFilename(chunk) };
 	std::ifstream chunkFileIn2{ filename2, std::ios::binary };	
@@ -1179,6 +1189,8 @@ bool tryReadChunk(chunk::Chunk &chunk, vec3i &start, vec3i &end) {
 				start = start.min(blockCoord);
 				end   = end  .max(blockCoord);
 			}
+			
+			if(isBlockEmitter(block)) emitters.add(blockCoord);
 		}
 
 		return true;
@@ -1204,6 +1216,8 @@ bool tryReadChunk(chunk::Chunk &chunk, vec3i &start, vec3i &end) {
 				start = start.min(blockCoord);
 				end   = end  .max(blockCoord);
 			}
+			
+			if(isBlockEmitter(block)) emitters.add(blockCoord);
 		}
 
 		return true;
@@ -1213,11 +1227,15 @@ bool tryReadChunk(chunk::Chunk &chunk, vec3i &start, vec3i &end) {
 	return false;
 }
 
-void genTrees(vec3i const chunk, chunk::ChunkData &data, vec3i &start, vec3i &end) {	
+void genTrees(chunk::Chunk chunk, vec3i &start, vec3i &end) {	
+	auto const &chunkCoord{ chunk.position() };
+	auto &data{ chunk.data() };
+	auto &emitters{ chunk.emitters() };
+	
 	for(int32_t cx{-1}; cx <= 1; cx ++) 
 	for(int32_t cz{-1}; cz <= 1; cz ++) {
-		vec3i const chunkOffset{ cx, -chunk.y, cz };
-		auto const curChunk{ chunk + chunkOffset };
+		vec3i const chunkOffset{ cx, -chunkCoord.y, cz };
+		auto const curChunk{ chunkCoord + chunkOffset };
 		
 		auto const treeBlock{ getTreeBlock(vec2i{curChunk.x, curChunk.z}) };
 		
@@ -1242,6 +1260,8 @@ void genTrees(vec3i const chunk, chunk::ChunkData &data, vec3i &start, vec3i &en
 							&& !( (abs(x) == abs(z))&&(abs(x)==1) &&(tl.y==5 || (treeBlock.x*(x+1)/2+treeBlock.z*(z+1)/2)%2==0) )
 							)
 					)) curBlock = chunk::Block::fullBlock(5);
+					
+					if(isBlockEmitter(curBlock.id())) emitters.add(blk);
 
 					if(is) {
 						start = start.min(blk);
@@ -1257,6 +1277,7 @@ void genTrees(vec3i const chunk, chunk::ChunkData &data, vec3i &start, vec3i &en
 void genChunkData(double const (&heights)[chunk::blocksInChunkDim * chunk::blocksInChunkDim], chunk::Chunk chunk, vec3i &start, vec3i &end) {
 	auto const &pos{ chunk.position() };
 	auto &data{ chunk.data() };
+	auto &emitters{ chunk.emitters() };
 	
 	for(int z = 0; z < chunk::blocksInChunkDim; ++z)
 	for(int y = 0; y < chunk::blocksInChunkDim; ++y) 
@@ -1280,31 +1301,12 @@ void genChunkData(double const (&heights)[chunk::blocksInChunkDim * chunk::block
 		else {
 			data[index] = chunk::Block::emptyBlock();
 		}
+		
+		
+		if(isBlockEmitter(data[index])) emitters.add(blockCoord);
 	}
 		
-	genTrees(pos, data, *&start, *&end);	
-}
-
-static uint8_t calcAO(chunk::Chunks &chunks, chunk::Move_to_neighbour_Chunk chunk, vec3i const chunkPos, vec3i const cubeCoordInChunk) {
-	uint8_t cubes{};
-	for(int j{}; j < 8; j ++) {
-		auto const offsetcubeCoordInChunk_unnormalized{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0) };
-		ChunkCoord const offsetCubePos{ chunkPos, ChunkCoord::Cube{vec3l(offsetcubeCoordInChunk_unnormalized)} };
-		
-		auto const offsetCubeChunkIndex{ chunk.move(offsetCubePos.chunk()) };
-		if(!offsetCubeChunkIndex.is()) continue;
-		
-		auto const offsetCubeBlockCoord{ offsetCubePos.blockInChunk() };
-		auto const offsetCubeLocalCoord{ offsetCubePos.cube() & 1 };
-		
-		auto offsetCubeChunk{ chunks[offsetCubeChunkIndex.get()] };
-		
-		auto const solidCube{ offsetCubeChunk.data()[chunk::blockIndex(offsetCubeBlockCoord)].cube(vec3i(offsetCubeLocalCoord)) };
-		
-		if(solidCube) cubes |= 1 << j;
-	}
-	
-	return cubes;
+	genTrees(chunk, *&start, *&end);	
 }
 
 static void fillChunkData(double const (&heights)[chunk::blocksInChunkDim * chunk::blocksInChunkDim], chunk::Chunk chunk) {
@@ -1346,14 +1348,6 @@ static void iterateCubeNeighbours(
 	}
 }
 
-static bool isBlockTranslucent(uint16_t const id) {
-	return id == 0 || id == 5 || id == 7;
-}
-
-static bool isBlockEmitter(uint16_t const id) {
-	return id == 13 || id == 14;
-}
-
 struct CubeInfo { vec3i cubeCoord;/*could fit in 32 bits*/ int chunkIndex; };
 
 enum class LightingCubeType {
@@ -1367,7 +1361,7 @@ struct SkyLightingConfig {
 	
 	static LightingCubeType getType(uint16_t const blockId, bool const cube) { 
 		if(!cube || isBlockTranslucent(blockId)) return LightingCubeType::medium;
-			else if(isBlockEmitter(blockId)) return LightingCubeType::emitter;
+		//else if(isBlockEmitter(blockId)) return LightingCubeType::emitter;
 		else return LightingCubeType::wall;
 	}
 	
@@ -1815,6 +1809,28 @@ static void setNeighboursLightingUpdate(chunk::Chunks &chunks, vec3i const minCh
 	}
 }
 
+static uint8_t calcAO(chunk::Chunks &chunks, chunk::Move_to_neighbour_Chunk chunk, vec3i const chunkPos, vec3i const cubeCoordInChunk) {
+	uint8_t cubes{};
+	for(int j{}; j < 8; j ++) {
+		auto const offsetcubeCoordInChunk_unnormalized{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0) };
+		ChunkCoord const offsetCubePos{ chunkPos, ChunkCoord::Cube{vec3l(offsetcubeCoordInChunk_unnormalized)} };
+		
+		auto const offsetCubeChunkIndex{ chunk.move(offsetCubePos.chunk()) };
+		if(!offsetCubeChunkIndex.is()) continue;
+		
+		auto const offsetCubeBlockCoord{ offsetCubePos.blockInChunk() };
+		auto const offsetCubeLocalCoord{ offsetCubePos.cube() & 1 };
+		
+		auto offsetCubeChunk{ chunks[offsetCubeChunkIndex.get()] };
+		
+		auto const solidCube{ offsetCubeChunk.data()[chunk::blockIndex(offsetCubeBlockCoord)].cube(vec3i(offsetCubeLocalCoord)) };
+		
+		if(solidCube) cubes |= 1 << j;
+	}
+	
+	return cubes;
+}
+
 static void updateBlocks(chunk::Chunk chunk) {
 	//std::cout << "a:" << chunk.position() << '\n';
 	
@@ -1823,6 +1839,9 @@ static void updateBlocks(chunk::Chunk chunk) {
 	auto const start{ aabb.start() };
 	auto const end{ aabb.end() };
 	auto const chunkCoord{ chunk.position() };
+	auto &blocks{ chunk.data() };
+	auto &emitters{ chunk.emitters() };
+	emitters.clear();  //hope that chunk is not filled with emitters
 	auto &ao{ chunk.ao() };
 	ao.reset();
 	
@@ -1867,6 +1886,14 @@ static void updateBlocks(chunk::Chunk chunk) {
 			
 			if(noNeighbours) block = chunk::Block::noNeighboursBlock(block);
 			else             block = chunk::Block::  neighboursBlock(block);
+		}
+		
+		//emitters
+		for(int z{start.z}; z < chunk::blocksInChunkDim; z++) 
+		for(int y{start.y}; y < chunk::blocksInChunkDim; y++) 
+		for(int x{start.x}; x < chunk::blocksInChunkDim; x++) {
+			vec3i const blockInChunkCoord{ x, y, z };
+			if(isBlockEmitter(blocks[blockInChunkCoord].id())) emitters.add(blockInChunkCoord);
 		}
 	}
 }
@@ -2003,7 +2030,7 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 	for(int32_t y = 15; y >= -16; y--) {
 		int32_t const usedIndex{ chunks.reserve() };
 		
-		auto const chunkIndex{ chunks.used[usedIndex] };
+		auto const chunkIndex{ chunks.usedChunks()[usedIndex] };
 		vec3i chunkPosition{ vec3i{columnPosition.x, y, columnPosition.y} };
 		
 		chunks.chunksIndex_position[chunkPosition] = chunkIndex;
@@ -2622,11 +2649,11 @@ static void update() {
 				}
 				
 				
-				chunks.chunksStatus[chunkIndex].setUpdateBlocks(true);
-				chunks.modified[chunkIndex] = true;
+				chunk.status().setUpdateBlocks(true);
+				chunk.modified() = true;
 				isAction = true;
 				
-				auto &aabb{ chunks.chunksAABB[chunkIndex] };
+				auto &aabb{ chunk.aabb() };
 				vec3i const start_{ aabb.start() };
 				vec3i const end_  { aabb.end  () };
 				
@@ -3032,7 +3059,7 @@ int main(void) {
 			glUniform1i(drawPlayer_u, isSpectator);
 			
 			int updatedCount{};
-			for(auto const chunkIndex : chunks.used) {
+			for(auto const chunkIndex : chunks.usedChunks()) {
 				if(chunkIndex >= gpuChunksCount) {
 					std::cout << "Error: gpu buffer was not properly resized. size=" << gpuChunksCount << " expected=" << (chunkIndex+1);
 					exit(-1);
@@ -3141,6 +3168,7 @@ int main(void) {
 				
 				ss.precision(4);
 				ss << "camera in: chunk=" << currentCoord().chunk() << " inside chunk=" << currentCoord().positionInChunk() << '\n';
+				if(playerChunkCand != -1) ss << "emitters count in camera chunk=" << chunks[playerChunkCand].emitters().size() << '\n';
 				ss << "camera forward=" << forwardDir << '\n';
 			}
 			ss.precision(1);
@@ -3223,7 +3251,7 @@ int main(void) {
 
 static void quit() {
 	int count = 0;
-	if(saveChunks) for(auto const chunkIndex : chunks.used) {
+	if(saveChunks) for(auto const chunkIndex : chunks.usedChunks()) {
 		auto chunk{ chunks[chunkIndex] };
 		if(chunk.modified()) {
 			writeChunk(chunk);

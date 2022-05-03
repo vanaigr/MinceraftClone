@@ -89,6 +89,7 @@ namespace chunk {
 			gs(lighting, chunksLighting)
 			//gs(skyLighting, chunksSkyLighting)
 			//gs(blockLighting, chunksBlockLighting)
+			gs(emitters, chunksEmitters)
 		#undef gs
 	};
 	
@@ -374,6 +375,38 @@ namespace chunk {
 	};
 	
 	
+	struct ChunkBlocksList {
+		static constexpr int16_t capacity = chunk::blocksInChunkCount;
+		
+		using value_type = int16_t; static_assert(blocksInChunkCount < (1 << 15));
+	private:
+		
+		std::array<value_type, capacity> list;
+		int16_t curSize;
+	public:
+		ChunkBlocksList() = default;
+		
+		bool inRange(int const index) const { return index >= 0 && index < size(); }
+			
+		value_type       &operator[](int const index)       { assert(inRange(index)); return list[index]; }
+		value_type const &operator[](int const index) const { assert(inRange(index)); return list[index]; }		
+		
+		vec3i operator()(int const index) const { assert(inRange(index)); return indexBlock(list[index]); }
+		
+		int size() const {
+			return curSize;
+		}
+		
+		void add(vec3i const blockCoord) {
+			assert(curSize != capacity);
+			list[curSize++] = blockIndex(blockCoord);
+		}
+		
+		void clear() {
+			curSize = 0;
+		}
+	};
+	
 	//using ChunkData = std::array<Block, chunk::blocksInChunkCount>;
 	struct ChunkData {
 		static constexpr int size = chunk::blocksInChunkCount;
@@ -422,23 +455,25 @@ namespace chunk {
 				return  (std::hash<int32_t>{}(it.x) ^ (std::hash<int32_t>{}(it.x) << 1)) ^ (std::hash<int32_t>{}(it.z) << 1);
 			} 
 		};
-	public:
-		std::vector<int> used{};
 		
+		std::vector<int> used{};
+	public:
 		std::vector<vec3i> chunksPos{};
 		std::vector<AABB> chunksAABB{};
 		std::vector<ChunkStatus> chunksStatus{};
 		std::vector<bool> modified{};
 		std::vector<ChunkData> chunksData{};
-		std::vector<ChunkAO> chunksAO;
-		std::vector<ChunkLighting> chunksLighting;
+		std::vector<ChunkAO> chunksAO{};
+		std::vector<ChunkLighting> chunksLighting{};
 		//std::vector<ChunkLighting> chunksSkyLighting;
 		//std::vector<ChunkLighting> chunksBlockLighting;
+		std::vector<ChunkBlocksList> chunksEmitters{};
 		std::vector<Neighbours> chunksNeighbours{};
 		std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
+	
+		std::vector<int>  const &usedChunks() const { return used; }
 		
-		//returns used[] position 
-		//all the chunk data is not initialised
+		//returns used[] position
 		inline int reserve() {
 			int index;
 			int usedSize = used.size();
@@ -447,8 +482,9 @@ namespace chunk {
 				index = vacant[vacant.size()-1];
 				vacant.pop_back();
 			}
-			else { //TODO: avoid zero-init
+			else { //TODO: avoid zero-init, allocate everything at once
 				index = usedSize;
+				
 				chunksPos.resize(index+1);
 				chunksAABB.resize(index+1);
 				chunksStatus.resize(index+1);
@@ -458,6 +494,7 @@ namespace chunk {
 				chunksLighting.resize(index+1);
 				//chunksSkyLighting.resize(index+1);
 				//chunksBlockLighting.resize(index+1);
+				chunksEmitters.resize(index+1);
 				chunksNeighbours.resize(index+1);
 			}
 			used.push_back(index);
