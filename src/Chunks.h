@@ -62,11 +62,15 @@ namespace chunk {
 	public:
 		Chunk_() = default;
 		
-		Chunk_(Chunks &chunks, int const chunkIndex) : chunks_{ &chunks }, chunk_index{ chunkIndex } {}
+		Chunk_(Chunks &chunks, int const chunkIndex) : chunks_{ &chunks }, chunk_index{ chunkIndex } {}	
+		
+		bool operator==(Chunk_<Chunks> const other) const {
+			return chunks_ == other.chunks_ && chunk_index == other.chunk_index;
+		}
 		
 		bool operator!=(Chunk_<Chunks> const other) const {
-			return chunks_ != other.chunks_ || chunk_index != other.chunk_index;
-		}
+			return !(*this == other);
+		}	
 			
 		auto &chunks() { return *chunks_; }	
 		auto const &chunks() const { return *chunks_; }
@@ -78,11 +82,13 @@ namespace chunk {
 			gs(position, chunksPos)
 			gs(aabb, chunksAABB)
 			gs(status, chunksStatus)
-			gs(modified, modified) //is this safe? (gpuPresent returns rvalue reference)
+			gs(modified, modified)
 			gs(data, chunksData)
 			gs(neighbours, chunksNeighbours)
 			gs(ao, chunksAO)
 			gs(lighting, chunksLighting)
+			//gs(skyLighting, chunksSkyLighting)
+			//gs(blockLighting, chunksBlockLighting)
 		#undef gs
 	};
 	
@@ -348,13 +354,7 @@ namespace chunk {
 			}
 			return result; 
 		}
-		static constexpr uint8_t lightForDirIndex(uint8_t const light, uint8_t const index) {
-			return index == 2 /*(0, -1, 0)*/  ? light : uint8_t(misc::max(int(light) - 1, 0));
-		}
-			
-		static constexpr uint8_t lightForDir(uint8_t const light, vec3i const dir) {
-			return lightForDirIndex(light, dirAsIndex(dir));
-		}
+
 	private:
 		std::array<uint8_t, size> lighting;
 	public:
@@ -398,6 +398,17 @@ namespace chunk {
 			assert(checkBlockCoordInChunkValid(coord));
 			return blocks[blockIndex(coord)];
 		}
+		
+		std::tuple<uint16_t, bool> cubeAt(vec3i const cubeCoord) const {
+			auto const blockInChunkCoord{ cubeCoord / chunk::cubesInBlockDim };
+			auto const cubeInBlockCoord { cubeCoord % chunk::cubesInBlockDim };
+			
+			auto const block{ (*this)[blockInChunkCoord] };
+			auto const blockId{ block.id() };
+			auto const isCube{ block.cube(cubeInBlockCoord) };
+			
+			return std::tuple<uint16_t, bool>{ blockId, isCube };
+		}
 	};
 	
 	
@@ -421,6 +432,8 @@ namespace chunk {
 		std::vector<ChunkData> chunksData{};
 		std::vector<ChunkAO> chunksAO;
 		std::vector<ChunkLighting> chunksLighting;
+		//std::vector<ChunkLighting> chunksSkyLighting;
+		//std::vector<ChunkLighting> chunksBlockLighting;
 		std::vector<Neighbours> chunksNeighbours{};
 		std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
 		
@@ -443,6 +456,8 @@ namespace chunk {
 				chunksData.resize(index+1);
 				chunksAO.resize(index+1);
 				chunksLighting.resize(index+1);
+				//chunksSkyLighting.resize(index+1);
+				//chunksBlockLighting.resize(index+1);
 				chunksNeighbours.resize(index+1);
 			}
 			used.push_back(index);
