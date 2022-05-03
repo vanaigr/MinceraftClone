@@ -86,9 +86,8 @@ namespace chunk {
 			gs(data, chunksData)
 			gs(neighbours, chunksNeighbours)
 			gs(ao, chunksAO)
-			gs(lighting, chunksLighting)
-			//gs(skyLighting, chunksSkyLighting)
-			//gs(blockLighting, chunksBlockLighting)
+			gs(skyLighting, chunksSkyLighting)
+			gs(blockLighting, chunksBlockLighting)
 			gs(emitters, chunksEmitters)
 		#undef gs
 	};
@@ -386,16 +385,21 @@ namespace chunk {
 	public:
 		ChunkBlocksList() = default;
 		
+		int size() const { return curSize; }
 		bool inRange(int const index) const { return index >= 0 && index < size(); }
-			
+		
 		value_type       &operator[](int const index)       { assert(inRange(index)); return list[index]; }
-		value_type const &operator[](int const index) const { assert(inRange(index)); return list[index]; }		
+		value_type const &operator[](int const index) const { assert(inRange(index)); return list[index]; }	
 		
 		vec3i operator()(int const index) const { assert(inRange(index)); return indexBlock(list[index]); }
 		
-		int size() const {
-			return curSize;
-		}
+		value_type *begin() { return &list[0];      } 
+		value_type *end  () { return &list[size()]; } 		
+		
+		value_type const *cbegin() const { return &(*this)[0]; } 
+		value_type const *cend  () const { return &(*this)[size()]; } 
+		
+		
 		
 		void add(vec3i const blockCoord) {
 			assert(curSize != capacity);
@@ -464,9 +468,8 @@ namespace chunk {
 		std::vector<bool> modified{};
 		std::vector<ChunkData> chunksData{};
 		std::vector<ChunkAO> chunksAO{};
-		std::vector<ChunkLighting> chunksLighting{};
-		//std::vector<ChunkLighting> chunksSkyLighting;
-		//std::vector<ChunkLighting> chunksBlockLighting;
+		std::vector<ChunkLighting> chunksSkyLighting;
+		std::vector<ChunkLighting> chunksBlockLighting;
 		std::vector<ChunkBlocksList> chunksEmitters{};
 		std::vector<Neighbours> chunksNeighbours{};
 		std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
@@ -491,9 +494,8 @@ namespace chunk {
 				modified.resize(index+1);
 				chunksData.resize(index+1);
 				chunksAO.resize(index+1);
-				chunksLighting.resize(index+1);
-				//chunksSkyLighting.resize(index+1);
-				//chunksBlockLighting.resize(index+1);
+				chunksSkyLighting.resize(index+1);
+				chunksBlockLighting.resize(index+1);
 				chunksEmitters.resize(index+1);
 				chunksNeighbours.resize(index+1);
 			}

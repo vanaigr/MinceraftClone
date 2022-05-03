@@ -285,9 +285,13 @@ float lightForChunkVertexDir(const int chunkIndex, const ivec3 vertex, const ive
 }
 
 
-layout(binding = 7) restrict readonly buffer ChunksLighting {
+layout(binding = 7) restrict readonly buffer ChunksSkyLighting {
     uint data[];
-} lighting;
+} skyLighting;
+
+layout(binding = 8) restrict readonly buffer ChunksBlockLighting {
+    uint data[];
+} blockLighting;
 
 float lightingAtCube(int chunkIndex, ivec3 cubeCoord) {
 	const ivec3 outDir = testBounds(shr3i(cubeCoord, 1));
@@ -306,7 +310,12 @@ float lightingAtCube(int chunkIndex, ivec3 cubeCoord) {
 	const int el = index / 4;
 	const int sh = (index % 4) * 8;
 	
-	const float light = float((lighting.data[el] >> sh) & 255) / 31.0;
+	const uint lightingInt = max(
+		((skyLighting.data[el] >> sh) & 255), 
+		((blockLighting.data[el] >> sh) & 255)
+	);
+	
+	const float light = float(lightingInt) / 31.0;
 	return 0.02 + pow(light, 2.2) * 0.98;
 }
 
