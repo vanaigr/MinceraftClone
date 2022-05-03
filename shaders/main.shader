@@ -316,7 +316,7 @@ float lightingAtCube(int chunkIndex, ivec3 cubeCoord) {
 }
 
 //chunk::ChunkSet<15>
-layout(binding = 8) restrict readonly buffer ChunksEmitters {
+layout(binding = 9) restrict readonly buffer ChunksEmitters {
     uint data[];
 } emitters;
 

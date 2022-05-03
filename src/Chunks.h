@@ -86,7 +86,7 @@ namespace chunk {
 			gs(neighbours, chunksNeighbours)
 			gs(ao, chunksAO)
 			gs(lighting, chunksLighting)
-			gs(emitters, chunkEmittersIndices)
+			gs(emittersGPU, chunkEmittersIndices)
 		#undef gs
 	};
 	

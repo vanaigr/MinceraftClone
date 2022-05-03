@@ -301,7 +301,7 @@ static GLuint mainProgram = 0;
   static GLuint time_u;
   static GLuint mouseX_u, mouseY_u;
   static GLuint projection_u, toLocal_matrix_u;
-  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo, chunksNeighbours_ssbo, chunksAO_ssbo, chunksLighting_ssbo, chunksEmitters_ssbo;
+  static GLuint playerChunk_u, playerInChunk_u, chunksPostions_ssbo, chunksBounds_ssbo, chunksNeighbours_ssbo, chunksAO_ssbo, chunksLighting_ssbo, chunksEmittersGPU_ssbo;
 
 static GLuint mapChunks_p;
 
@@ -373,9 +373,9 @@ void resizeBuffer() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
 	static_assert(sizeof(chunk::Emitters) == sizeof(uint32_t) * 8);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksEmitters_ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksEmittersGPU_ssbo);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::Emitters), NULL, GL_DYNAMIC_DRAW);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, chunksEmitters_ssbo);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, chunksEmittersGPU_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
@@ -555,8 +555,8 @@ static void reloadShaders() {
 		glGenBuffers(1, &chunksAO_ssbo);		
 		glDeleteBuffers(1, &chunksLighting_ssbo);
 		glGenBuffers(1, &chunksLighting_ssbo);		
-		glDeleteBuffers(1, &chunksEmitters_ssbo);
-		glGenBuffers(1, &chunksEmitters_ssbo);
+		glDeleteBuffers(1, &chunksEmittersGPU_ssbo);
+		glGenBuffers(1, &chunksEmittersGPU_ssbo);
 
 		resizeBuffer();
 	}
@@ -1739,7 +1739,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			uint32_t const aabbData{ chunk.aabb().getData() };
 			auto const &neighbours{ chunk.neighbours() };
 			auto const &ao{ chunk.ao() };
-			auto const &emitters{ chunk.emitters() };
+			auto const &emittersGPU{ chunk.emittersGPU() };
 			//std::cout << "b:" << chunkCoord << '\n';
 			static_assert(sizeof chunkData == 16384);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkIndex_u); 
@@ -1771,8 +1771,8 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 
 			static_assert(sizeof(chunk::Emitters) == sizeof(uint32_t)*8);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksEmitters_ssbo);
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::Emitters), sizeof(chunk::Emitters), &emitters);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksEmittersGPU_ssbo);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::Emitters), sizeof(chunk::Emitters), &emittersGPU);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 		}					
 
@@ -2412,7 +2412,7 @@ static void update() {
 						updateNeighbouringCubeLightingAdd(chunk, curCubeCoord, 0, true);
 					}
 					
-					chunk.emitters().remove(result.blockIndex);
+					chunk.emittersGPU().remove(result.blockIndex);
 				}
 				else {
 					auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex) };
@@ -2423,7 +2423,7 @@ static void update() {
 					}
 					updateNeighbouringCubeLightingAdd(chunk, curCubeCoord, 0, true);
 					
-					if(block.empty()) chunk.emitters().remove(result.blockIndex);
+					if(block.empty()) chunk.emittersGPU().remove(result.blockIndex);
 				}
 				
 				
@@ -2530,7 +2530,7 @@ static void update() {
 								updateNeighbouringCubeLightingAdd(chunk, curCubeCoord, 31u, true);
 							}
 							
-							chunk.emitters().tryAdd(blockIndex);
+							chunk.emittersGPU().tryAdd(blockIndex);
 						}
 					}
 					break;
