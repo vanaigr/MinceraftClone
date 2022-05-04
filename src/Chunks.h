@@ -6,6 +6,7 @@
 #include<array>
 #include<tuple>
 #include<utility>
+#include<algorithm>
 
 #include"Vector.h"
 
@@ -29,6 +30,8 @@ namespace chunk {
 	static constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
 		return index < blocksInChunkCount;
 	}
+	
+	//used in main.shader
 	inline static constexpr int16_t blockIndex(vec3i const coord) {
 		assert(checkBlockCoordInChunkValid(coord));
 		return coord.x + coord.y*chunk::blocksInChunkDim + coord.z*chunk::blocksInChunkDim*chunk::blocksInChunkDim;
@@ -89,6 +92,7 @@ namespace chunk {
 			gs(skyLighting, chunksSkyLighting)
 			gs(blockLighting, chunksBlockLighting)
 			gs(emitters, chunksEmitters)
+			gs(neighbouringEmitters, chunksNeighbouringEmitters)
 		#undef gs
 	};
 	
@@ -263,11 +267,14 @@ namespace chunk {
 	struct ChunkStatus {
 	private:
 		uint8_t status : 2;
+		
 		uint8_t updateBlocks : 1;
+		uint8_t updateLightingAdd : 1;
+		uint8_t updateNeighbouringEmitters : 1;
+		
 		uint8_t blocksUpdated : 1;
 		uint8_t lightingUpdated : 1;
-		uint8_t updateLightingAdd : 1;
-		//uint8_t updateLightingSub : 1;
+		uint8_t neighbouringEmittersUpdated : 1;
 	public:
 		ChunkStatus() = default;
 		
@@ -280,24 +287,27 @@ namespace chunk {
 		void resetStatus() { status = 0; }
 		
 		
-		bool isInvalidated() const { return blocksUpdated || lightingUpdated; }
-		bool needsUpdate()   const { return updateBlocks || updateLightingAdd/* || updateLightingSub*/; }
+		bool isInvalidated() const { return blocksUpdated || lightingUpdated || neighbouringEmittersUpdated; }
+		bool needsUpdate()   const { return updateBlocks || updateLightingAdd || updateNeighbouringEmitters; }
 		
-		void setBlocksUpdated  (bool const val) { blocksUpdated     = val; } 
-		void setLightingUpdated(bool const val) { lightingUpdated   = val; }
+		bool isBlocksUpdated  () const { return blocksUpdated; }
+		void setBlocksUpdated  (bool const val) { blocksUpdated = val; } 
 		
-		bool isBlocksUpdated  () const { return blocksUpdated  ; }
 		bool isLightingUpdated() const { return lightingUpdated; }
+		void setLightingUpdated(bool const val) { lightingUpdated = val; }		
 		
+		bool isNeighbouringEmittersUpdated() const { return neighbouringEmittersUpdated; }
+		void setNeighbouringEmittersUpdated(bool const val) { neighbouringEmittersUpdated = val; }
+	
 		
 		void setUpdateBlocks(bool const val) { updateBlocks = val; } 
 		bool isUpdateBlocks() const { return updateBlocks; }
 		
-		void setUpdateLightingAdd(bool const val) { updateLightingAdd = val; }
-		//void setUpdateLightingSub(bool const val) { updateLightingSub = val; }
-
 		bool isUpdateLightingAdd() const { return updateLightingAdd; }
-		//bool isUpdateLightingSub() const { return updateLightingSub; }
+		void setUpdateLightingAdd(bool const val) { updateLightingAdd = val; }
+		
+		bool isUpdateNeighbouringEmitters() const { return updateNeighbouringEmitters; }
+		void setUpdateNeighbouringEmitters(bool const it) { updateNeighbouringEmitters = it; }
 		
 	};
 	
@@ -448,6 +458,97 @@ namespace chunk {
 		}
 	};
 	
+	struct Chunk3x3BlocksList {
+		static int constexpr sidelength = 3 * chunk::blocksInChunkDim;
+		static_assert((sidelength-1)*(sidelength-1)*(sidelength-1) >= (1<<16), "sadly, we can't store block coords in 27 edjecent chunks in an unsigned short");
+		static_assert((sidelength-1)*(sidelength-1)*(sidelength-1) <  (1<<17), "but we can store the coordinate in 17 bits");
+		
+		static int constexpr capacity = 30;
+		
+		bool checkCoordValid(vec3i const coord) {
+			return coord.in(-chunk::blocksInChunkDim, chunk::blocksInChunkDim + chunk::blocksInChunkDim-1).all();
+		}
+		
+		static int32_t coordToIndex(vec3i const coord) {
+			return (coord.x + chunk::blocksInChunkDim)
+				 + (coord.y + chunk::blocksInChunkDim) * sidelength
+				 + (coord.z + chunk::blocksInChunkDim) * sidelength * sidelength;
+		}
+		static vec3i indexToCoord(int32_t const index) {
+			return vec3i{
+				index % sidelength,
+				(index / sidelength) % sidelength,
+				index / sidelength / sidelength
+			} - chunk::blocksInChunkDim;
+		}
+	private:
+
+		
+		uint32_t bits; /*is list empty, spare bit, 30 bits for the last bit of all the coords*/
+		std::array<uint16_t, capacity> coords16;
+	public:
+		bool isEmpty() const { return bool((bits & 1) == 0); }
+		
+		int32_t operator[](int const position) const { return int32_t(coords16[position]) | (int32_t((bits >> (position+2)) & 1) << 16); }
+		vec3i operator()(int const position) const { return indexToCoord((*this)[position]); }
+		
+		void clear() { bits = 0; }
+		void fillRepeated(std::array<vec3i, 30> const &coords, int const count) {
+			assert(count >= 0);
+			if(count == 0) { clear(); return; }
+			
+			uint32_t coordsBits{ 1 };
+			for(int i{}; i < capacity; i++) {
+				auto const blockIndex{ coordToIndex(coords[i % count]) };
+				coords16[i] = uint16_t(blockIndex);
+				coordsBits = coordsBits | (((blockIndex >> 16)&1) << i);
+			}
+			
+			bits = 1 | (coordsBits << 2);
+		}
+	};
+	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);
+	
+	/*template<uint16_t maxSize>
+	struct BlocksSet {
+	private:
+		std::array<uint16_t, 1+size_t(maxSize)> data;
+	public:
+		BlocksSet() = default;
+		
+		uint16_t &size() { return data[0]; }
+		uint16_t const &size() const { return data[0]; }
+		
+		uint16_t *begin() { return &data[1]; }
+		uint16_t *end() { return begin() + size(); }
+				
+		uint16_t const *cbegin() const { return &data[1]; }
+		uint16_t const *cend() const { return begin() + size(); }
+		
+		bool checkIndexValid(int const index) const { return index < size() && index >= 0; }
+		
+		uint16_t &operator[](int const index) { assert(checkIndexValid(index)); return data[1+index]; }
+		uint16_t const &operator[](int const index) const { assert(checkIndexValid(index)); return data[1+index]; }
+		
+		uint16_t *tryAdd(uint16_t const blockIndex) {
+			auto &curSize{ size() };
+			if(curSize < maxSize && std::find(begin(), end(), blockIndex) == end()) {
+				return &( (*this)[curSize++] = blockIndex );
+			}
+			else return NULL;
+		}
+		
+		void remove(uint16_t const blockIndex) {
+			uint16_t *const cur{ std::find(begin(), end(), blockIndex) };
+			if(cur != end()) {
+				for(uint16_t *next{cur+1}; next < end(); next++) *(next-1) = *next;
+				size()--;
+			}
+		}
+	private:
+	};
+	
+	using Emitters = BlocksSet<15>;*/
 	
 	struct Chunks {	
 	private:
@@ -472,6 +573,7 @@ namespace chunk {
 		std::vector<ChunkLighting> chunksBlockLighting;
 		std::vector<ChunkBlocksList> chunksEmitters{};
 		std::vector<Neighbours> chunksNeighbours{};
+		std::vector<Chunk3x3BlocksList> chunksNeighbouringEmitters;
 		std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
 	
 		std::vector<int>  const &usedChunks() const { return used; }
@@ -498,6 +600,7 @@ namespace chunk {
 				chunksBlockLighting.resize(index+1);
 				chunksEmitters.resize(index+1);
 				chunksNeighbours.resize(index+1);
+				chunksNeighbouringEmitters.resize(index+1);
 			}
 			used.push_back(index);
 			
@@ -506,7 +609,6 @@ namespace chunk {
 	
 		inline void recycle(int const index) {
 			auto chunkIndex = used[index];
-			chunksNeighbours[chunkIndex] = Neighbours();
 			used.erase(used.begin()+index);
 			vacant.push_back(chunkIndex);
 		}
@@ -582,13 +684,17 @@ namespace chunk {
 		
 		OptionalChunkIndex moveToNeighbour(vec3i const neighbour) {
 			if(!valid) return {};
-			return offset(neighbour - chunk.position());
+			if(Neighbours::checkDirValid(neighbour)) return offset(neighbour);
+			if(diagonalNeighbourDirValid(neighbour)) return offsetDiagonal(neighbour);
+			if(neighbour == 0) return optChunk();
+			*this = Move_to_neighbour_Chunk(chunk.chunks(), chunk.position() + neighbour);
+			return optChunk();
 		}
-			
+		
+
 		OptionalChunkIndex offset(vec3i const dir) {
 			if(dir == 0) return { chunk.chunkIndex() };
 			if(!valid) return {};
-			assert(Neighbours::checkDirValid(dir));
 			
 			auto const optChunkIndex{ chunk.neighbours()[dir] };
 			valid = optChunkIndex.is();

@@ -41,6 +41,8 @@ const int cubesInChunkDimAsPow2 = cubesInBlockDimAsPow2 + blocksInChunkDimAsPow2
 const int cubesInChunkDim = 1 << cubesInChunkDimAsPow2;
 const int cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
 
+
+
 layout(binding = 1) restrict readonly buffer ChunksBlocks {
      uint data[][16*16*16];
 } chunksBlocks;
@@ -64,6 +66,9 @@ uint chunkBounds(const int chunkIndex) {
 }
 ivec3 indexBlock(const uint data) { //copied from Chunks.h
 	return ivec3( data % blocksInChunkDim, (data / blocksInChunkDim) % blocksInChunkDim, (data / blocksInChunkDim / blocksInChunkDim) );
+}
+uint blockIndex(const ivec3 coord) {
+	return uint(coord.x + coord.y*blocksInChunkDim + coord.z*blocksInChunkDim*blocksInChunkDim);
 }
 ivec3 start(const uint data) { return indexBlock(data&65535u); } //copied from Chunks.h
 ivec3 end(const uint data) { return indexBlock((data>>16)&65535u); } //copied from Chunks.h
@@ -319,6 +324,55 @@ float lightingAtCube(int chunkIndex, ivec3 cubeCoord) {
 	return 0.02 + pow(light, 2.2) * 0.98;
 }
 
+//chunk::Chunk3x3BlocksList
+layout(binding = 9) restrict readonly buffer ChunksNeighbourngEmitters {
+    uint data[];
+} emitters;
+  const int neSidelength = 3 * blocksInChunkDim;
+  const int neCapacity = 30;
+  
+  int neCoordToIndex(const ivec3 coord) {
+  	return (coord.x + blocksInChunkDim)
+  		 + (coord.y + blocksInChunkDim) * neSidelength
+  		 + (coord.z + blocksInChunkDim) * neSidelength * neSidelength;
+  }
+  ivec3 neIndexToCoord(const int index) {
+  	return ivec3(
+  		index % neSidelength,
+  		(index / neSidelength) % neSidelength,
+  		index / neSidelength / neSidelength
+  	) - blocksInChunkDim;
+  }
+
+  struct NE { ivec3 coord; bool is; };
+  NE neFromChunk(const int chunkIndex, const int neIndex) { 
+	const int chunkOffset = chunkIndex * 16;
+	const int neOffset = neIndex / 2;
+	const int neShift = (neIndex % 2) * 16;
+	
+	const uint first = emitters.data[chunkOffset];
+	const uint ne16 = (emitters.data[chunkOffset + 1 + neOffset] >> neShift) & 0xffff;
+	
+	const uint ne_index = ne16 | (((first >> (2 + neIndex))&1)<<16);
+	const ivec3 ne_coord = neIndexToCoord(int(ne_index));
+	
+	return NE(ne_coord, bool(first & 1));
+  }
+
+/*uint emittersDataInChunk(const int chunkIndex, const int dataIndex) {
+	const int index_ = chunkIndex * 16 + dataIndex;
+	const int index = index_ / 2;
+	const int shift = (index_ % 2) * 16;
+	return (emitters.data[index] >> shift) & 0xffff;
+}
+
+uint emittersCountInChunk(const int chunkIndex) {
+	return emittersDataInChunk(chunkIndex, 0);
+}
+
+uint emitterIndexInChunk(const int chunkIndex, const int emitterIndex) {
+	return emittersDataInChunk(chunkIndex, emitterIndex+1);
+}*/
 
 vec3 rgb2hsv(const vec3 c) {
     vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -836,15 +890,30 @@ Frame packResult(const Result it, const int parent) {
 	);
 }
 
+int mapInteger(int value) {//https://stackoverflow.com/a/24771093/18704284
+    value *= 1664525;
+    value += 101390223;
+    value ^= value >> 11;
+    value ^= value << 16;
+    value ^= value >> 23;
+    value *= 110351245;
+    value += 12345;
+
+    return value;
+}
+
 Result combineSteps(const Result current, const Result inner) {
 	const bool curShadow = current.type == 1;
-	const bool innerShadow = inner.type == 1;
+	const bool innerShadow = inner.type == 1 || inner.type == 2;
 	
 	const Surface resultingSurface = innerShadow ? inner.surface : current.surface;
 	
 	if(innerShadow && !curShadow) {
-		const vec3 shadowTint = surfaceType(resultingSurface) == 0 ? inner.color : vec3(0.4);
-		return Result(current.color * shadowTint, current.depth + inner.depth, current.surface, current.type);
+		const bool lighting = inner.type == 2;
+		const uint innerSurface = surfaceType(inner.surface);
+		const bool emitter = innerSurface == 13 || innerSurface == 14;
+		const vec3 shadowTint = lighting ? vec3(1) : (surfaceType(resultingSurface) == 0 ? inner.color : vec3(0.4));
+		return Result(current.color * shadowTint + (lighting && emitter ? (inner.color / (0.01 + inner.depth*inner.depth)) : vec3(0)), current.depth + inner.depth, current.surface, current.type);
 	}
 	
 	const uint type = surfaceType(current.surface);
@@ -857,7 +926,7 @@ Result combineSteps(const Result current, const Result inner) {
 vec3 trace(const Ray startRay, const int startChunkIndex) {
 	int curFrame = -1;
 	int newFrame = curFrame+1;
-	
+
 	const ivec3 startChunkPosition = chunkPosition(startChunkIndex);
 	
 	putFrame(newFrame++, packParams(Params(startRay, startChunkIndex, 0, 0u), curFrame));
@@ -874,7 +943,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 		const int startBias = p.bias;
 		const int parent = curentFrame.parent;
 		
-		const bool shadow = type == 1;
+		const bool shadow = type == 1 || type == 2;
 		
 		const vec3 startP = playerRelativePosition - (vec3(0.3, 1.95/2, 0.3));
 		const vec3 endP   = playerRelativePosition + (vec3(0.3, 1.95/2, 0.3));
@@ -987,8 +1056,9 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				continue;
 			}			
 			else {
+				const bool emitter = blockId == 13 || blockId == 14;
 				const ivec3 relativeToChunk = chunkPosition(intersectionChunkIndex) - startChunkPosition;
-				const vec3 color = sampleAtlas(atlasOffset, uv) * light * mix(0.4, 1.0, ambient);
+				const vec3 color = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.4, 1.0, ambient));
 				
 				putFrame(curFrame, packResult(Result( color, t, surfaceBlock(blockId), type ), parent));
 				
@@ -997,27 +1067,51 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 					const int shadowOffsetsCount = 4;
 					const float shadowOffsets[] = { -1, 0, 1, 0 };
 					
-					const float shadowSubdiv = 32;
+					const int shadowSubdiv = 32;
 					const float shadowSmoothness = 32;
+					const int shadowsInChunkDim = blocksInChunkDim * shadowSubdiv;		
 					
-					const vec3 offset_ = vec3(
-						shadowOffsets[ int(mod(floor(coord.x * shadowSubdiv), shadowOffsetsCount)) ],
-						shadowOffsets[ int(mod(floor(coord.y * shadowSubdiv), shadowOffsetsCount)) ],
-						shadowOffsets[ int(mod(floor(coord.z * shadowSubdiv), shadowOffsetsCount)) ]
-					);
-					const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
+					if(emitter) continue;
 					
-					const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
-					const vec3 v = normalize(vec3(-1, 4, 2) + offset);
-					const vec3 temp = cross(q.xyz, v) + q.w * v;
-					const vec3 rotated = v + 2.0*cross(q.xyz, temp);
-					
-					const vec3 newDir = normalize(rotated);
-					const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
 					const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*0.5 )/shadowSubdiv;
 					
-					if(newFrame < maxFrames) 
-						putFrame(newFrame++, packParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 1u ), curFrame));
+					const ivec3 shadowInChunkCoord = ivec3(floor(mod(coord * shadowSubdiv, vec3(shadowsInChunkDim))));
+					const int shadowInChunkIndex = 
+						  shadowInChunkCoord.x
+						+ shadowInChunkCoord.y * shadowsInChunkDim
+						+ shadowInChunkCoord.z * shadowsInChunkDim * shadowsInChunkDim; //should fit in 31 bit
+					const int rShadowInChunkIndex = mapInteger(shadowInChunkIndex);
+					const int dirIndex = int(uint(rShadowInChunkIndex) % 42);
+					const bool emitters = dirIndex < 30;
+					
+					if(newFrame < maxFrames) { //shadow
+						const vec3 offset_ = vec3(
+							shadowOffsets[ int(mod(floor(coord.x * shadowSubdiv), shadowOffsetsCount)) ],
+							shadowOffsets[ int(mod(floor(coord.y * shadowSubdiv), shadowOffsetsCount)) ],
+							shadowOffsets[ int(mod(floor(coord.z * shadowSubdiv), shadowOffsetsCount)) ]
+						);
+						const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
+						const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
+						const vec3 v = normalize(vec3(-1, 4, 2) + offset);
+						const vec3 temp = cross(q.xyz, v) + q.w * v;
+						const vec3 rotated = v + 2.0*cross(q.xyz, temp);
+						
+						const vec3 newDir = normalize(rotated);
+						const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
+						
+						putFrame(newFrame++, packParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 1u), curFrame));
+					}
+					if(emitters && newFrame < maxFrames) {
+						const NE ne = neFromChunk(intersectionChunkIndex, dirIndex);
+						
+						if(ne.is) {
+							const vec3 relativeCoord = position - relativeToChunk * blocksInChunkDim;
+							const vec3 newDir = normalize(ne.coord+0.5 - relativeCoord);
+							const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
+							
+							putFrame(newFrame++, packParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 2u), curFrame));
+						}
+					}
 					continue;
 				}
 			}
@@ -1054,6 +1148,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 		const Result outerResult = unpackResult(outer);
 		const int outertParent = outer.parent;
 		
+		//if(currentResult.type == 2) return vec3(1,0,1);
 		putFrame(currentParent, packResult(combineSteps(outerResult, currentResult), outertParent));
 	}
 	
@@ -1072,6 +1167,10 @@ void main() {
 	const Ray ray = Ray(-relativeChunkPos, rayDir);
 
 	const vec3 col = trace(ray, startChunkIndex);
+	
+	const float bw = 0.299 * col.r + 0.587 * col.g + 0.114 * col.b;
+	const vec3 c = rgb2hsv(col);
+	const vec3 c2 = hsv2rgb(vec3(c.x, 1 - exp(-2 / (bw+2)), c.z));
 	
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) color = vec4(vec3(0.98), 1);
 	else color = vec4(col, 1);
