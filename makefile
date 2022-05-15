@@ -1,9 +1,9 @@
 INCLUDES=-I .\dependencies\include
 SOURCE_DIR=src
 OBJECT_DIR=obj
-CPP_EXCLUDES=  
+CPP_EXCLUDES=
 
-WS= -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unneeded-internal-declaration -Wno-unused-function -Wno-unused-label
+WS= -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unneeded-internal-declaration -Wno-unused-function
 CFLAGS= -O3 -std=c++17 -pedantic -c $(WS)
 PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU -D _CRT_SECURE_NO_WARNINGS
 
@@ -34,16 +34,12 @@ GCD=$(shell git log --format=%ad -n1 --date=iso)
 
 PPFLAGS+= -DCOMMIT_HASH="\"$(GCH)\"" -DCOMMIT_NAME="\"$(GCM)\"" -DCOMMIT_BRANCH="\"$(GCB)\"" -DCOMMIT_DATE="\"$(GCD)\""
 
-.PHONY: test
-test:
-	@echo $(PPFLAGS)
-
 build-run: $(EXECUTABLE)
 	$(EXECUTABLE)
 	
 build: $(EXECUTABLE)
 
-$(EXECUTABLE): $(SOURCES) $(OBJECT_FILES)
+$(EXECUTABLE): $(OBJECT_FILES)
 	@echo building $@
 	@ $(CC) $(LIBS_PATH) $(LIBS) $(WIN_API_LIBS) $(OBJECT_FILES) -Xlinker /NODEFAULTLIB:libcmt -o "$@"
 
@@ -57,6 +53,3 @@ clear-obj:
 	
 clear: clear-obj
 	@if exist "$(OBJECT_DIR)" rmdir $(EXECUTABLE)
-	
-
-#run: build

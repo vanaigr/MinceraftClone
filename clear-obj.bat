@@ -1,2 +1,2 @@
 @echo off
-make -f config.makefile clear-obj
+make clear-obj

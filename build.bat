@@ -1,3 +1,3 @@
 @echo off
-make -f config.makefile build
+make build
 pause
