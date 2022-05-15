@@ -1,5 +1,8 @@
 #pragma once
 
+#include"Units.h"
+#include"Vector.h"
+
 #include<vector>
 #include<unordered_map>
 #include<stdint.h>
@@ -8,53 +11,39 @@
 #include<utility>
 #include<algorithm>
 
-#include"Vector.h"
 
 namespace chunk {
-	//all the constans are copied into main.shader
-	static constexpr int const blocksInChunkDimAsPow2 = 4;
-	static constexpr int const blocksInChunkDim = 1 << blocksInChunkDimAsPow2;
-	static constexpr int const blocksInChunkCount = blocksInChunkDim*blocksInChunkDim*blocksInChunkDim;
-	
-	static constexpr int const cubesInBlockDimAsPow2 = 1;
-	static constexpr int const cubesInBlockDim = 1 << cubesInBlockDimAsPow2;
-	static constexpr int const cubesInBlockCount = cubesInBlockDim*cubesInBlockDim*cubesInBlockDim;
-	
-	static constexpr int const cubesInChunkDimAsPow2 = cubesInBlockDimAsPow2 + blocksInChunkDimAsPow2;
-	static constexpr int const cubesInChunkDim = 1 << cubesInChunkDimAsPow2;
-	static constexpr int const cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
-	
 	static constexpr bool checkBlockCoordInChunkValid(vec3i const coord) {
-		return coord.inMMX(vec3i{0}, vec3i{blocksInChunkDim}).all();
+		return coord.inMMX(vec3i{0}, vec3i{units::blocksInChunkDim}).all();
 	}
 	static constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
-		return index < blocksInChunkCount;
+		return index < units::blocksInChunkCount;
 	}
 	
 	//used in main.shader
 	inline static constexpr int16_t blockIndex(vec3i const coord) {
 		assert(checkBlockCoordInChunkValid(coord));
-		return coord.x + coord.y*chunk::blocksInChunkDim + coord.z*chunk::blocksInChunkDim*chunk::blocksInChunkDim;
+		return coord.x + coord.y*units::blocksInChunkDim + coord.z*units::blocksInChunkDim*units::blocksInChunkDim;
 	}
 	inline static constexpr vec3i indexBlock(int16_t index) {
 		assert(checkBlockIndexInChunkValid(index));
-		return vec3i{ index % chunk::blocksInChunkDim, (index / chunk::blocksInChunkDim) % chunk::blocksInChunkDim, (index / chunk::blocksInChunkDim / chunk::blocksInChunkDim) };
+		return vec3i{ index % units::blocksInChunkDim, (index / units::blocksInChunkDim) % units::blocksInChunkDim, (index / units::blocksInChunkDim / units::blocksInChunkDim) };
 	}
 	
 	static constexpr bool checkCubeCoordInChunkValid(vec3i const coord) {
-		return coord.inMMX(vec3i{0}, vec3i{cubesInChunkDim}).all();
+		return coord.inMMX(vec3i{0}, vec3i{units::cubesInChunkDim}).all();
 	}
 	static constexpr bool checkCubeIndexInChunkValid(uint32_t const index) {
-		return index < cubesInChunkCount;
+		return index < units::cubesInChunkCount;
 	}
 	
 	static vec3i cubeCoordInChunk_(uint32_t const index) { ///used in main.shader
 		assert(checkCubeIndexInChunkValid(index));
-		return vec3i( index % chunk::cubesInChunkDim, (index / chunk::cubesInChunkDim) % chunk::cubesInChunkDim, (index / chunk::cubesInChunkDim / chunk::cubesInChunkDim) );
+		return vec3i( index % units::cubesInChunkDim, (index / units::cubesInChunkDim) % units::cubesInChunkDim, (index / units::cubesInChunkDim / units::cubesInChunkDim) );
 	}
 	static uint32_t cubeIndexInChunk(vec3i const coord) { ///used in main.shader
 		assert(checkCubeCoordInChunkValid(coord));
-		return coord.x + coord.y*chunk::cubesInChunkDim + coord.z*chunk::cubesInChunkDim*chunk::cubesInChunkDim;
+		return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim;
 	}
 	
 	template<typename Chunks>
@@ -101,27 +90,27 @@ namespace chunk {
 
 	
 	struct Block { //used in main.shader
-		static_assert(chunk::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
+		static_assert(units::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
 		
 		static constexpr bool checkCubeCoordValid(vec3i const coord) {
-			return coord.inMMX(vec3i{0}, vec3i{chunk::cubesInBlockDim}).all();
+			return coord.inMMX(vec3i{0}, vec3i{units::cubesInBlockDim}).all();
 		}
 		
 		static constexpr bool checkCubeIndexValid(uint8_t const index) {
-			return index < chunk::cubesInBlockCount;
+			return index < units::cubesInBlockCount;
 		}
 		
 		static constexpr uint8_t cubePosIndex(vec3i const pos) {
 			assert(checkCubeCoordValid(pos));
-			return pos.x + (pos.y << chunk::cubesInBlockDimAsPow2) + (pos.z << (chunk::cubesInBlockDimAsPow2*2));
+			return pos.x + (pos.y << units::cubesInBlockDimAsPow2) + (pos.z << (units::cubesInBlockDimAsPow2*2));
 		}
 		
 		static constexpr vec3i cubeIndexPos(uint8_t const index) {
 			assert(checkCubeIndexValid(index));
 			return vec3i(
-				 index                                      % chunk::cubesInBlockDim, 
-				(index >>  chunk::cubesInBlockDimAsPow2   ) % chunk::cubesInBlockDim, 
-				(index >> (chunk::cubesInBlockDimAsPow2*2)) % chunk::cubesInBlockDim
+				 index                                      % units::cubesInBlockDim, 
+				(index >>  units::cubesInBlockDimAsPow2   ) % units::cubesInBlockDim, 
+				(index >> (units::cubesInBlockDimAsPow2*2)) % units::cubesInBlockDim
 			);
 		}
 		
@@ -179,7 +168,7 @@ namespace chunk {
 	
 	
 	struct AABB { //used in main.shader
-		static constexpr int64_t cd = chunk::blocksInChunkDim-1;
+		static constexpr int64_t cd = units::blocksInChunkDim-1;
 		static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two block indices must fit into 32 bits" );
 	private:
 		uint32_t data;
@@ -313,7 +302,7 @@ namespace chunk {
 	
 	
 	struct ChunkAO {
-		static constexpr int size = chunk::cubesInChunkCount;
+		static constexpr int size = units::cubesInChunkCount;
 		
 		static vec3i dirsForIndex(const int index) { //used in main.shader
 			assert(index < 8); //at most 8 cubes share 1 vertex
@@ -338,7 +327,7 @@ namespace chunk {
 
 	
 	struct ChunkLighting {
-		static constexpr int size = chunk::cubesInChunkCount;
+		static constexpr int size = units::cubesInChunkCount;
 		
 		static constexpr int dirsCount{ 6 };
 		
@@ -385,9 +374,9 @@ namespace chunk {
 	
 	
 	struct ChunkBlocksList {
-		static constexpr int16_t capacity = chunk::blocksInChunkCount;
+		static constexpr int16_t capacity = units::blocksInChunkCount;
 		
-		using value_type = int16_t; static_assert(blocksInChunkCount < (1 << 15));
+		using value_type = int16_t; static_assert(units::blocksInChunkCount < (1 << 15));
 	private:
 		
 		std::array<value_type, capacity> list;
@@ -421,9 +410,8 @@ namespace chunk {
 		}
 	};
 	
-	//using ChunkData = std::array<Block, chunk::blocksInChunkCount>;
 	struct ChunkData {
-		static constexpr int size = chunk::blocksInChunkCount;
+		static constexpr int size = units::blocksInChunkCount;
 	private:
 		 std::array<Block, size> blocks;
 	 public:
@@ -447,8 +435,8 @@ namespace chunk {
 		}
 		
 		std::tuple<uint16_t, bool> cubeAt(vec3i const cubeCoord) const {
-			auto const blockInChunkCoord{ cubeCoord / chunk::cubesInBlockDim };
-			auto const cubeInBlockCoord { cubeCoord % chunk::cubesInBlockDim };
+			auto const blockInChunkCoord{ cubeCoord / units::cubesInBlockDim };
+			auto const cubeInBlockCoord { cubeCoord % units::cubesInBlockDim };
 			
 			auto const block{ (*this)[blockInChunkCoord] };
 			auto const blockId{ block.id() };
@@ -459,27 +447,27 @@ namespace chunk {
 	};
 	
 	struct Chunk3x3BlocksList {
-		static int constexpr sidelength = 3 * chunk::blocksInChunkDim;
+		static int constexpr sidelength = 3 * units::blocksInChunkDim;
 		static_assert((sidelength-1)*(sidelength-1)*(sidelength-1) >= (1<<16), "sadly, we can't store block coords in 27 edjecent chunks in an unsigned short");
 		static_assert((sidelength-1)*(sidelength-1)*(sidelength-1) <  (1<<17), "but we can store the coordinate in 17 bits");
 		
 		static int constexpr capacity = 30;
 		
 		bool checkCoordValid(vec3i const coord) {
-			return coord.in(-chunk::blocksInChunkDim, chunk::blocksInChunkDim + chunk::blocksInChunkDim-1).all();
+			return coord.in(-units::blocksInChunkDim, units::blocksInChunkDim + units::blocksInChunkDim-1).all();
 		}
 		
 		static int32_t coordToIndex(vec3i const coord) {
-			return (coord.x + chunk::blocksInChunkDim)
-				 + (coord.y + chunk::blocksInChunkDim) * sidelength
-				 + (coord.z + chunk::blocksInChunkDim) * sidelength * sidelength;
+			return (coord.x + units::blocksInChunkDim)
+				 + (coord.y + units::blocksInChunkDim) * sidelength
+				 + (coord.z + units::blocksInChunkDim) * sidelength * sidelength;
 		}
 		static vec3i indexToCoord(int32_t const index) {
 			return vec3i{
 				index % sidelength,
 				(index / sidelength) % sidelength,
 				index / sidelength / sidelength
-			} - chunk::blocksInChunkDim;
+			} - units::blocksInChunkDim;
 		}
 	private:
 

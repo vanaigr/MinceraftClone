@@ -6,9 +6,10 @@
 #include <GLFW/glfw3.h>
 
 #include"Vector.h"
-#include"Chunks.h"
-#include"ChunkCoord.h"
+#include"Chunk.h"
+#include"Position.h"
 #include"Viewport.h"
+#include"Lighting.h"
 
 #include"Font.h"
 #include"ShaderLoader.h"
@@ -58,8 +59,8 @@ static bool debug{ false };
 static double const height{ 1.95 };
 static double const width{ 0.6 };
 
-static int64_t const width_i{ ChunkCoord::posToFracRAway(width).x }; 
-static int64_t const height_i{ ChunkCoord::posToFracRAway(height).x };
+static int64_t const width_i{ Position::posToFracRAway(width).x }; 
+static int64_t const height_i{ Position::posToFracRAway(height).x };
 
 static double       deltaTime{ 16.0/1000.0 };
 static double const fixedDeltaTime{ 16.0/1000.0 };
@@ -73,14 +74,14 @@ static double const aspect{ windowSize_d.y / windowSize_d.x };
 static bool isOnGround{false};
 
 static vec3d playerForce{};
-static vec3l const playerCameraOffset{ 0, ChunkCoord::posToFrac(height*0.85).x, 0 };
-static ChunkCoord playerCoord{ vec3i{0,0,0}, ChunkCoord::Position{vec3d{0.01,12.001,0.01}} };
-static ChunkCoord playerCamPos{playerCoord + playerCameraOffset};
+static vec3l const playerCameraOffset{ 0, Position::posToFrac(height*0.85).x, 0 };
+static Position playerCoord{ vec3i{0,0,0}, Position::BlocksDouble{vec3d{0.01,12.001,0.01}} };
+static Position playerCamPos{playerCoord + playerCameraOffset};
 static Viewport playerViewport{ 
 	vec2d{ misc::pi / 2.0, 0 }
 };
 
-static ChunkCoord spectatorCoord{ playerCoord };
+static Position spectatorCoord{ playerCoord };
 
 static Camera playerCamera {
 	aspect,
@@ -111,12 +112,12 @@ static Viewport &viewport_current() {
 	return playerViewport;
 }
 
-static ChunkCoord &currentCoord() {
+static Position &currentCoord() {
 	if(isSpectator) return spectatorCoord;
 	return playerCoord;
 }
 
-static ChunkCoord currentCameraPos() {
+static Position currentCameraPos() {
 	if(isSpectator) return spectatorCoord;
 	return playerCamPos;
 }
@@ -1108,8 +1109,8 @@ public:
 double heightAt(vec2i const flatChunk, vec2i const block) {
 	static siv::PerlinNoise perlin{ (uint32_t)rand() };
 	auto const value = perlin.octave2D(
-		(flatChunk.x * 1.0 * chunk::blocksInChunkDim + block.x) / 20.0, 
-		(flatChunk.y * 1.0 * chunk::blocksInChunkDim + block.y) / 20.0, 
+		(flatChunk.x * 1.0 * units::blocksInChunkDim + block.x) / 20.0, 
+		(flatChunk.y * 1.0 * units::blocksInChunkDim + block.y) / 20.0, 
 		3
 	);
 						
@@ -1124,8 +1125,8 @@ vec3i getTreeBlock(vec2i const flatChunk) {
 	
 	vec2i const it( 
 		(vec2d(random(vec2i{flatChunk.x+1, flatChunk.y}), random(vec2i{flatChunk.x*3, flatChunk.y*5})) 
-		 * chunk::blocksInChunkDim)
-		.floor().clamp(0, chunk::blocksInChunkDim)
+		 * units::blocksInChunkDim)
+		.floor().clamp(0, units::blocksInChunkDim)
 	);
 	
 	auto const height{ heightAt(flatChunk,it) };
@@ -1161,9 +1162,9 @@ void writeChunk(chunk::Chunk &chunk) {
 	
 	std::ofstream chunkFileOut{ chunkNewFilename(chunk), std::ios::binary };
 	
-	for(int x{}; x < chunk::blocksInChunkDim; x++) 
-	for(int y{}; y < chunk::blocksInChunkDim; y++) 
-	for(int z{}; z < chunk::blocksInChunkDim; z++) {
+	for(int x{}; x < units::blocksInChunkDim; x++) 
+	for(int y{}; y < units::blocksInChunkDim; y++) 
+	for(int z{}; z < units::blocksInChunkDim; z++) {
 		vec3i const blockCoord{x,y,z};
 		auto const blockData = data[chunk::blockIndex(blockCoord)].data();
 		
@@ -1184,9 +1185,9 @@ bool tryReadChunk(chunk::Chunk chunk, vec3i &start, vec3i &end) {
 	auto const filename2{ chunkNewFilename(chunk) };
 	std::ifstream chunkFileIn2{ filename2, std::ios::binary };	
 	if(!chunkFileIn2.fail()) {
-		for(int x{}; x < chunk::blocksInChunkDim; x++) 
-		for(int y{}; y < chunk::blocksInChunkDim; y++) 
-		for(int z{}; z < chunk::blocksInChunkDim; z++) 
+		for(int x{}; x < units::blocksInChunkDim; x++) 
+		for(int y{}; y < units::blocksInChunkDim; y++) 
+		for(int z{}; z < units::blocksInChunkDim; z++) 
 		{
 			vec3i const blockCoord{x,y,z};
 			//uint16_t &block = data[chunk::blockIndex(blockCoord)];
@@ -1217,9 +1218,9 @@ bool tryReadChunk(chunk::Chunk chunk, vec3i &start, vec3i &end) {
 	auto const filename{ chunkFilename(chunk) };
 	std::ifstream chunkFileIn{ filename, std::ios::binary };
 	if(!chunkFileIn.fail()) {
-		for(int x{}; x < chunk::blocksInChunkDim; x++) 
-		for(int y{}; y < chunk::blocksInChunkDim; y++) 
-		for(int z{}; z < chunk::blocksInChunkDim; z++) {
+		for(int x{}; x < units::blocksInChunkDim; x++) 
+		for(int y{}; y < units::blocksInChunkDim; y++) 
+		for(int z{}; z < units::blocksInChunkDim; z++) {
 			vec3i const blockCoord{x,y,z};
 			//uint16_t &block = data[chunk::blockIndex(blockCoord)];
 			uint8_t blk[2];
@@ -1260,9 +1261,9 @@ void genTrees(chunk::Chunk chunk, vec3i &start, vec3i &end) {
 		for(int32_t y{0} ; y < 6 ; y++) 
 		for(int32_t z{-2}; z <= 2; z++) {
 			vec3i tl{ x,y,z };// tree-local block
-			auto const blk{ chunkOffset * chunk::blocksInChunkDim + treeBlock + tl };
+			auto const blk{ chunkOffset * units::blocksInChunkDim + treeBlock + tl };
 			
-			if(blk.inMMX(vec3i{0}, vec3i{chunk::blocksInChunkDim}).all()) {
+			if(blk.inMMX(vec3i{0}, vec3i{units::blocksInChunkDim}).all()) {
 				auto const index{ chunk::blockIndex(blk) };
 				chunk::Block &curBlock{ data[index] };
 				
@@ -1291,20 +1292,20 @@ void genTrees(chunk::Chunk chunk, vec3i &start, vec3i &end) {
 	
 }
 
-void genChunkData(double const (&heights)[chunk::blocksInChunkDim * chunk::blocksInChunkDim], chunk::Chunk chunk, vec3i &start, vec3i &end) {
+void genChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk, vec3i &start, vec3i &end) {
 	auto const &pos{ chunk.position() };
 	auto &data{ chunk.data() };
 	auto &emitters{ chunk.emitters() };
 	
-	for(int z = 0; z < chunk::blocksInChunkDim; ++z)
-	for(int y = 0; y < chunk::blocksInChunkDim; ++y) 
-	for(int x = 0; x < chunk::blocksInChunkDim; ++x) {
+	for(int z = 0; z < units::blocksInChunkDim; ++z)
+	for(int y = 0; y < units::blocksInChunkDim; ++y) 
+	for(int x = 0; x < units::blocksInChunkDim; ++x) {
 		vec3i const blockCoord{ x, y, z };
 		
-		auto const height{ heights[z * chunk::blocksInChunkDim + x] };
+		auto const height{ heights[z * units::blocksInChunkDim + x] };
 		auto const index{ chunk::blockIndex(blockCoord) };
-		//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * chunk::blocksInChunkDim + y + 1), 9)) { //repeated floor
-		double const diff{ height - double(pos.y * chunk::blocksInChunkDim + y) };
+		//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * units::blocksInChunkDim + y + 1), 9)) { //repeated floor
+		double const diff{ height - double(pos.y * units::blocksInChunkDim + y) };
 		if(diff >= 0) {
 			uint16_t block = 0;
 			if(diff < 1) block = 1; //grass
@@ -1326,14 +1327,14 @@ void genChunkData(double const (&heights)[chunk::blocksInChunkDim * chunk::block
 	genTrees(chunk, *&start, *&end);	
 }
 
-static void fillChunkData(double const (&heights)[chunk::blocksInChunkDim * chunk::blocksInChunkDim], chunk::Chunk chunk) {
+static void fillChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk) {
 	auto const &index{ chunk.chunkIndex() };
 	auto const &pos{ chunk.position() };
 	auto &chunks{ chunk.chunks() };
 	auto &data{ chunk.data() };
 	auto &aabb{ chunk.aabb() };
 	
-	vec3i start{chunk::blocksInChunkDim-1};
+	vec3i start{units::blocksInChunkDim-1};
 	vec3i end  {0 };
 	
 	if(loadChunks && tryReadChunk(chunk, start, end)) chunk.modified() = false;
@@ -1341,35 +1342,6 @@ static void fillChunkData(double const (&heights)[chunk::blocksInChunkDim * chun
 	
 	aabb = chunk::AABB(start, end);
 }
-
-
-template<typename Action>
-static void iterateCubeNeighbours(
-	chunk::Chunk cubeChunk, vec3i const cubeCoord, 
-	Action &&action
-) {
-	auto &chunks{ cubeChunk.chunks() };
-	auto const chunkCoord{ cubeChunk.position() };
-	
-	for(auto i{decltype(chunk::ChunkLighting::dirsCount){}}; i < chunk::ChunkLighting::dirsCount; i++) {
-		auto const neighbourDir{ chunk::ChunkLighting::indexAsDir(i) };
-		
-		ChunkCoord const neighbourCubePos{ chunkCoord, ChunkCoord::Cube{vec3l(cubeCoord + neighbourDir)} };
-		auto const neighbourCubeChunkCoord{ neighbourCubePos.chunk() };
-		auto const neighbourCubeInChunkCoord{ neighbourCubePos.cubeInChunk() };
-		
-		auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{cubeChunk}.move(neighbourCubeChunkCoord).get() };
-		if(neighbourCubeChunkIndex == -1) continue;
-
-		action(neighbourDir, chunks[neighbourCubeChunkIndex], neighbourCubeInChunkCoord);
-	}
-}
-
-struct CubeInfo { vec3i cubeCoord;/*could fit in 32 bits*/ int chunkIndex; };
-
-enum class LightingCubeType {
-	medium, wall, emitter
-};
 
 struct SkyLightingConfig {
 	static chunk::ChunkLighting &getLighting(chunk::Chunk chunk) {
@@ -1409,157 +1381,11 @@ struct BlocksLightingConfig {
 		return uint8_t(misc::max(int(lighting) - 1, 0));
 	}
 };
- 
-namespace AddLighting {
-	namespace {
-		template<typename Config>
-		static void propagateAddLight(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const startLight) {
-			cubeChunk.status().setLightingUpdated(true);
-			iterateCubeNeighbours(
-				cubeChunk, cubeInChunkCoord, 
-				[startLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-					auto [blockId, isCube] = cubeChunk.data().cubeAt(cubeInChunkCoord);
-					
-					auto const type{ Config::getType(blockId, isCube) };
-					if(type == LightingCubeType::wall) return;
-					
-					auto &cubeLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
-					if(type == LightingCubeType::medium) {
-						auto const expectedLight{ Config::propagationRule(startLight, fromDir, blockId, isCube) };
-						if(cubeLight < expectedLight) {
-							cubeLight = expectedLight;
-							propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, cubeLight);	
-						}
-					}
-				}
-			);
-		}
-	}
-	
-	template<typename Config>
-	static void fromCube(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) {	
-		auto const startLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
-		propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, startLight);
-	}
-	
-	template<typename Config>
-	static void fromCubeForcedFirst(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) {
-		auto const startLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
-		iterateCubeNeighbours(
-			cubeChunk, cubeInChunkCoord, 
-			[&startLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-				auto [blockId, isCube] = cubeChunk.data().cubeAt(cubeInChunkCoord);
-				
-				auto const type{ Config::getType(blockId, isCube) };
-				if(type == LightingCubeType::wall) return;
-				
-				auto &cubeLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
-				if(type == LightingCubeType::medium) {
-					auto const expectedLight{ SkyLightingConfig::propagationRule(startLight, fromDir, blockId, isCube) };
-					if(cubeLight < expectedLight) cubeLight = expectedLight;
-					propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, cubeLight); //update even if starting cube's expected neighbour lighting is not enough
-				}
-				else {
-					assert(type == LightingCubeType::emitter);
-					propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, cubeLight); 
-				}
-			}
-		);
-	}
-}
-	
-namespace SubtractLighting {
-	
-	namespace {
-		template<typename Config>
-		static void propagateLightRemove(std::vector<CubeInfo> &endCubes, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const cubeLight) {
-			iterateCubeNeighbours(
-				cubeChunk, cubeInChunkCoord,
-				[&endCubes, fromLight = cubeLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-					auto [blockId, isCube] = cubeChunk.data().cubeAt(cubeInChunkCoord);
-					auto const type{ Config::getType(blockId, isCube) };
-					if(type == LightingCubeType::wall) return;
-					
-					auto &light{ Config::getLight(cubeChunk, cubeInChunkCoord) };
-					auto const alreadyChecked{ light == 0 };
-					auto const hasLight{ light != 0 };
-					
-					auto const expectedLight{ Config::propagationRule(fromLight, fromDir, blockId, isCube) };
-					if(type == LightingCubeType::medium && expectedLight >= light && !alreadyChecked) {
-						cubeChunk.status().setLightingUpdated(true);
-						light = 0;
-						propagateLightRemove<Config>(endCubes, cubeChunk, cubeInChunkCoord, expectedLight);
-					}
-					else if(hasLight) {
-						endCubes.push_back(CubeInfo{cubeInChunkCoord, cubeChunk.chunkIndex()}); 
-					}
-				}
-			);
-		}
-		
-		template<typename Config>
-		static void removeLightInChunkCubes(
-			chunk::Chunk cubesChunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord, 
-			std::vector<CubeInfo> &endCubes
-		) {
-			if((cubesEndInChunkCoord < cubesStartInChunkCoord).all()) return;
-			
-			cubesChunk.status().setLightingUpdated(true);
-			
-			for(int32_t z{cubesStartInChunkCoord.z}; z <= cubesEndInChunkCoord.z; z++)
-			for(int32_t y{cubesStartInChunkCoord.y}; y <= cubesEndInChunkCoord.y; y++)
-			for(int32_t x{cubesStartInChunkCoord.x}; x <= cubesEndInChunkCoord.x; x++) {
-				Config::getLight(cubesChunk, vec3i{x,y,z}) = 0u;
-			}
-			
-			for(int32_t z{cubesStartInChunkCoord.z}; z <= cubesEndInChunkCoord.z; z++)
-			for(int32_t y{cubesStartInChunkCoord.y}; y <= cubesEndInChunkCoord.y; y++)
-			for(int32_t x{cubesStartInChunkCoord.x}; x <= cubesEndInChunkCoord.x; x++) {
-				vec3i const cubeInChunkCoord{ x, y, z };
-				
-				iterateCubeNeighbours(
-					cubesChunk, cubeInChunkCoord,
-					[&endCubes, cubesChunk, cubesStartInChunkCoord, cubesEndInChunkCoord](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-						if(cubeChunk == cubesChunk && cubeInChunkCoord.in(cubesStartInChunkCoord, cubesEndInChunkCoord).all()) return;//skip cubes inside of starting area
-						
-						auto [blockId, isCube] = cubeChunk.data().cubeAt(cubeInChunkCoord);
-						auto const type{ Config::getType(blockId, isCube) };
-						if(type == LightingCubeType::wall) return;
-						
-						auto &light{ Config::getLight(cubeChunk, cubeInChunkCoord) };
-						if(type == LightingCubeType::medium) {
-							auto const expectedLight{ light };
-							cubeChunk.status().setLightingUpdated(true);
-							light = 0;
-							propagateLightRemove<Config>(endCubes, cubeChunk, cubeInChunkCoord, expectedLight);
-						}
-						else {
-							assert(type == LightingCubeType::emitter);
-							endCubes.push_back(CubeInfo{cubeInChunkCoord, cubeChunk.chunkIndex()}); 
-						}
-					}
-				);
-			}
-		}
-	}
-	
-	template<typename Config>
-	void inChunkCubes(chunk::Chunk chunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord) {
-		static std::vector<CubeInfo> endCubes{};
-		endCubes.clear();
-		
-		auto &chunks{ chunk.chunks() };
-	
-		removeLightInChunkCubes<Config>(chunk, cubesStartInChunkCoord, cubesEndInChunkCoord, endCubes);
-		
-		for(auto const ci : endCubes) ::AddLighting::fromCube<Config>(chunks[ci.chunkIndex], ci.cubeCoord);
-	}
-}
 
 template<typename Config>
 static void setNeighboursLightingUpdate(chunk::Chunks &chunks, vec3i const minChunkPos, vec3i const maxChunkPos) {
-	auto const minCubePos{ vec3l(minChunkPos  ) * chunk::cubesInChunkDim     };
-	auto const maxCubePos{ vec3l(maxChunkPos+1) * chunk::cubesInChunkDim - 1 };
+	auto const minCubePos{ vec3l(minChunkPos  ) * units::cubesInChunkDim     };
+	auto const maxCubePos{ vec3l(maxChunkPos+1) * units::cubesInChunkDim - 1 };
 
 	static vec3i const sides[3]       = { {1,0,0}, {0,1,0}, {0,0,1} };
 	static vec3i const otherSides1[3] = { {0,0,1}, {0,0,1}, {0,1,0} };
@@ -1587,20 +1413,20 @@ static void setNeighboursLightingUpdate(chunk::Chunks &chunks, vec3i const minCh
 			
 			auto const &neighbourBlocks{ neighbourChunk.data() };
 			
-			for(int coord1{}; coord1 < chunk::cubesInChunkDim; coord1++)
-			for(int coord2{}; coord2 < chunk::cubesInChunkDim; coord2++) {
+			for(int coord1{}; coord1 < units::cubesInChunkDim; coord1++)
+			for(int coord2{}; coord2 < units::cubesInChunkDim; coord2++) {
 				auto const cubeInChunkCoord{
-					  sides[side] * (axisPositive ? chunk::cubesInChunkDim-1 : 0)
+					  sides[side] * (axisPositive ? units::cubesInChunkDim-1 : 0)
 					+ otherSides1[side] * coord1
 					+ otherSides2[side] * coord2
 				};
 				auto const cubeCoord{
-					  vec3l(chunkCoord) * chunk::cubesInChunkDim
+					  vec3l(chunkCoord) * units::cubesInChunkDim
 					+ vec3l(cubeInChunkCoord)
 				};
 				
 				auto const neighbourCubeInChunkCoord{
-					  sides[side] * (axisPositive ? 0 : chunk::cubesInChunkDim-1)
+					  sides[side] * (axisPositive ? 0 : units::cubesInChunkDim-1)
 					+ otherSides1[side] * coord1
 					+ otherSides2[side] * coord2
 				};
@@ -1656,8 +1482,8 @@ static void fastUpdateLightingInDir(
 		chunk coords alond specified axis, in chunks
 	*/
 	
-	auto const chunkFirstCoordCubeAxis{  chunkCoordAxis    * chunk::cubesInChunkDim };
-	auto const chunkLastCoordCubeAxis { (chunkCoordAxis+1) * chunk::cubesInChunkDim - 1 };
+	auto const chunkFirstCoordCubeAxis{  chunkCoordAxis    * units::cubesInChunkDim };
+	auto const chunkLastCoordCubeAxis { (chunkCoordAxis+1) * units::cubesInChunkDim - 1 };
 	
 	auto const beginCoordsAxis{ beginCoordsCubeAxisUnbound.clamp(chunkFirstCoordCubeAxis, chunkLastCoordCubeAxis) };
 	auto const endCoordsAxis  { endCoordsCubeAxisUnbound  .clamp(chunkFirstCoordCubeAxis, chunkLastCoordCubeAxis) };
@@ -1673,7 +1499,7 @@ static void fastUpdateLightingInDir(
 		+ otherAxis2 * beginCoordsAxis.z
 	};
 	auto const beforeStartCubeCoord{ startCubeCoord - vec3l(dir) };
-	ChunkCoord const beforeStartCubePos{ vec3i{}, ChunkCoord::Cube{beforeStartCubeCoord} };
+	Position const beforeStartCubePos{ vec3i{}, Position::Cube{beforeStartCubeCoord} };
 	auto const chunkBeforeIndex{ chunk::Move_to_neighbour_Chunk{mtnChunk}.move(beforeStartCubePos.chunk()).get() };
 	
 	auto const isBefore{ chunkBeforeIndex != chunkIndex };
@@ -1698,14 +1524,14 @@ static void fastUpdateLightingInDir(
 					+ otherAxis2 * o2
 				};
 				vec3i const cubeInChunkCoord(
-					cubeCoord - vec3l(chunkCoord) * chunk::cubesInChunkDim
+					cubeCoord - vec3l(chunkCoord) * units::cubesInChunkDim
 				);
 				
 				auto [blockId, isCube] = chunk.data().cubeAt(cubeInChunkCoord);
 				auto const type{ Config::getType(blockId, isCube) };
 				if(type != LightingCubeType::medium) continue;
 
-				auto const cubeCoordBefore{ (cubeInChunkCoord - dir).mod(chunk::cubesInChunkDim) };
+				auto const cubeCoordBefore{ (cubeInChunkCoord - dir).mod(units::cubesInChunkDim) };
 				
 				auto const candLighting{ Config::propagationRule(lightingBefore[cubeCoordBefore], dir, blockId, isCube) };
 				auto &cubeLighting{ lighting[cubeInChunkCoord] };
@@ -1729,7 +1555,7 @@ static void fastUpdateLightingInDir(
 				+ otherAxis2 * o2
 			};
 			vec3i const cubeInChunkCoord(
-				cubeCoord - vec3l(chunkCoord) * chunk::cubesInChunkDim
+				cubeCoord - vec3l(chunkCoord) * units::cubesInChunkDim
 			);
 			
 			auto [blockId, isCube] = chunk.data().cubeAt(cubeInChunkCoord);
@@ -1773,12 +1599,12 @@ static void updateSkyLightingInChunks(chunk::Chunks &chunks, vec3i const minChun
 	int const chunkIndicesCount(chunkIndices.size());
 	if(chunkIndicesCount == 0) return;
 	
-	vec3l minCube{ vec3l(minChunkPos  ) * chunk::cubesInChunkDim-1 };
-	vec3l maxCube{ vec3l(maxChunkPos+1) * chunk::cubesInChunkDim };
+	vec3l minCube{ vec3l(minChunkPos  ) * units::cubesInChunkDim-1 };
+	vec3l maxCube{ vec3l(maxChunkPos+1) * units::cubesInChunkDim };
 	
 	for(int iters{}; iters < 10; iters++) {
-		vec3l newMinCube{ vec3l(maxChunkPos + 1) * chunk::cubesInChunkDim };
-		vec3l newMaxCube{ vec3l(minChunkPos    ) * chunk::cubesInChunkDim-1 };
+		vec3l newMinCube{ vec3l(maxChunkPos + 1) * units::cubesInChunkDim };
+		vec3l newMaxCube{ vec3l(minChunkPos    ) * units::cubesInChunkDim-1 };
 		
 		for(int dir{1}; dir >= -1; dir-=2) {
 			for(int j{}; j < 3; j++) {
@@ -1814,7 +1640,7 @@ static void updateSkyLightingInChunks(chunk::Chunks &chunks, vec3i const minChun
 	for(auto z{minCube.z}; z <= maxCube.z; z++)
 	for(auto y{minCube.y}; y <= maxCube.y; y++)
 	for(auto x{minCube.x}; x <= maxCube.x; x++) {
-		ChunkCoord const cubePos{ vec3i(0), ChunkCoord::Cube{vec3l(x, y, z)} };
+		Position const cubePos{ vec3i(0), Position::Cube{vec3l(x, y, z)} };
 		auto const cubeChunkCoord{ cubePos.chunk() };
 		auto const cubeInChunkCoord{ cubePos.cubeInChunk() };
 		
@@ -1846,10 +1672,10 @@ static void updateBlockLightingInChunks(chunk::Chunks &chunks, vec3i const minCh
 			auto &blockLighting{ curChunk.blockLighting() };
 			for(chunk::ChunkBlocksList::value_type const blockIndex : curChunk.emitters()) {
 				auto const blockInChunkCoord{ chunk::indexBlock(blockIndex) };
-				for(int cubeInBlockIndex{}; cubeInBlockIndex < chunk::cubesInBlockCount; cubeInBlockIndex++) {
+				for(int cubeInBlockIndex{}; cubeInBlockIndex < units::cubesInBlockCount; cubeInBlockIndex++) {
 					auto const cubeInBlockCoord{ chunk::Block::cubeIndexPos(cubeInBlockIndex) };
 					
-					auto const cubeInChunkCoord{ blockInChunkCoord*chunk::cubesInBlockDim + cubeInBlockCoord };
+					auto const cubeInChunkCoord{ blockInChunkCoord*units::cubesInBlockDim + cubeInBlockCoord };
 					
 					blockLighting[cubeInChunkCoord] = 31u;
 				}
@@ -1860,12 +1686,12 @@ static void updateBlockLightingInChunks(chunk::Chunks &chunks, vec3i const minCh
 	int const chunkIndicesCount(chunkIndices.size());
 	if(chunkIndicesCount == 0) return;
 	
-	vec3l minCube{ vec3l(minChunkPos  ) * chunk::cubesInChunkDim-1 };
-	vec3l maxCube{ vec3l(maxChunkPos+1) * chunk::cubesInChunkDim };
+	vec3l minCube{ vec3l(minChunkPos  ) * units::cubesInChunkDim-1 };
+	vec3l maxCube{ vec3l(maxChunkPos+1) * units::cubesInChunkDim };
 	
 	for(int iters{}; iters < 10; iters++) {
-		vec3l newMinCube{ vec3l(maxChunkPos + 1) * chunk::cubesInChunkDim };
-		vec3l newMaxCube{ vec3l(minChunkPos    ) * chunk::cubesInChunkDim-1 };
+		vec3l newMinCube{ vec3l(maxChunkPos + 1) * units::cubesInChunkDim };
+		vec3l newMaxCube{ vec3l(minChunkPos    ) * units::cubesInChunkDim-1 };
 		
 		for(int dir{1}; dir >= -1; dir-=2) {
 			for(int j{}; j < 3; j++) {
@@ -1901,7 +1727,7 @@ static void updateBlockLightingInChunks(chunk::Chunks &chunks, vec3i const minCh
 	for(auto z{minCube.z}; z <= maxCube.z; z++)
 	for(auto y{minCube.y}; y <= maxCube.y; y++)
 	for(auto x{minCube.x}; x <= maxCube.x; x++) {
-		ChunkCoord const cubePos{ vec3i(0), ChunkCoord::Cube{vec3l(x, y, z)} };
+		Position const cubePos{ vec3i(0), Position::Cube{vec3l(x, y, z)} };
 		auto const cubeChunkCoord{ cubePos.chunk() };
 		auto const cubeInChunkCoord{ cubePos.cubeInChunk() };
 		
@@ -1956,7 +1782,7 @@ static void updateNeighbouringEmitters(chunk::Chunk chunk) {
 		if(neighbouringEmitterToAdd < startChunkEmiter + neighbour.emittersCount) {
 			auto const localChunkEmitterIndex{ neighbouringEmitterToAdd - startChunkEmiter };
 			auto const localChunkEmitterBlock{ chunks[neighbour.chunkIndex].emitters()(localChunkEmitterIndex) };
-			neighbouringEmitters[i] = localChunkEmitterBlock + neighbour.dir * chunk::blocksInChunkDim;
+			neighbouringEmitters[i] = localChunkEmitterBlock + neighbour.dir * units::blocksInChunkDim;
 			neighbouringEmitterToAdd += emitterStep;
 			i++;
 		}
@@ -1973,7 +1799,7 @@ static uint8_t calcAO(chunk::Chunks &chunks, chunk::Move_to_neighbour_Chunk chun
 	uint8_t cubes{};
 	for(int j{}; j < 8; j ++) {
 		auto const offsetcubeCoordInChunk_unnormalized{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0) };
-		ChunkCoord const offsetCubePos{ chunkPos, ChunkCoord::Cube{vec3l(offsetcubeCoordInChunk_unnormalized)} };
+		Position const offsetCubePos{ chunkPos, Position::Cube{vec3l(offsetcubeCoordInChunk_unnormalized)} };
 		
 		auto const offsetCubeChunkIndex{ chunk.move(offsetCubePos.chunk()) };
 		if(!offsetCubeChunkIndex.is()) continue;
@@ -2016,7 +1842,7 @@ static void updateBlocks(chunk::Chunk chunk) {
 	chunk::Move_to_neighbour_Chunk const mtnChunk{chunk};
 	if(!aabb.empty()) {
 		//AO
-		static constexpr int cnb{ chunk::cubesInBlockDim };
+		static constexpr int cnb{ units::cubesInBlockDim };
 		for(int z{start.z*cnb}; z < (end.z+1)*cnb; z++) 
 		for(int y{start.y*cnb}; y < (end.y+1)*cnb; y++) 
 		for(int x{start.x*cnb}; x < (end.x+1)*cnb; x++) {
@@ -2026,7 +1852,7 @@ static void updateBlocks(chunk::Chunk chunk) {
 		
 		
 		auto const offsetedStart{ start.max(1) };
-		auto const offsetedEnd  { start.min(chunk::blocksInChunkDim-1) };
+		auto const offsetedEnd  { start.min(units::blocksInChunkDim-1) };
 		//blocks with no neighbours
 		for(int z{offsetedStart.z}; z < (offsetedEnd.z+1); z++) 
 		for(int y{offsetedStart.y}; y < (offsetedEnd.y+1); y++) 
@@ -2200,12 +2026,12 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 }
 
 static void genChunksColumnAt(vec2i const columnPosition) {
-	double heights[chunk::blocksInChunkDim * chunk::blocksInChunkDim];
+	double heights[units::blocksInChunkDim * units::blocksInChunkDim];
 	double minHeight = 1.0 / 0.0;
-	for(int z = 0; z < chunk::blocksInChunkDim; z++) 
-	for(int x = 0; x < chunk::blocksInChunkDim; x++) {
+	for(int z = 0; z < units::blocksInChunkDim; z++) 
+	for(int x = 0; x < units::blocksInChunkDim; x++) {
 		auto const height{  heightAt(vec2i{columnPosition.x,columnPosition.y}, vec2i{x,z}) };
-		heights[z* chunk::blocksInChunkDim + x] = height;
+		heights[z* units::blocksInChunkDim + x] = height;
 		minHeight = std::min(minHeight, height);
 	}
 	
@@ -2293,7 +2119,7 @@ static void genChunksColumnAt(vec2i const columnPosition) {
 			lowestWithBlockLighting  = std::min(lowestWithBlockLighting , chunkPosition.y);
 		}
 		
-		if((y + 1)*chunk::blocksInChunkDim-1 >= minHeight) lowestNotFullY = std::min(lowestNotFullY, y);
+		if((y + 1)*units::blocksInChunkDim-1 >= minHeight) lowestNotFullY = std::min(lowestNotFullY, y);
 		
 		for(int i{}; i < 4; i ++) {
 			vec3 const next{ vec3i{0,-1,0} };
@@ -2371,7 +2197,7 @@ struct PosDir {
 	vec3i direction;
 	vec3i chunk;
 	
-	PosDir(ChunkCoord const coord, vec3l const line): 
+	PosDir(Position const coord, vec3l const line): 
 		start{ coord.coordInChunk() },
 		end{ start + line },
 		
@@ -2401,7 +2227,7 @@ struct PosDir {
 			atCoord(inAxis, coord, vec3i{0,0,1})
 		};
 	}
-	ChunkCoord at(vec3i inAxis, int64_t const coord) const { return ChunkCoord{ chunk, ChunkCoord::Fractional{part_at(inAxis, coord)} }; }
+	Position at(vec3i inAxis, int64_t const coord) const { return Position{ chunk, Position::Fractional{part_at(inAxis, coord)} }; }
 	
 	friend std::ostream &operator<<(std::ostream &o, PosDir const v) {
 		return o << "PosDir{" << v.start << ", " << v.end << ", " << v.direction << ", " << v.chunk << "}";
@@ -2465,12 +2291,12 @@ public:
 	
 	static constexpr vec3l nextCoords(vec3l const current, vec3i const dir) {
 		return current.applied([&](auto const coord, auto const i) -> int64_t {
-			//return ((coord / ChunkCoord::fracBlockDim) + std::max(dir[i], 0)) << ChunkCoord::fracBlockDimAsPow2;
+			//return ((coord / units::fracInBlockDim) + std::max(dir[i], 0)) << units::fracInBlockDimAsPow2;
 			
 			if(dir[i] >= 0) //round down
-				return ((coord >> ChunkCoord::fracCubeDimAsPow2) + 1) << ChunkCoord::fracCubeDimAsPow2;
+				return ((coord >> units::fracInCubeDimAsPow2) + 1) << units::fracInCubeDimAsPow2;
 			else //round up
-				return (-((-coord) >> ChunkCoord::fracCubeDimAsPow2) - 1) << ChunkCoord::fracCubeDimAsPow2;
+				return (-((-coord) >> units::fracInCubeDimAsPow2) - 1) << units::fracInCubeDimAsPow2;
 		});
 	};
 	
@@ -2481,9 +2307,9 @@ public:
 	#undef G
 };
 
-static bool checkIntersection(chunk::Chunks &chunks, ChunkCoord const coord1, ChunkCoord const coord2) {
-	ChunkCoord const c1{ coord1.coord().min(coord2.coord()) };
-	ChunkCoord const c2{ coord1.coord().max(coord2.coord()) };
+static bool checkIntersection(chunk::Chunks &chunks, Position const coord1, Position const coord2) {
+	Position const c1{ coord1.coord().min(coord2.coord()) };
+	Position const c2{ coord1.coord().max(coord2.coord()) };
 	chunk::Move_to_neighbour_Chunk chunk{chunks, c1.chunk() };
 	
 	vec3l const c1c{ c1.cube() };
@@ -2496,19 +2322,19 @@ static bool checkIntersection(chunk::Chunks &chunks, ChunkCoord const coord1, Ch
 		
 		auto const cubeLocalCoord{ 
 			cubeCoord.applied([](auto const coord, auto i) -> int32_t {
-				return int32_t(misc::mod<int64_t>(coord, chunk::cubesInBlockDim));
+				return int32_t(misc::mod<int64_t>(coord, units::cubesInBlockDim));
 			})
 		};
 		
-		ChunkCoord const coord{ ChunkCoord::cubeToFrac(cubeCoord) };
+		Position const position{ Position::cubeToFrac(cubeCoord) };
 				
-		vec3i const blockChunk = coord.chunk();
+		vec3i const blockChunk = position.chunk();
 		
 		auto const chunkIndex{ chunk.move(blockChunk).get() };
 		if(chunkIndex == -1) return true;
 		
 		auto const chunkData{ chunks.chunksData[chunkIndex] };
-		auto const index{ chunk::blockIndex(coord.blockInChunk()) };
+		auto const index{ chunk::blockIndex(position.blockInChunk()) };
 		auto const block{ chunkData[index] };
 		
 		if(block.id() != 0 && block.cube(cubeLocalCoord)) return true;
@@ -2517,11 +2343,11 @@ static bool checkIntersection(chunk::Chunks &chunks, ChunkCoord const coord1, Ch
 	return false;
 }
 
-static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGround) {	
+static void updateCollision(Position &player, vec3d &playerForce, bool &isOnGround) {	
 	//auto const playerChunk{ player.chunk() };
 	
 	vec3l playerPos{ player.coord() };
-	vec3l force{ ChunkCoord::posToFracTrunk(playerForce) };
+	vec3l force{ Position::posToFracTrunk(playerForce) };
 	
 	vec3l maxPlayerPos{};
 	
@@ -2548,12 +2374,12 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		playerMin = vec3l{ playerPos.x-width_i/2, playerPos.y         , playerPos.z-width_i/2 };
 		playerMax = vec3l{ playerPos.x+width_i/2, playerPos.y+height_i, playerPos.z+width_i/2 };
 		
-		min = ChunkCoord::fracToBlockCube(playerPos - vec3l{width_i/2,0,width_i/2});
-		max = ChunkCoord::fracToBlockCube(playerPos + vec3l{width_i/2,height_i,width_i/2} - 1);
+		min = Position::fracToBlockCube(playerPos - vec3l{width_i/2,0,width_i/2});
+		max = Position::fracToBlockCube(playerPos + vec3l{width_i/2,height_i,width_i/2} - 1);
 	};
 	
 	struct MovementResult {
-		ChunkCoord coord;
+		Position coord;
 		bool isCollision;
 		bool continueMovement;
 	};
@@ -2576,19 +2402,19 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		auto const axisPlayerPos{ playerPos.dot(vec3l(axis)) };
 		auto const axisPlayerMaxPos{ maxPlayerPos.dot(vec3l(axis)) };
 		
-		auto const start{ misc::divFloor( axisPositive ? axisPlayerMax : axisPlayerMin, ChunkCoord::fracCubeDim)-int64_t(axisNegative) };
-		auto const end{ misc::divFloor(axisPlayerMaxPos + axisPlayerOffset, ChunkCoord::fracCubeDim) };
+		auto const start{ misc::divFloor<decltype(axisPlayerMax)>( axisPositive ? axisPlayerMax : axisPlayerMin, units::fracInCubeDim)-int64_t(axisNegative) };
+		auto const end{ misc::divFloor<decltype(axisPlayerOffset)>(axisPlayerMaxPos + axisPlayerOffset, units::fracInCubeDim) };
 		auto const count{ (end - start) * axisDir };
 		
 		
 		for(int64_t a{}; a <= count; a++) {
 			auto const axisCurCubeCoord{ start + a * axisDir };
 			
-			auto const axisNewCoord{ ChunkCoord::blockCubeToFrac(vec3i(axisCurCubeCoord + int64_t(axisNegative))).x - axisPlayerOffset }; 
-			ChunkCoord const newCoord{ vec3l(axisNewCoord) * vec3l(axis) + vec3l(playerPos) * vec3l(otherAxis) };
+			auto const axisNewCoord{ Position::blockCubeToFrac(vec3i(axisCurCubeCoord + int64_t(axisNegative))).x - axisPlayerOffset }; 
+			Position const newPos{ vec3l(axisNewCoord) * vec3l(axis) + vec3l(playerPos) * vec3l(otherAxis) };
 				
-			vec3l const upStepOffset{ vec3l{0, ChunkCoord::fracCubeDim, 0} + vec3l(axis) * vec3l(axisDir) };
-			ChunkCoord const upStepCoord{newCoord + ChunkCoord::Fractional{upStepOffset}};
+			vec3l const upStepOffset{ vec3l{0, units::fracInCubeDim, 0} + vec3l(axis) * vec3l(axisDir) };
+			Position const upStepCoord{newPos + Position::Fractional{upStepOffset}};
 			
 			auto const upStepMin = (upStepCoord.coord() - vec3l{width_i/2,0,width_i/2});
 			auto const upStepMax = (upStepCoord.coord() + vec3l{width_i/2,height_i,width_i/2} - 1);
@@ -2609,16 +2435,16 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				
 				auto const cubeLocalCoord{ 
 					cubeCoord.applied([](auto const coord, auto i) -> int32_t {
-						return int32_t(misc::mod<int64_t>(coord, chunk::cubesInBlockDim));
+						return int32_t(misc::mod<int64_t>(coord, units::cubesInBlockDim));
 					})
 				};
 				
-				ChunkCoord const coord{ ChunkCoord::cubeToFrac(cubeCoord) };
+				Position const coord{ Position::cubeToFrac(cubeCoord) };
 						
 				vec3i const blockChunk = coord.chunk();
 				
 				auto const chunkIndex{ chunk.move(blockChunk).get() };
-				if(chunkIndex == -1) return { newCoord, false, false };
+				if(chunkIndex == -1) return { newPos, false, false };
 				
 				auto const chunkData{ chunks.chunksData[chunkIndex] };
 				auto const index{ chunk::blockIndex(coord.blockInChunk()) };
@@ -2627,8 +2453,8 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 				if(block.id() != 0 && block.cube(cubeLocalCoord)) {
 					if(newCoordBigger) {
 						auto const diff{ playerPos.y - coord.coord().y };
-						if(upStepPossible && diff <= ChunkCoord::fracCubeDim && diff >= 0) return { upStepCoord, false, true };
-						else return { newCoord, true, false };
+						if(upStepPossible && diff <= units::fracInCubeDim && diff >= 0) return { upStepCoord, false, true };
+						else return { newPos, true, false };
 					}
 				}
 			}
@@ -2649,7 +2475,7 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 			}
 			else if(result.isCollision) {
 				if(negative_.y) isOnGround = true;
-				force = ChunkCoord::posToFracTrunk(ChunkCoord::fracToPos(force) * 0.8);
+				force = Position::posToFracTrunk(Position::fracToPos(force) * 0.8);
 				force.y = 0;
 			}
 			
@@ -2688,14 +2514,14 @@ static void updateCollision(ChunkCoord &player, vec3d &playerForce, bool &isOnGr
 		} while(result.continueMovement);
 	}
 	
-	player = ChunkCoord{ playerPos };
-	playerForce = ChunkCoord::fracToPos(force) * (isOnGround ? vec3d{0.8,1,0.8} : vec3d{1});
+	player = Position{ playerPos };
+	playerForce = Position::fracToPos(force) * (isOnGround ? vec3d{0.8,1,0.8} : vec3d{1});
 }
 
 bool checkCanPlaceBlock(vec3i const blockChunk, vec3i const blockCoord) {
-	ChunkCoord const relativeBlockCoord{ ChunkCoord{ blockChunk, ChunkCoord::Block{vec3l(blockCoord)} } - currentCoord() };
+	Position const relativeBlockCoord{ Position{ blockChunk, Position::Block{vec3l(blockCoord)} } - currentCoord() };
 	vec3l const blockStartF{ relativeBlockCoord.coord() };
-	vec3l const blockEndF{ blockStartF + ChunkCoord::fracBlockDim };
+	vec3l const blockEndF{ blockStartF + units::fracInBlockDim };
 	
 	/*static_*/assert(width_i % 2 == 0);
 	
@@ -2723,25 +2549,25 @@ static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir cons
 		vec3l const intersection{ checkBlock.get_current() };
 		
 		vec3l const cubeCoord{ 
-			ChunkCoord::fracToBlockCube(intersection)
+			Position::fracToBlockCube(intersection)
 			  + vec3l(pd.direction.min(0)) * intersectionAxis
 		};
 		
 		auto const cubeLocalCoord{ 
 			cubeCoord.applied([](auto const coord, auto i) -> int32_t {
-				return int32_t(misc::mod<int64_t>(coord, chunk::cubesInBlockDim));
+				return int32_t(misc::mod<int64_t>(coord, units::cubesInBlockDim));
 			})
 		};
 		
-		ChunkCoord const blockAt { 
+		Position const blockAt { 
 			vec3i{},
-			ChunkCoord::Fractional{ 
-				cubeCoord * ChunkCoord::fracCubeDim
+			Position::Fractional{ 
+				cubeCoord * units::fracInCubeDim
 			}  
 		};
-		ChunkCoord const coord{ 
+		Position const coord{ 
 			pd.chunk,
-			ChunkCoord::Fractional{ blockAt.coord() }
+			Position::Fractional{ blockAt.coord() }
 		};
 		
 		vec3i const blockCoord = coord.blockInChunk();
@@ -2782,7 +2608,7 @@ static void markNeighboursIfAtBounds(chunk::Chunk chunk, vec3i const blockCoord)
 	chunk::Move_to_neighbour_Chunk const c{ chunk };
 	for(int i{}; i < chunk::Neighbours::neighboursCount; i++) {
 		auto const dir{ chunk::Neighbours::indexAsDir(i) };
-		auto const bounds{ dir.max(0).mix(vec3i{0}, vec3i{chunk::blocksInChunkDim-1}) };
+		auto const bounds{ dir.max(0).mix(vec3i{0}, vec3i{units::blocksInChunkDim-1}) };
 		
 		auto const blockAtBounds{ blockCoord.equal(bounds) };
 		if(blockAtBounds.any()) {
@@ -2820,8 +2646,8 @@ static void update() {
 	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE && !isSpectator) {
 		bool isAction = false;
 
-		ChunkCoord const viewport{ currentCameraPos() };
-		PosDir const pd{ PosDir(viewport, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
+		Position const viewport{ currentCameraPos() };
+		PosDir const pd{ PosDir(viewport, Position::posToFracTrunk(viewport_current().forwardDir() * 7)) };
 		vec3i const dirSign{ pd.direction };
 		DDA checkBlock{ pd };
 	
@@ -2842,21 +2668,21 @@ static void update() {
 					block = chunk::Block::emptyBlock();
 					
 					if(emitter) {
-						auto const cubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim };
+						auto const cubeCoord{ chunk::indexBlock(result.blockIndex) * units::cubesInBlockDim };
 						SubtractLighting::inChunkCubes<BlocksLightingConfig>(chunk, cubeCoord, cubeCoord + 1);
 					}
-					else for(int i{}; i < chunk::cubesInBlockCount; i++) {
-						auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
+					else for(int i{}; i < units::cubesInBlockCount; i++) {
+						auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
 						AddLighting::fromCubeForcedFirst<BlocksLightingConfig>(chunk, curCubeCoord);
 					}
 					
-					for(int i{}; i < chunk::cubesInBlockCount; i++) {
-						auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
+					for(int i{}; i < units::cubesInBlockCount; i++) {
+						auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
 						AddLighting::fromCubeForcedFirst<SkyLightingConfig>(chunk, curCubeCoord);
 					}
 				}
 				else {
-					auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex) };
+					auto const curCubeCoord{ chunk::indexBlock(result.blockIndex) * units::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex) };
 					block = chunk::Block{ block.id(), uint8_t( block.cubes() & (~chunk::Block::blockCubeMask(result.cubeIndex)) ) };
 					
 					if(emitter) SubtractLighting::inChunkCubes<BlocksLightingConfig>(chunk, curCubeCoord, curCubeCoord);
@@ -2874,7 +2700,7 @@ static void update() {
 				vec3i const start_{ aabb.start() };
 				vec3i const end_  { aabb.end  () };
 				
-				vec3i start{ chunk::blocksInChunkDim-1 };
+				vec3i start{ units::blocksInChunkDim-1 };
 				vec3i end  { 0 };
 				
 				for(int32_t x = start_.x; x <= end_.x; x++)
@@ -2902,10 +2728,10 @@ static void update() {
 				
 				if(intersectionAxis == 0) break;
 				
-				ChunkCoord const coord{ 
+				Position const coord{ 
 					pd.chunk,
-					ChunkCoord::Cube{ 
-						  ChunkCoord::fracToBlockCube(intersection)
+					Position::Cube{ 
+						  Position::fracToBlockCube(intersection)
 						+ vec3l(pd.direction.min(0)) * vec3l(intersectionAxis)
 					} 
 				};
@@ -2922,7 +2748,7 @@ static void update() {
 				auto const blockId{ chunkData[index].id() };
 				
 				if(blockId != 0) {
-					ChunkCoord const bc{ coord - ChunkCoord::Block{ vec3l(dirSign) * vec3l(intersectionAxis) } };
+					Position const bc{ coord - Position::Block{ vec3l(dirSign) * vec3l(intersectionAxis) } };
 					vec3i const blockCoord = bc.blockInChunk();
 					vec3i const blockChunk = bc.chunk();
 			
@@ -2955,16 +2781,16 @@ static void update() {
 						aabb = chunk::AABB(start, end);
 						
 						
-						SubtractLighting::inChunkCubes<SkyLightingConfig>(chunk, blockCoord*chunk::cubesInBlockDim, blockCoord*chunk::cubesInBlockDim + 1);
-						SubtractLighting::inChunkCubes<BlocksLightingConfig>(chunk, blockCoord*chunk::cubesInBlockDim, blockCoord*chunk::cubesInBlockDim + 1);						
+						SubtractLighting::inChunkCubes<SkyLightingConfig>(chunk, blockCoord*units::cubesInBlockDim, blockCoord*units::cubesInBlockDim + 1);
+						SubtractLighting::inChunkCubes<BlocksLightingConfig>(chunk, blockCoord*units::cubesInBlockDim, blockCoord*units::cubesInBlockDim + 1);						
 						if(emitter) {
-							for(int i{}; i < chunk::cubesInBlockCount; i++) {
-								auto const curCubeCoord{ blockCoord * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
+							for(int i{}; i < units::cubesInBlockCount; i++) {
+								auto const curCubeCoord{ blockCoord * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
 								BlocksLightingConfig::getLight(chunk, curCubeCoord) = 31u;		
 							}
 								
-							for(int i{}; i < chunk::cubesInBlockCount; i++) {
-								auto const curCubeCoord{ blockCoord * chunk::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
+							for(int i{}; i < units::cubesInBlockCount; i++) {
+								auto const curCubeCoord{ blockCoord * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
 								AddLighting::fromCube<BlocksLightingConfig>(chunk, curCubeCoord);
 							}
 						}
@@ -3195,7 +3021,7 @@ int main(void) {
 		float toGlob[3][3];
 		currentViewport.localToGlobalSpace(&toGlob);
 		currentViewport.globalToLocalSpace(&toLoc);
-		ChunkCoord const cameraCoord{ currentCameraPos() };
+		Position const cameraCoord{ currentCameraPos() };
 		auto const cameraChunk{ cameraCoord.chunk() };
 		auto const cameraPosInChunk{ cameraCoord.positionInChunk() };
 		
@@ -3269,7 +3095,7 @@ int main(void) {
 			int playerChunkIndex = playerChunkCand;
 			glUniform1i(startChunkIndex_u, playerChunkIndex);
 			
-			auto const playerRelativePos{ vec3f((playerCoord - ChunkCoord{ChunkCoord::Chunk{cameraChunk}}).position()) + vec3f{0, float(height/2.0), 0} };
+			auto const playerRelativePos{ vec3f((playerCoord - Position{Position::Chunk{cameraChunk}}).position()) + vec3f{0, float(height/2.0), 0} };
 			glUniform3f(playerRelativePosition_u, playerRelativePos.x, playerRelativePos.y, playerRelativePos.z);
 			
 			glUniform1i(drawPlayer_u, isSpectator);
@@ -3292,14 +3118,14 @@ int main(void) {
 		{
 			glUseProgram(blockHitbox_p);
 			
-			PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
+			PosDir const pd{ PosDir(cameraCoord, Position::posToFracTrunk(viewport_current().forwardDir() * 7)) };
 			auto const optionalResult{ trace(chunks, pd) };
 				
 			if(optionalResult) {
 				auto const result{ *optionalResult };
 				auto const chunk { result.chunk };
 				
-				ChunkCoord const blockCoord{ chunk.position(), ChunkCoord::Block{vec3l(chunk::indexBlock(result.blockIndex))} };
+				Position const blockCoord{ chunk.position(), Position::Block{vec3l(chunk::indexBlock(result.blockIndex))} };
 				
 				auto const blockRelativePos{ 
 					vec3f((blockCoord - cameraCoord).position()) +  
@@ -3365,7 +3191,7 @@ int main(void) {
 	
 				ss  << COMMIT_HASH << " - " << COMMIT_BRANCH << " : " << COMMIT_NAME << " (" << COMMIT_DATE << ")" << '\n';
 				
-				PosDir const pd{ PosDir(cameraCoord, ChunkCoord::posToFracTrunk(viewport_current().forwardDir() * 7)) };
+				PosDir const pd{ PosDir(cameraCoord, Position::posToFracTrunk(viewport_current().forwardDir() * 7)) };
 				auto const optionalResult{ trace(chunks, pd) };
 				if(optionalResult) {
 					auto const result{ *optionalResult };
@@ -3376,7 +3202,7 @@ int main(void) {
 					
 					ss.precision(1);
 					auto const block{ chunk.data()[blockInChunkCoord] };
-					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << (vec3f(blockInChunkCoord*chunk::cubesInBlockDim + cubeInBlockCoord)/chunk::cubesInBlockDim)  << " : block id=" << block.id() << '\n';
+					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << (vec3f(blockInChunkCoord*units::cubesInBlockDim + cubeInBlockCoord)/units::cubesInBlockDim)  << " : block id=" << block.id() << '\n';
 				};
 				
 				ss.precision(4);

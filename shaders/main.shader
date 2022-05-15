@@ -28,7 +28,7 @@ uniform sampler2D noise;
 uniform vec3 playerRelativePosition;
 uniform bool drawPlayer;
 
-//copied from Chunks.h
+//copied from Units.h
 const int blocksInChunkDimAsPow2 = 4;
 const int blocksInChunkDim = 1 << blocksInChunkDimAsPow2;
 const int blocksInChunkCount = blocksInChunkDim*blocksInChunkDim*blocksInChunkDim;
