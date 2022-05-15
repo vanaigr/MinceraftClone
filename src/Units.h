@@ -1,10 +1,9 @@
 #pragma once
 #include"Misc.h"
 
-#include<limits>
 #include<stdint.h>
-#include<utility>
-#include<stdexcept>
+//#include<utility>
+#include<cmath>
 
 #include"Unit.h"
 
@@ -15,31 +14,25 @@ namespace units {
 	  //block is 1/16 of a chunk
 	  constexpr int blocksInChunkDimAsPow2 = 4;
 	  constexpr int blocksInChunkDim = 1 << blocksInChunkDimAsPow2;
-	  constexpr int blocksInChunkCount = blocksInChunkDim*blocksInChunkDim*blocksInChunkDim;
 	  
 	  //cube is 1/2 of a block
 	  constexpr int cubesInBlockDimAsPow2 = 1;
 	  constexpr int cubesInBlockDim = 1 << cubesInBlockDimAsPow2;
-	  constexpr int cubesInBlockCount = cubesInBlockDim*cubesInBlockDim*cubesInBlockDim;
 	  
 	  constexpr int cubesInChunkDimAsPow2 = cubesInBlockDimAsPow2 + blocksInChunkDimAsPow2;
 	  constexpr int cubesInChunkDim = 1 << cubesInChunkDimAsPow2;
-	  constexpr int cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
 
 	//fractional is 1/(2^32) of a chunk
 	constexpr int fracInChunkDimAsPow2 = 32;
 	constexpr long long fracInChunkDim = 1ll << fracInChunkDimAsPow2;
-	/*no fracInChunkCount*/
 	
 	constexpr int fracInBlockDimAsPow2 = fracInChunkDimAsPow2 - blocksInChunkDimAsPow2; static_assert(fracInBlockDimAsPow2 >= 0);
 	constexpr int fracInBlockDim = 1 << fracInBlockDimAsPow2;
-	/*no fracInBlockCount*/
 	
 	constexpr int fracInCubeDimAsPow2 = fracInChunkDimAsPow2 - cubesInChunkDimAsPow2; static_assert(fracInCubeDimAsPow2 >= 0);
 	constexpr int fracInCubeDim = 1 << fracInCubeDimAsPow2;
-	/*no fracInCubeCount*/
 	
-
+	
 	struct UnitsHierarchy;
 
 	//units ID
@@ -72,6 +65,16 @@ namespace units {
 		return other <= unit && unit < (other + 1);
 	}
 	template<typename Unit> constexpr bool fitsInOneChunk(Unit const unit) { return fitsIn<Unit, Chunk>(unit, Chunk{0}); }
+	
+	
+	static constexpr inline Fractional posToFrac(double value) { return Fractional::create(floor(value*fracInBlockDim)); }
+	static constexpr inline Fractional posToFracTrunk(double value) { return Fractional::create(value*fracInBlockDim/*default is truncate*/); }
+	static constexpr inline Fractional posToFracRAway(double value) {  //round away from zero
+		auto const val{ value*fracInBlockDim };
+		return Fractional::create( std::copysign(ceil(abs(val)), val) ); 
+	}
+	
+	static constexpr inline double fracToPos(Fractional value) { return static_cast<double>(value.value()) / fracInBlockDim; }
 	
 	
 	namespace /*test*/ {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include"Position.h"
 #include"Chunk.h"
 
 template<typename Action>
@@ -13,9 +14,9 @@ static void iterateCubeNeighbours(
 	for(auto i{decltype(chunk::ChunkLighting::dirsCount){}}; i < chunk::ChunkLighting::dirsCount; i++) {
 		auto const neighbourDir{ chunk::ChunkLighting::indexAsDir(i) };
 		
-		Position const neighbourCubePos{ chunkCoord, Position::Cube{vec3l(cubeCoord + neighbourDir)} };
-		auto const neighbourCubeChunkCoord{ neighbourCubePos.chunk() };
-		auto const neighbourCubeInChunkCoord{ neighbourCubePos.cubeInChunk() };
+		auto const neighbourCubePos{ pos::Chunk{chunkCoord} + pos::Cube{cubeCoord + neighbourDir} };
+		auto const neighbourCubeChunkCoord{ neighbourCubePos.valAs<pos::Chunk>() };
+		auto const neighbourCubeInChunkCoord{ neighbourCubePos.as<pos::Cube>().valIn<pos::Chunk>() };
 		
 		auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{cubeChunk}.move(neighbourCubeChunkCoord).get() };
 		if(neighbourCubeChunkIndex == -1) continue;
@@ -46,7 +47,9 @@ namespace AddLighting {
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord, 
 				[startLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-					auto [blockId, isCube] = cubeChunk.data().cubeAt(cubeInChunkCoord);
+					auto const cube{ cubeChunk.data().cubeAt(cubeInChunkCoord) };
+					auto const blockId{ cube.block.id() };
+					auto const isCube{ cube.isSolid };
 					
 					auto const type{ Config::getType(blockId, isCube) };
 					if(type == LightingCubeType::wall) return;
@@ -76,8 +79,10 @@ namespace AddLighting {
 		iterateCubeNeighbours(
 			cubeChunk, cubeInChunkCoord, 
 			[&startLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-				auto [blockId, isCube] = cubeChunk.data().cubeAt(cubeInChunkCoord);
-				
+				auto const cube{ cubeChunk.data().cubeAt(cubeInChunkCoord) };
+				auto const blockId{ cube.block.id() };
+				auto const isCube{ cube.isSolid };
+						
 				auto const type{ Config::getType(blockId, isCube) };
 				if(type == LightingCubeType::wall) return;
 				
@@ -105,7 +110,10 @@ namespace SubtractLighting {
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord,
 				[&endCubes, fromLight = cubeLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-					auto [blockId, isCube] = cubeChunk.data().cubeAt(cubeInChunkCoord);
+					auto const cube{ cubeChunk.data().cubeAt(cubeInChunkCoord) };
+					auto const blockId{ cube.block.id() };
+					auto const isCube{ cube.isSolid };
+					
 					auto const type{ Config::getType(blockId, isCube) };
 					if(type == LightingCubeType::wall) return;
 					
@@ -151,7 +159,9 @@ namespace SubtractLighting {
 					[&endCubes, cubesChunk, cubesStartInChunkCoord, cubesEndInChunkCoord](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
 						if(cubeChunk == cubesChunk && cubeInChunkCoord.in(cubesStartInChunkCoord, cubesEndInChunkCoord).all()) return;//skip cubes inside of starting area
 						
-						auto [blockId, isCube] = cubeChunk.data().cubeAt(cubeInChunkCoord);
+						auto const cube{ cubeChunk.data().cubeAt(cubeInChunkCoord) };
+						auto const blockId{ cube.block.id() };
+						auto const isCube{ cube.isSolid };
 						auto const type{ Config::getType(blockId, isCube) };
 						if(type == LightingCubeType::wall) return;
 						

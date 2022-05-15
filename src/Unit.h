@@ -141,5 +141,30 @@ namespace unit {
 		#pragma clang diagnostic pop
 		
 		#undef comp
+		
+		template<typename T>
+		constexpr static This create(T &&it) {
+			return This(static_cast<value_type>(it));
+		}
+		
+		template<typename Other>
+		constexpr auto as() const {
+			return static_cast<Other>(*this);
+		}
+		
+		template<typename Other>
+		constexpr auto valAs() const {
+			return as<Other>().value();
+		}
+		
+		template<typename Other>
+		constexpr auto in() const {
+			return *this - static_cast<This>(static_cast<Other>(*this));
+		}
+		
+		template<typename Other>
+		constexpr auto valIn() const {
+			return in<Other>().value();
+		}
 	};
 }

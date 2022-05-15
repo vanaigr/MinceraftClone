@@ -1,6 +1,7 @@
 #pragma once
 
 #include"Units.h"
+#include"Position.h"
 #include"Vector.h"
 
 #include<vector>
@@ -17,7 +18,7 @@ namespace chunk {
 		return coord.inMMX(vec3i{0}, vec3i{units::blocksInChunkDim}).all();
 	}
 	static constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
-		return index < units::blocksInChunkCount;
+		return index < pos::blocksInChunkCount;
 	}
 	
 	//used in main.shader
@@ -34,7 +35,7 @@ namespace chunk {
 		return coord.inMMX(vec3i{0}, vec3i{units::cubesInChunkDim}).all();
 	}
 	static constexpr bool checkCubeIndexInChunkValid(uint32_t const index) {
-		return index < units::cubesInChunkCount;
+		return index < pos::cubesInChunkCount;
 	}
 	
 	static vec3i cubeCoordInChunk_(uint32_t const index) { ///used in main.shader
@@ -90,14 +91,14 @@ namespace chunk {
 
 	
 	struct Block { //used in main.shader
-		static_assert(units::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
+		static_assert(pos::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
 		
 		static constexpr bool checkCubeCoordValid(vec3i const coord) {
 			return coord.inMMX(vec3i{0}, vec3i{units::cubesInBlockDim}).all();
 		}
 		
 		static constexpr bool checkCubeIndexValid(uint8_t const index) {
-			return index < units::cubesInBlockCount;
+			return index < pos::cubesInBlockCount;
 		}
 		
 		static constexpr uint8_t cubePosIndex(vec3i const pos) {
@@ -160,7 +161,7 @@ namespace chunk {
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cube(uint8_t const index) const { return blockCube(cubes(), index); }
 		
-		operator bool() const { return id() != 0; }
+		explicit operator bool() const { return id() != 0; }
 		constexpr bool isEmpty() const { return id() == 0; }
 		constexpr bool empty() const { return isEmpty(); }
 		
@@ -302,7 +303,7 @@ namespace chunk {
 	
 	
 	struct ChunkAO {
-		static constexpr int size = units::cubesInChunkCount;
+		static constexpr int size = pos::cubesInChunkCount;
 		
 		static vec3i dirsForIndex(const int index) { //used in main.shader
 			assert(index < 8); //at most 8 cubes share 1 vertex
@@ -327,7 +328,7 @@ namespace chunk {
 
 	
 	struct ChunkLighting {
-		static constexpr int size = units::cubesInChunkCount;
+		static constexpr int size = pos::cubesInChunkCount;
 		
 		static constexpr int dirsCount{ 6 };
 		
@@ -374,9 +375,9 @@ namespace chunk {
 	
 	
 	struct ChunkBlocksList {
-		static constexpr int16_t capacity = units::blocksInChunkCount;
+		static constexpr int16_t capacity = pos::blocksInChunkCount;
 		
-		using value_type = int16_t; static_assert(units::blocksInChunkCount < (1 << 15));
+		using value_type = int16_t; static_assert(pos::blocksInChunkCount < (1 << 15));
 	private:
 		
 		std::array<value_type, capacity> list;
@@ -411,7 +412,7 @@ namespace chunk {
 	};
 	
 	struct ChunkData {
-		static constexpr int size = units::blocksInChunkCount;
+		static constexpr int size = pos::blocksInChunkCount;
 	private:
 		 std::array<Block, size> blocks;
 	 public:
@@ -434,15 +435,16 @@ namespace chunk {
 			return blocks[blockIndex(coord)];
 		}
 		
-		std::tuple<uint16_t, bool> cubeAt(vec3i const cubeCoord) const {
+		struct Cube{ Block block; bool isSolid; };
+		
+		Cube cubeAt(vec3i const cubeCoord) const {
 			auto const blockInChunkCoord{ cubeCoord / units::cubesInBlockDim };
 			auto const cubeInBlockCoord { cubeCoord % units::cubesInBlockDim };
 			
 			auto const block{ (*this)[blockInChunkCoord] };
-			auto const blockId{ block.id() };
 			auto const isCube{ block.cube(cubeInBlockCoord) };
 			
-			return std::tuple<uint16_t, bool>{ blockId, isCube };
+			return { block, isCube };
 		}
 	};
 	
