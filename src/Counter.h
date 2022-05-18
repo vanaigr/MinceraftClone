@@ -1,7 +1,7 @@
 #pragma once
 
 template<size_t size>
-class MeanCounter {
+class Counter {
 private:
 	double accumulator[size];
 	size_t currentIndex = 0;

@@ -38,7 +38,10 @@ namespace chunk {
 		return index < pos::cubesInChunkCount;
 	}
 	
-	static vec3i cubeCoordInChunk_(uint32_t const index) { ///used in main.shader
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+	static vec3i cubeCoordInChunk(uint32_t const index) { ///used in main.shader
+#pragma clang diagnostic pop
 		assert(checkCubeIndexInChunkValid(index));
 		return vec3i( index % units::cubesInChunkDim, (index / units::cubesInChunkDim) % units::cubesInChunkDim, (index / units::cubesInChunkDim / units::cubesInChunkDim) );
 	}
@@ -228,7 +231,7 @@ namespace chunk {
 				return dirs[neighbourIndex];
 			}
 			
-			static constexpr uint8_t dirAsIndex(vec3i const dir) {
+			static uint8_t dirAsIndex(vec3i const dir) {
 				assert(checkDirValid(dir));
 				auto const result{ (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) };
 				if(indexAsDir(result) != dir) {
@@ -237,10 +240,10 @@ namespace chunk {
 				}
 				return result; 
 			}
-			static constexpr uint8_t mirror(uint8_t index) {
+			static uint8_t mirror(uint8_t index) {
 				return dirAsIndex(-indexAsDir(index));
 			}
-			static constexpr uint8_t mirror(vec3i const dir) {
+			static uint8_t mirror(vec3i const dir) {
 				return dirAsIndex(-dir);
 			}
 		
@@ -345,7 +348,7 @@ namespace chunk {
 			vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
 			return dirs[neighbourIndex];
 		}
-		static constexpr uint8_t dirAsIndex(vec3i const dir) {
+		static uint8_t dirAsIndex(vec3i const dir) {
 			assert(checkDirValid(dir));
 			auto const result{ (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) };
 			if(indexAsDir(result) != dir) {
@@ -546,7 +549,7 @@ namespace chunk {
 		std::vector<int> used_{};
 		
 		struct PosHash { 
-			constexpr inline std::size_t operator()(vec3i const &it) const noexcept { 
+			inline std::size_t operator()(vec3i const &it) const noexcept { 
 				return  (std::hash<int32_t>{}(it.x) ^ (std::hash<int32_t>{}(it.x) << 1)) ^ (std::hash<int32_t>{}(it.z) << 1);
 			} 
 		};
@@ -567,6 +570,10 @@ namespace chunk {
 		std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
 	
 		std::vector<int>  const &usedChunks() const { return used; }
+		
+		Chunks() = default;
+		Chunks(Chunks const&) = delete; //prevent accidental pass-by-value
+		Chunks &operator=(Chunks const&) = delete;
 		
 		//returns used[] position
 		inline int reserve() {

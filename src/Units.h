@@ -105,7 +105,7 @@ namespace units {
 			};
 		};
 		
-		void test() {
+		constexpr void test() {
 			TestConversion<Block, 5>::to<Fractional , fracInBlockDim  * 5>::check();
 			TestConversion<Block, 5>::to<Cube, cubesInBlockDim * 5>::check();
 			TestConversion<Chunk, 5>::to<Cube, cubesInChunkDim * 5>::check();
@@ -121,5 +121,6 @@ namespace units {
 			static_assert(fitsInOneChunk(Block{blocksInChunkDim - 1}));
 			static_assert(!fitsInOneChunk(Block{blocksInChunkDim}));
 		}
+		static_assert((test(), true)); //supress 'unused function' test
 	}
 }

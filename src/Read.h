@@ -1,9 +1,11 @@
 #pragma once
 
+#include<memory>
+
 struct Image {
     unsigned long sizeX;
     unsigned long sizeY;
-    char* data;
+    std::unique_ptr<char[]> data;
 };
 
 //https://stackoverflow.com/a/42043320/15291447
@@ -59,12 +61,12 @@ inline int ImageLoad(char const* filename, Image* image) {
         // seek past the rest of the bitmap header.
         fseek(file, 24, SEEK_CUR);
         // read the data.
-        image->data = (char*)malloc(size);
+        image->data = std::unique_ptr<char[]>((char*)malloc(size));
         if (image->data == NULL) {
             printf("Error allocating memory for color-corrected image data");
             return 0;
         }
-        if ((i = fread(image->data, size, 1, file)) != 1) {
+        if ((i = fread(image->data.get(), size, 1, file)) != 1) {
             printf("Error reading image data from %s.\n", filename);
             return 0;
         }

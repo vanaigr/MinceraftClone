@@ -1,20 +1,16 @@
 #version 450
 
-uniform uvec2 windowSize;
-
-uniform vec3 rightDir, topDir;
 
 in vec4 gl_FragCoord;
-
-layout (depth_greater) out float gl_FragDepth;
 layout(location = 0) out vec4 color;
+
+uniform uvec2 windowSize;
+uniform vec3 rightDir, topDir;
 
 uniform float time;
 
 uniform sampler2D atlas;
-uniform vec2 atlasTileCount;
-
-uniform float mouseX;
+uniform float atlasTileSize;
 
 uniform mat4 projection; //from local space to screen
 
@@ -27,6 +23,8 @@ uniform sampler2D noise;
 
 uniform vec3 playerRelativePosition;
 uniform bool drawPlayer;
+uniform float playerWidth;
+uniform float playerHeight;
 
 //copied from Units.h
 const int blocksInChunkDimAsPow2 = 4;
@@ -43,11 +41,11 @@ const int cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
 
 
 
-layout(binding = 1) restrict readonly buffer ChunksBlocks {
+restrict readonly buffer ChunksBlocks {
      uint data[][16*16*16];
 } chunksBlocks;
 
-layout(binding = 2) restrict readonly buffer AtlasDescription {
+restrict readonly buffer AtlasDescription {
     int positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot 
 };
 
@@ -57,7 +55,7 @@ struct Ray {
 };
 
 
-layout(binding = 4) restrict readonly buffer ChunksBounds {
+restrict readonly buffer ChunksBounds {
     uint bounds[];
 } bs;
 
@@ -88,7 +86,7 @@ bool emptyBounds(const int chunkIndex) {
 
 
 #define neighboursCount 6
-layout(binding = 5) restrict readonly buffer ChunksNeighbours {
+restrict readonly buffer ChunksNeighbours {
     int neighbours[];
 } ns;
 
@@ -105,7 +103,7 @@ layout(binding = 5) restrict readonly buffer ChunksNeighbours {
 	}
 	
 	bool isNeighbourSelf(const int index) {
-		return indexAsNeighbourDir(index) == 0;
+		return indexAsNeighbourDir(index) == ivec3(0);
 	}
 
 int chunkDirectNeighbourIndex(const int chunkIndex, const ivec3 dir) {
@@ -135,7 +133,7 @@ uniform ivec3 playerChunk;
 uniform  vec3 playerInChunk;
 
 	
-layout(binding = 3) restrict readonly buffer ChunksPoistions {
+restrict readonly buffer ChunksPoistions {
     int positions[];
 } ps;
 
@@ -159,13 +157,12 @@ vec3 relativeChunkPosition(const int chunkIndex) {
 	return vec3( (chunkPosition(chunkIndex) - playerChunk) * blocksInChunkDim ) - playerInChunk;
 }
 
-
-vec3 sampleAtlas(const vec2 offset, const vec2 coord) {
-    vec2 uv = vec2(
-        coord.x + offset.x,
-        coord.y + atlasTileCount.y - (offset.y + 1)
-    ) / atlasTileCount;
-    return pow(texture2D(atlas, uv).rgb, vec3(2.2));
+vec3 sampleAtlas(const vec2 offset, const vec2 coord) { //used in Main.cpp - Block hitbox fragment, Current block fragment
+	const ivec2 size = textureSize(atlas, 0);
+	const vec2 textureCoord = vec2(coord.x + offset.x, offset.y + 1-coord.y);
+    const vec2 uv_ = vec2(textureCoord * atlasTileSize / vec2(size));
+	const vec2 uv = vec2(uv_.x, 1 - uv_.y);
+    return pow(texture(atlas, uv).rgb, vec3(2.2));
 }
 
 vec2 atlasAt(const uint id, const ivec3 side) {
@@ -231,7 +228,7 @@ Block blockAt_unnormalized(int chunkIndex, ivec3 blockCoord) {
 	return blockAt(chunkIndex, blockCoord);
 }
 
-layout(binding = 6) restrict readonly buffer ChunksAO {
+restrict readonly buffer ChunksAO {
     uint data[];
 } ao;
 
@@ -290,11 +287,11 @@ float lightForChunkVertexDir(const int chunkIndex, const ivec3 vertex, const ive
 }
 
 
-layout(binding = 7) restrict readonly buffer ChunksSkyLighting {
+restrict readonly buffer ChunksSkyLighting {
     uint data[];
 } skyLighting;
 
-layout(binding = 8) restrict readonly buffer ChunksBlockLighting {
+restrict readonly buffer ChunksBlockLighting {
     uint data[];
 } blockLighting;
 
@@ -325,7 +322,7 @@ float lightingAtCube(int chunkIndex, ivec3 cubeCoord) {
 }
 
 //chunk::Chunk3x3BlocksList
-layout(binding = 9) restrict readonly buffer ChunksNeighbourngEmitters {
+restrict readonly buffer ChunksNeighbourngEmitters {
     uint data[];
 } emitters;
   const int neSidelength = 3 * blocksInChunkDim;
@@ -442,6 +439,7 @@ Surface surfaceEntity(const uint type) {
 	return Surface(type | (1u << 31));
 }
 
+#if 0
 //https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
 vec3 reflect(const vec3 incoming, const vec3 normal)  { 
     return incoming - 2 * dot(incoming, normal) * normal; 
@@ -457,6 +455,8 @@ vec3 refract2(const vec3 incoming, const vec3 normal, const float ior)  {
     const float k = 1 - eta * eta * (1 - cosi * cosi); 
     return k < 0 ? reflect(incoming, normal) : eta * incoming + (eta * cosi - sqrt(k)) * n; 
 }
+
+#endif
 
 vec3 screenMultipty(const vec3 v1, const vec3 v2) {
 	return 1 - (1-v1) * (1-v2);
@@ -564,6 +564,8 @@ IntersectionInfo noIntersectionInfo() {
 	return i;
 }
 
+bvec3 and3b/*seems that glsl has no && for bvec_*/(const bvec3 a, const bvec3 b) { return bvec3(a.x && b.x, a.y && b.y, a.z && b.z); }
+
 IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*must be loaded*/ startChunkIndex, const int startBias, const float stopAtLen /*and return no intersection with chunkIndex*/) { 
 	const vec3 dir = ray.dir;
 	const vec3 dirSign = sign(dir);
@@ -594,7 +596,7 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 		const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
 		const bvec3 nextMinAxisB = equal(nextLenghts, vec3(nextMinLen));
 				
-		if(!any(equal(curCoord, candCoords) && nextMinAxisB)) bias = -1;
+		if(!any(and3b(equal(curCoord, candCoords), nextMinAxisB))) bias = -1;
 		
 		curCoord = mix(
 			at(ray, nextMinLen), 
@@ -945,8 +947,8 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 		
 		const bool shadow = type == 1 || type == 2;
 		
-		const vec3 startP = playerRelativePosition - (vec3(0.3, 1.95/2, 0.3));
-		const vec3 endP   = playerRelativePosition + (vec3(0.3, 1.95/2, 0.3));
+		const vec3 startP = playerRelativePosition - vec2(playerWidth/2.0, 0           ).xyx;
+		const vec3 endP   = playerRelativePosition + vec2(playerWidth/2.0, playerHeight).xyx;
 		
 		const Intersection playerIntersection = intersectCube(ray, startP, endP, vec3(1,0,0), vec3(0,1,0));
 		const bool isPlayer = (drawPlayer || curFrame != 0) && playerIntersection.is;
@@ -1035,7 +1037,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				const vec3 incoming = ray.dir - glassOffset * vec3(1-intersectionSide);
 				
 				const vec3 refracted_ = refract(normalize(incoming), normalize(normal), 1 );
-				const bool isRefracted = refracted_ != 0;
+				const bool isRefracted = refracted_ != vec3(0);
 				const vec3 newDir = isRefracted ? refracted_ : reflect(incoming, normalize(vec3(side)));
 				const int newBias = sign( isRefracted ? bias + 1 : -bias );
 				
@@ -1046,7 +1048,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 			}
 			else if(blockId == 8) {
 				const vec3 color = sampleAtlas(atlasOffset, uv) * light * mix(0.5, 1.0, ambient);
-				const vec3 offset = normalize(texture2D(noise, uv/5).xyz - 0.5) * 0.01;
+				const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
 				const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
 				const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
 				

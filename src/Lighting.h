@@ -88,7 +88,7 @@ namespace AddLighting {
 				
 				auto &cubeLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 				if(type == LightingCubeType::medium) {
-					auto const expectedLight{ SkyLightingConfig::propagationRule(startLight, fromDir, blockId, isCube) };
+					auto const expectedLight{ Config::propagationRule(startLight, fromDir, blockId, isCube) };
 					if(cubeLight < expectedLight) cubeLight = expectedLight;
 					propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, cubeLight); //update even if starting cube's expected neighbour lighting is not enough
 				}
