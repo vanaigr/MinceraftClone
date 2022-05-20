@@ -3,6 +3,7 @@ obj
 *.exe
 config.makefile
 Test
+assets/atlas.psd
 /save
 /save0
 /save2

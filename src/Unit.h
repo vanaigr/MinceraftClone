@@ -157,6 +157,11 @@ namespace unit {
 			return in<Other>().value();
 		}
 		
+		template<typename Other>
+		constexpr auto isIn() const {
+			return this->value() == this->in<Other>().value();
+		}
+		
 		#define comp(OPERATOR) constexpr friend auto operator##OPERATOR (This const c1, This const c2) { return c1.value() OPERATOR c2.value(); } \
 		\
 		template<typename Other, typename = std::enable_if_t<HaveCommon<Hierarchy, This, Other>::value>> constexpr friend auto operator##OPERATOR (This const c1, Other const c2) { \

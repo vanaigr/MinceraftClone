@@ -45,10 +45,6 @@ restrict readonly buffer ChunksBlocks {
      uint data[][16*16*16];
 } chunksBlocks;
 
-restrict readonly buffer AtlasDescription {
-    int positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot 
-};
-
 struct Ray {
     vec3 orig;
     vec3 dir;
@@ -157,6 +153,11 @@ vec3 relativeChunkPosition(const int chunkIndex) {
 	return vec3( (chunkPosition(chunkIndex) - playerChunk) * blocksInChunkDim ) - playerInChunk;
 }
 
+
+restrict readonly buffer AtlasDescription {
+    uint positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot; 16bit xAlpha, 16bit yAlpha
+} ad;
+
 vec3 sampleAtlas(const vec2 offset, const vec2 coord) { //used in Main.cpp - Block hitbox fragment, Current block fragment
 	const ivec2 size = textureSize(atlas, 0);
 	const vec2 textureCoord = vec2(coord.x + offset.x, offset.y + 1-coord.y);
@@ -165,12 +166,17 @@ vec3 sampleAtlas(const vec2 offset, const vec2 coord) { //used in Main.cpp - Blo
     return pow(texture(atlas, uv).rgb, vec3(2.2));
 }
 
+vec2 alphaAt(const uint id) {
+	const int index = (int(id) * 4 + 3);
+	const uint pos = ad.positions[index];
+	return vec2( pos & 0xffffu, (pos>>16) & 0xffffu );
+}
+
 vec2 atlasAt(const uint id, const ivec3 side) {
 	const int offset = int(side.y == 1) + int(side.y == -1) * 2;
-	const int index = (int(id) * 3 + offset);
-	const int pos = positions[index];
-	const int bit16 = 65535;
-	return vec2( pos&bit16, (pos>>16)&bit16 );
+	const int index = (int(id) * 4 + offset);
+	const uint pos = ad.positions[index];
+	return vec2( pos & 0xffffu, (pos>>16) & 0xffffu );
 }
 
 ivec3 testBounds(const ivec3 i) {
@@ -668,19 +674,17 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 			const vec3 toBlockCoord   = floor(curCoord - negative_ * vec3(blockBounds));
 			
 			Block toBlock;
-			//if(!atBlockBounds) toBlock = fromBlock;
-			//else {
-				const ivec3 relativeToBlockCoordI = ivec3(toBlockCoord - relativeTo);
-				if(checkBoundaries(relativeToBlockCoordI)) toBlock = blockAt(
-					curChunkIndex,
-					relativeToBlockCoordI
-				);
-				else if(nextNotLoaded) toBlock = blockAir();
-				else toBlock = blockAt(
-					nextChunkIndex,
-					ivec3(toBlockCoord - nextRelativeTo) //and3i(relativeToBlockCoordI + blocksInChunkDim, blocksInChunkDim-1)
-				);
-			//}
+			
+			const ivec3 relativeToBlockCoordI = ivec3(toBlockCoord - relativeTo);
+			if(checkBoundaries(relativeToBlockCoordI)) toBlock = blockAt(
+				curChunkIndex,
+				relativeToBlockCoordI
+			);
+			else if(nextNotLoaded) toBlock = blockAir();
+			else toBlock = blockAt(
+				nextChunkIndex,
+				ivec3(toBlockCoord - nextRelativeTo) //and3i(relativeToBlockCoordI + blocksInChunkDim, blocksInChunkDim-1)
+			);
 			
 			const Block biasedFromBlock = bias < 0 ? fromBlock : blockAir();
 			const Block biasedToBlock   = bias < 1 ? toBlock   : blockAir();
@@ -722,10 +726,19 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 								dot(intersectionSide, localBlockCoord.zxx),
 								dot(intersectionSide, localBlockCoord.yzy)
 							);
-			
-							if(blockId == 5) { //leaves
-								if(int(dot(ivec2(uv * vec2(4, 8)), vec2(1))) % 2 != 0) continue;
-							}
+							const float index = dot(floor(curCoord), vec3(7, 13, 17));
+							const float cindex = mod(index, 4);
+							const float sindex = mod(1 - index, 4);//sinA = cos(90deg - A)
+							const mat2 rot = mat2(							
+								/*cos(floor(index) * 90deg) <=> index: 0->1, 1->0, 2->-1, 3->0*/
+								 (1 - cindex) * float(!(cindex == 3)),
+								-(1 - sindex) * float(!(sindex == 3)),
+								 (1 - sindex) * float(!(sindex == 3)),
+								 (1 - cindex) * float(!(cindex == 3))
+							); //some multiple 90 degree rotation per block coord
+							const vec2 alphaUv = rot * (uv-0.5) + 0.5; //rotation around (0.5, 0.5)
+							
+							if(sampleAtlas(alphaAt(blockId), alphaUv).x < 0.5) continue;
 						
 							if(stopAtLen <= length(curCoord - ray.orig)) return IntersectionInfo(
 								vec3(0),
@@ -751,7 +764,7 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 			fromBlock = toBlock;
 			const bool hnn = hasNoNeighbours(fromBlock);
 			const float skipDistance = hnn ? 1 : (blockId(fromBlock) == 0 ? 1.0 : cubesInBlockDim);
-			const vec3 candCoords = floor(curCoord*skipDistance * dirSign + (hnn ? 2 : 1))/skipDistance*dirSign;
+			const vec3 candCoords = floor(curCoord * skipDistance * dirSign + (hnn ? 2 : 1)) / skipDistance * dirSign;
 
 			const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
 			const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
@@ -765,7 +778,7 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 			//if(hnn) discard;//steps++;
 			bias = -1;
 			
-			const bool inChunkBounds = all(lessThan((curCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0)) );
+			const bool inChunkBounds = all(lessThanEqual((curCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0)) );
 	
 			if(!inChunkBounds) {
 				if(stopInThisChunk) break;

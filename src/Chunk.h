@@ -382,13 +382,11 @@ namespace chunk {
 		
 		using value_type = int16_t; static_assert(pos::blocksInChunkCount < (1 << 15));
 	private:
-		
-		std::array<value_type, capacity> list;
-		int16_t curSize;
+		std::vector<value_type> list;
 	public:
 		ChunkBlocksList() = default;
 		
-		int size() const { return curSize; }
+		int size() const { return list.size(); }
 		bool inRange(int const index) const { return index >= 0 && index < size(); }
 		
 		value_type       &operator[](int const index)       { assert(inRange(index)); return list[index]; }
@@ -405,12 +403,12 @@ namespace chunk {
 		
 		
 		void add(vec3i const blockCoord) {
-			assert(curSize != capacity);
-			list[curSize++] = blockIndex(blockCoord);
+			assert(size() != capacity);
+			list.push_back(blockIndex(blockCoord));
 		}
 		
 		void clear() {
-			curSize = 0;
+			list.clear();
 		}
 	};
 	
@@ -502,47 +500,6 @@ namespace chunk {
 	};
 	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);
 	
-	/*template<uint16_t maxSize>
-	struct BlocksSet {
-	private:
-		std::array<uint16_t, 1+size_t(maxSize)> data;
-	public:
-		BlocksSet() = default;
-		
-		uint16_t &size() { return data[0]; }
-		uint16_t const &size() const { return data[0]; }
-		
-		uint16_t *begin() { return &data[1]; }
-		uint16_t *end() { return begin() + size(); }
-				
-		uint16_t const *cbegin() const { return &data[1]; }
-		uint16_t const *cend() const { return begin() + size(); }
-		
-		bool checkIndexValid(int const index) const { return index < size() && index >= 0; }
-		
-		uint16_t &operator[](int const index) { assert(checkIndexValid(index)); return data[1+index]; }
-		uint16_t const &operator[](int const index) const { assert(checkIndexValid(index)); return data[1+index]; }
-		
-		uint16_t *tryAdd(uint16_t const blockIndex) {
-			auto &curSize{ size() };
-			if(curSize < maxSize && std::find(begin(), end(), blockIndex) == end()) {
-				return &( (*this)[curSize++] = blockIndex );
-			}
-			else return NULL;
-		}
-		
-		void remove(uint16_t const blockIndex) {
-			uint16_t *const cur{ std::find(begin(), end(), blockIndex) };
-			if(cur != end()) {
-				for(uint16_t *next{cur+1}; next < end(); next++) *(next-1) = *next;
-				size()--;
-			}
-		}
-	private:
-	};
-	
-	using Emitters = BlocksSet<15>;*/
-	
 	struct Chunks {	
 	private:
 		std::vector<int> vacant{};
@@ -562,8 +519,8 @@ namespace chunk {
 		std::vector<bool> modified{};
 		std::vector<ChunkData> chunksData{};
 		std::vector<ChunkAO> chunksAO{};
-		std::vector<ChunkLighting> chunksSkyLighting;
-		std::vector<ChunkLighting> chunksBlockLighting;
+		std::vector<ChunkLighting> chunksSkyLighting{};
+		std::vector<ChunkLighting> chunksBlockLighting{};
 		std::vector<ChunkBlocksList> chunksEmitters{};
 		std::vector<Neighbours> chunksNeighbours{};
 		std::vector<Chunk3x3BlocksList> chunksNeighbouringEmitters;
@@ -679,7 +636,7 @@ namespace chunk {
 			return optChunk();
 		}
 		
-		OptionalChunkIndex moveToNeighbour(vec3i const neighbour) {
+		OptionalChunkIndex moveToNeighbour/*offset to neighbour*/(vec3i const neighbour) {
 			if(!valid) return {};
 			if(Neighbours::checkDirValid(neighbour)) return offset(neighbour);
 			if(diagonalNeighbourDirValid(neighbour)) return offsetDiagonal(neighbour);
@@ -689,7 +646,7 @@ namespace chunk {
 		}
 		
 
-		OptionalChunkIndex offset(vec3i const dir) {
+		OptionalChunkIndex offset/*to immediate neighbour*/(vec3i const dir) {
 			if(dir == 0) return { chunk.chunkIndex() };
 			if(!valid) return {};
 			
