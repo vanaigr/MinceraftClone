@@ -807,30 +807,13 @@ vec3 background(const vec3 dir) {
 	return pow(res, vec3(2.2));
 }
 
-struct Frame {
-	uint data[7];
-	int parent;
-};
-
-const int maxFrames = 5;
-Frame frames[maxFrames];
-
-void setFrame(const int frameIndex, const Frame frame) {
-	frames[frameIndex] = frame;
-}
-void putFrame(const int frameIndex, const Frame frame) {
-	setFrame(frameIndex, frame);
-}
-
-Frame getFrame(const int frameIndex) {
-	return frames[frameIndex];
-}
 
 struct Params {
 	Ray ray;
 	int chunkIndex;
 	int bias;
 	uint type;
+	int parent;
 }; 
 
 struct Result {
@@ -838,74 +821,122 @@ struct Result {
 	float depth;
 	Surface surface;
 	uint type;
+	int parent;
 };
 
-Frame packParams(const Params it, const int parent) {
-	return Frame(
-		uint[7] (
-			floatBitsToUint(it.ray.orig.x),
-			floatBitsToUint(it.ray.orig.y),
-			floatBitsToUint(it.ray.orig.z),
-			
-			floatBitsToUint(it.ray.dir.x),
-			floatBitsToUint(it.ray.dir.y),
-			floatBitsToUint(it.ray.dir.z),
-			
-			uint(it.chunkIndex & 0xffffff) | (uint(sign(it.bias)+1) << 24) | (it.type << 26)
-		),	
-		parent
-	);
+int putResultPos = 0;
+int putParamsPos = 0;
+
+const int size = 40;
+uint stack[size]; 
+//add results ->              <- add params
+//result | result | 0 | 0 | params | params;
+//   putResultPos ^   ^ putParamsPos
+
+
+
+
+int curResultPos() { return putResultPos - 1; }
+
+int paramsPosOffset(const int pos) { return size - (pos+1) * 8; }
+int resultPosOffset(const int pos) { return pos * 4; }
+
+void writeParams(const Params it, const int position) {
+	const int offset = paramsPosOffset(position);
+	
+	stack[offset+0] = floatBitsToUint(it.ray.orig.x);
+	stack[offset+1] = floatBitsToUint(it.ray.orig.y);
+	stack[offset+2] = floatBitsToUint(it.ray.orig.z);
+	
+	stack[offset+3] = floatBitsToUint(it.ray.dir.x);
+	stack[offset+4] = floatBitsToUint(it.ray.dir.y);
+	stack[offset+5] = floatBitsToUint(it.ray.dir.z);
+	
+	stack[offset+6] = uint(it.chunkIndex);
+	
+	stack[offset+7] = (uint(it.parent) & 0xffffu) | (uint(sign(it.bias)+1) << 16) | (it.type << 18);
 }
-Params unpackParams(const Frame it) {
+Params readParams(const int position) {
+	const int offset = paramsPosOffset(position);
+		
 	return Params(
 		Ray(
 			vec3(
-				uintBitsToFloat(it.data[0]),
-				uintBitsToFloat(it.data[1]),
-				uintBitsToFloat(it.data[2])
+				uintBitsToFloat(stack[offset+0]),
+				uintBitsToFloat(stack[offset+1]),
+				uintBitsToFloat(stack[offset+2])
 			),
 			vec3(
-				uintBitsToFloat(it.data[3]),
-				uintBitsToFloat(it.data[4]),
-				uintBitsToFloat(it.data[5])
+				uintBitsToFloat(stack[offset+3]),
+				uintBitsToFloat(stack[offset+4]),
+				uintBitsToFloat(stack[offset+5])
 			)
 		),
-		int(it.data[6] & 0xffffff),
-		int((it.data[6] >> 24) & 3)-1,
-		uint(it.data[6] >> 26)
+		int(stack[offset+6]),
+		int((stack[offset+7] >> 16) & 3u)-1,
+		uint(stack[offset+7] >> 18),
+		int(stack[offset+7] << 16) >> 16 //sign extended shift
 	);
 }
 
-
-Result unpackResult(const Frame it) {
+void writeResult(const Result it, const int position) {
+	const int offset = resultPosOffset(position);
+	
+	stack[offset+0] = packHalf2x16(it.color.xy);
+	stack[offset+1] = packHalf2x16(vec2(it.color.z, it.depth));
+	
+	//stack[offset+0] = floatBitsToUint(it.color.x);
+	//stack[offset+1] = floatBitsToUint(it.color.y);
+	//stack[offset+2] = floatBitsToUint(it.color.z);
+	
+	//stack[offset+3] = floatBitsToUint(it.depth);
+	
+	stack[offset+2] = it.surface.data;
+	stack[offset+3] = (uint(it.parent) & 0xffffu) | (it.type << 16);
+}
+Result readResult(const int position) {
+	const int offset = resultPosOffset(position);
+	
+	const vec2 v1 = unpackHalf2x16(stack[offset+0]);
+	const vec2 v2 = unpackHalf2x16(stack[offset+1]);
 	return Result(
 		vec3(
-			uintBitsToFloat(it.data[0]),
-			uintBitsToFloat(it.data[1]),
-			uintBitsToFloat(it.data[2])
+			v1.x,
+			v1.y,
+			v2.x
+			//uintBitsToFloat(stack[offset+0]),
+			//uintBitsToFloat(stack[offset+1]),
+			//uintBitsToFloat(stack[offset+2])
 		),
-		uintBitsToFloat(it.data[3]),
-		Surface(it.data[4]),
-		it.data[5]
-	);
-}
-Frame packResult(const Result it, const int parent) {
-	return Frame(
-		uint[7] (
-			floatBitsToUint(it.color.x),
-			floatBitsToUint(it.color.y),
-			floatBitsToUint(it.color.z),
-			
-			floatBitsToUint(it.depth),
-			it.surface.data,
-			it.type,
-			0u
-		),
-		parent
+		v2.y,
+		//uintBitsToFloat(stack[offset+3]),
+		Surface(stack[offset+2]),
+		stack[offset+3] >> 16,
+		int(stack[offset+3] << 16) >> 16 //sign extended shift
 	);
 }
 
-int mapInteger(int value) {//https://stackoverflow.com/a/24771093/18704284
+Params popParams()  { return readParams(--putParamsPos); }
+void pushParams(const Params it) { writeParams(it, putParamsPos++); }
+void pushResult(const Result it) { writeResult(it, putResultPos++); }
+
+bool canPopParams() { return putParamsPos > 0; }
+bool canPushParams() { 
+	return paramsPosOffset(putParamsPos) >= 0
+	&& resultPosOffset(putResultPos) <= paramsPosOffset(putParamsPos); //resultOnePastEnd <= paramsNextEnd
+}
+bool canPushResult() { 
+	return resultPosOffset(putResultPos+1)-1 < size
+	&& resultPosOffset(putResultPos+1)-1 < paramsPosOffset(putParamsPos-1); //resultEnd < paramsEnd
+}
+
+vec3 fade(const vec3 color, const float depth) {
+	const float bw = 0.5 + dot(color, vec3(0.299, 0.587, 0.114)) * 0.5;
+	return mix(vec3(bw), color, inversesqrt(depth / 500 + 1));
+}
+
+
+int mapInteger(int value) {//based on https://stackoverflow.com/a/24771093/18704284
     value *= 1664525;
     value += 101390223;
     value ^= value >> 11;
@@ -918,6 +949,8 @@ int mapInteger(int value) {//https://stackoverflow.com/a/24771093/18704284
 }
 
 Result combineSteps(const Result current, const Result inner) {
+	const vec3 curColor = current.color;
+	
 	const bool curShadow = current.type == 1;
 	const bool innerShadow = inner.type == 1 || inner.type == 2;
 	
@@ -928,35 +961,39 @@ Result combineSteps(const Result current, const Result inner) {
 		const uint innerSurface = surfaceType(inner.surface);
 		const bool emitter = innerSurface == 13 || innerSurface == 14;
 		const vec3 shadowTint = lighting ? vec3(1) : (surfaceType(resultingSurface) == 0 ? inner.color : vec3(0.4));
-		return Result(current.color * shadowTint + (lighting && emitter ? (inner.color / (0.01 + inner.depth*inner.depth)) : vec3(0)), current.depth + inner.depth, current.surface, current.type);
+		return Result(
+			curColor * shadowTint + (lighting && emitter ? (inner.color / (0.01 + inner.depth*inner.depth)) : vec3(0)), 
+			current.depth + inner.depth, 
+			current.surface, 
+			current.type,
+			current.parent
+		);
 	}
 	
 	const uint type = surfaceType(current.surface);
 	
-	if(type == 7) return Result(current.color * inner.color, current.depth + inner.depth, resultingSurface, current.type);
-	else if(type == 8) return Result(inner.color * current.color, current.depth + inner.depth, resultingSurface, current.type);
-	else return Result(current.color, current.depth, resultingSurface, current.type);
+	if(type == 7) return Result(curColor * inner.color, current.depth + inner.depth, resultingSurface, current.type, current.parent);
+	else if(type == 8) return Result(curColor * inner.color, current.depth + inner.depth, resultingSurface, current.type, current.parent);
+	else return Result(curColor, current.depth, resultingSurface, current.type, current.parent);
 }
 
 vec3 trace(const Ray startRay, const int startChunkIndex) {
-	int curFrame = -1;
-	int newFrame = curFrame+1;
-
 	const ivec3 startChunkPosition = chunkPosition(startChunkIndex);
 	
-	putFrame(newFrame++, packParams(Params(startRay, startChunkIndex, 0, 0u), curFrame));
+	if(!canPushParams()) return vec3(1,0,1);
+	pushParams(Params(startRay, startChunkIndex, 0, 0u, curResultPos()));
 	
 	while(true) {
-		curFrame++;
-		if(curFrame >= newFrame) { curFrame = newFrame-1; break; }
+		if(!canPopParams()) break;
+		const int curFrame = putResultPos;
 		
-		const Frame curentFrame = getFrame(curFrame);
-		const Params p = unpackParams(curentFrame);
+		const Params p = popParams();
+		//if(!canPushResult()) ???; //this check is not needed because sizeof(Result) < sizeof(Params), so we would have space for at least 1 Result
 		const Ray ray = p.ray;
 		const int chunkIndex = p.chunkIndex;
 		const uint type = p.type;
 		const int startBias = p.bias;
-		const int parent = curentFrame.parent;
+		const int parent = p.parent;
 		
 		const bool shadow = type == 1 || type == 2;
 		
@@ -1045,48 +1082,51 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 					dot(intersectionSide, glassBlockCoord.yzy)
 				);
 				const vec2 offset = atlasAt(blockId, side);
-				const vec3 color = sampleAtlas(atlasOffset, clamp(glassUv, 0.0001, 0.9999)) * light * mix(0.6, 1.0, ambient);
-			
-				const vec3 incoming = ray.dir - glassOffset * vec3(1-intersectionSide);
+				const vec3 color_ = sampleAtlas(atlasOffset, clamp(glassUv, 0.0001, 0.9999)) * light * mix(0.6, 1.0, ambient);
+				const vec3 color = fade(color_, t);
+
+				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
+				if(canPushParams()) {
+					const vec3 incoming = ray.dir - glassOffset * vec3(1-intersectionSide);
 				
-				const vec3 refracted_ = refract(normalize(incoming), normalize(normal), 1 );
-				const bool isRefracted = refracted_ != vec3(0);
-				const vec3 newDir = isRefracted ? refracted_ : reflect(incoming, normalize(vec3(side)));
-				const int newBias = sign( isRefracted ? bias + 1 : -bias );
+					const vec3 refracted_ = refract(normalize(incoming), normalize(normal), 1 );
+					const bool isRefracted = refracted_ != vec3(0);
+					const vec3 newDir = isRefracted ? refracted_ : reflect(incoming, normalize(vec3(side)));
+					const int newBias = sign( isRefracted ? bias + 1 : -bias );
 				
-				putFrame(curFrame, packResult(Result( color, t, surfaceBlock(blockId), type ), parent));
-				if(newFrame < maxFrames) 
-					putFrame(newFrame++, packParams(Params( Ray(coord, newDir), intersectionChunkIndex, newBias, type ), curFrame));
+					pushParams(Params( Ray(coord, newDir), intersectionChunkIndex, newBias, type, curFrame));
+				}
 				continue;
 			}
 			else if(blockId == 8) {
-				const vec3 color = sampleAtlas(atlasOffset, uv) * light * mix(0.5, 1.0, ambient);
-				const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
-				const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
-				const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
+				const vec3 color_ = sampleAtlas(atlasOffset, uv) * light * mix(0.5, 1.0, ambient);
+				const vec3 color = fade(color_, t);
 				
-				putFrame(curFrame, packResult(Result( color, t, surfaceBlock(blockId), type ), parent));
-				if(newFrame < maxFrames) 
-					putFrame(newFrame++, packParams(Params( Ray(coord, reflected), intersectionChunkIndex, -bias, type ), curFrame));
+				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
+				if(canPushParams()) {
+					const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
+					const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
+					const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
+				
+					pushParams(Params( Ray(coord, reflected), intersectionChunkIndex, -bias, type, curFrame));
+				}
 				continue;
 			}			
 			else {
 				const bool emitter = blockId == 13 || blockId == 14;
 				const ivec3 relativeToChunk = chunkPosition(intersectionChunkIndex) - startChunkPosition;
-				const vec3 color = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.4, 1.0, ambient));
+				const vec3 color_ = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.4, 1.0, ambient));
+				const vec3 color = fade(color_, t);
 				
-				putFrame(curFrame, packResult(Result( color, t, surfaceBlock(blockId), type ), parent));
+				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
 				
-				if(shadow) continue;
-				else {
+				if(!shadow && !emitter) {
 					const int shadowOffsetsCount = 4;
 					const float shadowOffsets[] = { -1, 0, 1, 0 };
 					
 					const int shadowSubdiv = 32;
 					const float shadowSmoothness = 32;
 					const int shadowsInChunkDim = blocksInChunkDim * shadowSubdiv;		
-					
-					if(emitter) continue;
 					
 					const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*0.5 )/shadowSubdiv;
 					
@@ -1099,7 +1139,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 					const int dirIndex = int(uint(rShadowInChunkIndex) % 42);
 					const bool emitters = dirIndex < 30;
 					
-					if(newFrame < maxFrames) { //shadow
+					if(canPushParams()) { //shadow
 						const vec3 offset_ = vec3(
 							shadowOffsets[ int(mod(floor(coord.x * shadowSubdiv), shadowOffsetsCount)) ],
 							shadowOffsets[ int(mod(floor(coord.y * shadowSubdiv), shadowOffsetsCount)) ],
@@ -1114,9 +1154,9 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 						const vec3 newDir = normalize(rotated);
 						const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
 						
-						putFrame(newFrame++, packParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 1u), curFrame));
+						pushParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 1u, curFrame));
 					}
-					if(emitters && newFrame < maxFrames) {
+					if(emitters && canPushParams()) {
 						const NE ne = neFromChunk(intersectionChunkIndex, dirIndex);
 						
 						if(ne.is) {
@@ -1124,50 +1164,49 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 							const vec3 newDir = normalize(ne.coord+0.5 - relativeCoord);
 							const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
 							
-							putFrame(newFrame++, packParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 2u), curFrame));
+							pushParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 2u, curFrame));
 						}
 					}
-					continue;
 				}
+				
+				continue;
 			}
 		}
 		else if(isPlayer && i.chunkIndex != -1) { //player
-			putFrame(curFrame, packResult(Result( vec3(1), playerT, surfaceEntity(1), type ), parent));
-			if(shadow) continue;
-			
-			const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
-			const vec3 v = normalize(vec3(-1, 4, 2));
-			const vec3 temp = cross(q.xyz, v) + q.w * v;
-			const vec3 rotated = v + 2.0*cross(q.xyz, temp);
-			
-			const vec3 newDir = normalize(rotated);
-			const Ray newRay = Ray( playerIntersection.at + playerIntersection.normal * 0.001, newDir );
-			if(newFrame < maxFrames) 
-				putFrame(newFrame++, packParams(Params( newRay, i.chunkIndex, 0, 1 ), curFrame));
+			pushResult(Result( vec3(1), playerT, surfaceEntity(1), type, parent));
+			if(!shadow && canPushParams()) {
+				const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
+				const vec3 v = normalize(vec3(-1, 4, 2));
+				const vec3 temp = cross(q.xyz, v) + q.w * v;
+				const vec3 rotated = v + 2.0*cross(q.xyz, temp);
+				
+				const vec3 newDir = normalize(rotated);
+				const Ray newRay = Ray( playerIntersection.at + playerIntersection.normal * 0.001, newDir );
 
+				pushParams(Params( newRay, i.chunkIndex, 0, 1, curFrame));
+			}
 			continue;
 		}
 		else { //sky
-			putFrame(curFrame, packResult(Result( shadow ? vec3(1) : background(ray.dir), far, noSurface(), type ), parent));
+			pushResult(Result( shadow ? vec3(1) : background(ray.dir), far, noSurface(), type, parent));
 			continue;
 		}
 	}
 	
-	for(;curFrame >= 0; curFrame--) {
-		const Frame current = getFrame(curFrame);
-		const int currentParent = current.parent;
-		if(currentParent == -1) break;
-		const Result currentResult = unpackResult(current);
-		
-		const Frame outer = getFrame(currentParent);
-		const Result outerResult = unpackResult(outer);
-		const int outertParent = outer.parent;
-		
-		//if(currentResult.type == 2) return vec3(1,0,1);
-		putFrame(currentParent, packResult(combineSteps(outerResult, currentResult), outertParent));
-	}
+	if(curResultPos() < 0) return vec3(1, 0, 1);
 	
-	return unpackResult(getFrame(0)).color;
+	for(int curFrame = curResultPos(); curFrame >= 0; curFrame--) {
+		const Result currentResult = readResult(curFrame);
+		const int currentParent = currentResult.parent;
+		if(currentParent < 0) break;
+		
+		const Result outerResult = readResult(currentParent);
+
+		const Result res = combineSteps(outerResult, currentResult);
+		writeResult(res, currentParent);
+	}
+
+	return readResult(0).color;
 }
 
 void main() {
