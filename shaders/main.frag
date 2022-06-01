@@ -572,6 +572,28 @@ IntersectionInfo noIntersectionInfo() {
 
 bvec3 and3b/*seems that glsl has no && for bvec_*/(const bvec3 a, const bvec3 b) { return bvec3(a.x && b.x, a.y && b.y, a.z && b.z); }
 
+bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, const vec3 blockCoord, const uint blockId) {
+	const vec3 localBlockCoord = atPosition - blockCoord;
+	
+	const vec2 uv = vec2(
+		dot(intersectionSide, localBlockCoord.zxx),
+		dot(intersectionSide, localBlockCoord.yzy)
+	);
+	const float index = dot(floor(atPosition), vec3(7, 13, 17));
+	const float cindex = mod(index, 4);
+	const float sindex = mod(1 - index, 4);//sinA = cos(90deg - A)
+	const mat2 rot = mat2(							
+		/*cos(floor(index) * 90deg) <=> index: 0->1, 1->0, 2->-1, 3->0*/
+		(1 - cindex) * float(!(cindex == 3)),
+		-(1 - sindex) * float(!(sindex == 3)),
+		(1 - sindex) * float(!(sindex == 3)),
+		(1 - cindex) * float(!(cindex == 3))
+	); //some multiple 90 degree rotation per block coord
+	const vec2 alphaUv = rot * (uv-0.5) + 0.5; //rotation around (0.5, 0.5)
+	
+	return sampleAtlas(alphaAt(blockId), alphaUv).x > 0.5;
+}
+
 IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*must be loaded*/ startChunkIndex, const int startBias, const float stopAtLen /*and return no intersection with chunkIndex*/) { 
 	const vec3 dir = ray.dir;
 	const vec3 dirSign = sign(dir);
@@ -647,144 +669,122 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 		const float nearBoundsCandMinLen = max(max(nearBoundsCandLenghts.x, nearBoundsCandLenghts.y), nearBoundsCandLenghts.z);  //minimum length for all ray axis to get inside of chunk bounds
 		const bvec3 nearBoundCandMinB = equal(nearBoundsCandLenghts, vec3(nearBoundsCandMinLen));
 		
+		const bool stopInThisChunk = stopAtLen <= minOutLen;
 		const vec3 candCoord = pastNearBounds ? curCoord : mix(at(ray, nearBoundsCandMinLen), nearBoundsCandCoords, nearBoundCandMinB);
-		
 		const bvec3 inChunkBounds = lessThanEqual((candCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0));
+		
 		if(!all(inChunkBounds) || empty) {
 			curChunkIndex = nextNotLoaded ? -1 : nextChunkIndex;
 			relativeTo = nextRelativeTo;
-			continue;
 		}
-		
-		const bool stopInThisChunk = stopAtLen <= minOutLen;
-		
-		const vec3 candFromBlockCoord = floor(candCoord) - positive_ * vec3(equal(candCoord, floor(candCoord)));
-		const vec3 curFromBlockCoord  = floor(curCoord ) - positive_ * vec3(equal(curCoord , floor(curCoord) ));
-		
-		if(candFromBlockCoord != curFromBlockCoord) fromBlock = blockAir();
-		curCoord = candCoord;
-		if(!pastNearBounds) bias = -1;
-		
-		//step through blocks/cubes of the current chunk
-		while(true) {
-			const bvec3 blockBounds = equal(curCoord, floor(curCoord));
-			const bool atBlockBounds = any(blockBounds);
-					
-			const vec3 fromBlockCoord = floor(curCoord - positive_ * vec3(blockBounds));
-			const vec3 toBlockCoord   = floor(curCoord - negative_ * vec3(blockBounds));
+		else {
+			const vec3 candFromBlockCoord = floor(candCoord) - positive_ * vec3(equal(candCoord, floor(candCoord)));
+			const vec3 curFromBlockCoord  = floor(curCoord ) - positive_ * vec3(equal(curCoord , floor(curCoord) ));
 			
-			Block toBlock;
+			if(candFromBlockCoord != curFromBlockCoord) fromBlock = blockAir();
+			curCoord = candCoord;
+			if(!pastNearBounds) bias = -1;
 			
-			const ivec3 relativeToBlockCoordI = ivec3(toBlockCoord - relativeTo);
-			if(checkBoundaries(relativeToBlockCoordI)) toBlock = blockAt(
-				curChunkIndex,
-				relativeToBlockCoordI
-			);
-			else if(nextNotLoaded) toBlock = blockAir();
-			else toBlock = blockAt(
-				nextChunkIndex,
-				ivec3(toBlockCoord - nextRelativeTo) //and3i(relativeToBlockCoordI + blocksInChunkDim, blocksInChunkDim-1)
-			);
-			
-			const Block biasedFromBlock = bias < 0 ? fromBlock : blockAir();
-			const Block biasedToBlock   = bias < 1 ? toBlock   : blockAir();
-			
-			const uint fromBlockCubes = blockCubes(biasedFromBlock);
-			const uint    fromBlockId = blockId   (biasedFromBlock);
-			const uint   toBlockCubes = blockCubes(  biasedToBlock);
-			const uint      toBlockId = blockId   (  biasedToBlock);
-			
-			if(fromBlockId != 0 || toBlockId != 0) {
-				const bvec3 cubeBounds = equal(curCoord*cubesInBlockDim, floor(curCoord*cubesInBlockDim));
-				const vec3 localCubesCoordAt = curCoord - fromBlockCoord;
+			//step through blocks/cubes of the current chunk
+			while(true) {	
+				const bvec3 blockBounds = equal(curCoord, floor(curCoord));
+				const bool atBlockBounds = any(blockBounds);
+						
+				const vec3 fromBlockCoord = floor(curCoord - positive_ * vec3(blockBounds));
+				const vec3 toBlockCoord   = floor(curCoord - negative_ * vec3(blockBounds));
 				
-				const ivec3 fUpperCubes = ivec3(mod(localCubesCoordAt*cubesInBlockDim - positive_ * vec3(cubeBounds), cubesInBlockDim));
-				const ivec3 tUpperCubes = ivec3(mod(localCubesCoordAt*cubesInBlockDim - negative_ * vec3(cubeBounds), cubesInBlockDim));
+				Block toBlock;
 				
-				const bvec2 cubes = bvec2(
-					cubeAt(fromBlockCubes, fUpperCubes),
-					cubeAt(toBlockCubes  , tUpperCubes)
+				const ivec3 relativeToBlockCoordI = ivec3(toBlockCoord - relativeTo);
+				
+			 /* if(!atBlockBounds) toBlock = fromBlock;
+				else */
+				if(checkBoundaries(relativeToBlockCoordI)) toBlock = blockAt(
+					curChunkIndex,
+					relativeToBlockCoordI
+				);
+				else if(nextNotLoaded) toBlock = blockAir();
+				else toBlock = blockAt(
+					nextChunkIndex,
+					ivec3(toBlockCoord - nextRelativeTo) //and3i(relativeToBlockCoordI + blocksInChunkDim, blocksInChunkDim-1)
 				);
 				
-				const uint fBlockUsedId = cubes.x ? fromBlockId : 0;
-				const uint tBlockUsedId = cubes.y ? toBlockId   : 0;
+				const Block biasedFromBlock = bias < 0 ? fromBlock : blockAir();
+				const Block biasedToBlock   = bias < 1 ? toBlock   : blockAir();
 				
+				const uint fromBlockCubes = blockCubes(biasedFromBlock);
+				const uint    fromBlockId = blockId   (biasedFromBlock);
+				const uint   toBlockCubes = blockCubes(  biasedToBlock);
+				const uint      toBlockId = blockId   (  biasedToBlock);
 				
-				if(!(all(cubes) || all(not(cubes))) || (atBlockBounds && !(fBlockUsedId == tBlockUsedId && fBlockUsedId == 7))) {
-					const ivec3 intersectionSide = ivec3(cubeBounds);
+				if(fromBlockId != 0 || toBlockId != 0) {
+					const bvec3 cubeBounds = equal(curCoord*cubesInBlockDim, floor(curCoord*cubesInBlockDim));
+					const vec3 localCubesCoordAt = curCoord - fromBlockCoord;
 					
-					const uint blocks[] = { fBlockUsedId, tBlockUsedId };
-					const vec3 blocksCoord[] = { fromBlockCoord, toBlockCoord };
+					const ivec3 fUpperCubes = ivec3(mod(localCubesCoordAt*cubesInBlockDim - positive_ * vec3(cubeBounds), cubesInBlockDim));
+					const ivec3 tUpperCubes = ivec3(mod(localCubesCoordAt*cubesInBlockDim - negative_ * vec3(cubeBounds), cubesInBlockDim));
 					
-					for(bias = max(bias, -1 + int(blocks[0]==0)); bias < 1 - int(blocks[1]==0); bias ++) {
-						const uint blockId = blocks[bias+1];
-						const vec3 blockCoord = blocksCoord[bias+1];
+					const bvec2 cubes = bvec2(
+						cubeAt(fromBlockCubes, fUpperCubes),
+						cubeAt(toBlockCubes  , tUpperCubes)
+					);
+					
+					const uint fBlockUsedId = cubes.x ? fromBlockId : 0;
+					const uint tBlockUsedId = cubes.y ? toBlockId   : 0;
+					
+					if(!(all(cubes) || all(not(cubes))) || (atBlockBounds && !(fBlockUsedId == tBlockUsedId && fBlockUsedId == 7))) {
+						if(stopAtLen*stopAtLen <= dot(curCoord - ray.orig, curCoord - ray.orig)) break;
 						
-						if(blockId != 0) { 
-							const vec3 localBlockCoord = curCoord - blockCoord;
-							const vec2 uv = vec2(
-								dot(intersectionSide, localBlockCoord.zxx),
-								dot(intersectionSide, localBlockCoord.yzy)
-							);
-							const float index = dot(floor(curCoord), vec3(7, 13, 17));
-							const float cindex = mod(index, 4);
-							const float sindex = mod(1 - index, 4);//sinA = cos(90deg - A)
-							const mat2 rot = mat2(							
-								/*cos(floor(index) * 90deg) <=> index: 0->1, 1->0, 2->-1, 3->0*/
-								 (1 - cindex) * float(!(cindex == 3)),
-								-(1 - sindex) * float(!(sindex == 3)),
-								 (1 - sindex) * float(!(sindex == 3)),
-								 (1 - cindex) * float(!(cindex == 3))
-							); //some multiple 90 degree rotation per block coord
-							const vec2 alphaUv = rot * (uv-0.5) + 0.5; //rotation around (0.5, 0.5)
-							
-							if(sampleAtlas(alphaAt(blockId), alphaUv).x < 0.5) continue;
+						const ivec3 intersectionSide = ivec3(cubeBounds);
 						
-							if(stopAtLen <= length(curCoord - ray.orig)) return IntersectionInfo(
-								vec3(0),
-								vec3(0),
-								curChunkIndex,
-								0,
-								0u
-							);
+						const uint blocks[] = { fBlockUsedId, tBlockUsedId };
+						const vec3 blocksCoord[] = { fromBlockCoord, toBlockCoord };
+						
+						for(bias = max(bias, -1 + int(blocks[0]==0)); bias < 1 - int(blocks[1]==0); bias ++) {
+							const uint blockId = blocks[bias+1];
+							const vec3 blockCoord = blocksCoord[bias+1];
 							
-							return IntersectionInfo(
-								curCoord,
-								localBlockCoord,
-								curChunkIndex,
-								bias,
-								(fBlockUsedId & 0xffff) | ((tBlockUsedId & 0xffff) << 16)
-							);
+							if(blockId != 0) { 
+								if(!alphaTest(curCoord, vec3(intersectionSide), blockCoord, blockId)) continue;
+								
+								const vec3 localBlockCoord = curCoord - blockCoord;
+								return IntersectionInfo(
+									curCoord,
+									localBlockCoord,
+									curChunkIndex,
+									bias,
+									(fBlockUsedId & 0xffff) | ((tBlockUsedId & 0xffff) << 16)
+								);
+							}
 						}
-					}
-				}		
-			}
-			
-			
-			fromBlock = toBlock;
-			const bool hnn = hasNoNeighbours(fromBlock);
-			const float skipDistance = hnn ? 1 : (blockId(fromBlock) == 0 ? 1.0 : cubesInBlockDim);
-			const vec3 candCoords = floor(curCoord * skipDistance * dirSign + (hnn ? 2 : 1)) / skipDistance * dirSign;
-
-			const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
-			const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
-			const bvec3 nextMinAxisB = equal(nextLenghts, vec3(nextMinLen));
-			
-			curCoord = mix(
-				max(curCoord*dirSign, at(ray, nextMinLen.x)*dirSign)*dirSign, 
-				candCoords, 
-				nextMinAxisB
-			);
-			//if(hnn) discard;//steps++;
-			bias = -1;
-			
-			const bool inChunkBounds = all(lessThanEqual((curCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0)) );
+					}		
+				}
+				
+				
+				fromBlock = toBlock;
+				const bool hnn = hasNoNeighbours(fromBlock);
+				const float skipDistance = hnn ? 1 : (blockId(fromBlock) == 0 ? 1.0 : cubesInBlockDim);
+				const vec3 candCoords = floor(curCoord * skipDistance * dirSign + (hnn ? 2 : 1)) / skipDistance * dirSign;
 	
-			if(!inChunkBounds) {
-				if(stopInThisChunk) break;
-				curChunkIndex = nextNotLoaded ? -1 : nextChunkIndex;
-				relativeTo = nextRelativeTo;
-				break;
+				const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
+				const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
+				const bvec3 nextMinAxisB = equal(nextLenghts, vec3(nextMinLen));
+				
+				curCoord = mix(
+					max(curCoord*dirSign, at(ray, nextMinLen.x)*dirSign)*dirSign, 
+					candCoords, 
+					nextMinAxisB
+				);
+				bias = -1;
+				
+				const bool inChunkBounds = all(lessThanEqual((curCoord - relativeTo - farBoundaries) * dirSign, vec3(0,0,0)) );
+		
+				if(!inChunkBounds) {
+					if(stopInThisChunk) break;
+					curChunkIndex = nextNotLoaded ? -1 : nextChunkIndex;
+					relativeTo = nextRelativeTo;
+					break;
+				}
 			}
 		}
 		

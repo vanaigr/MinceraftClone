@@ -74,7 +74,7 @@ static pos::Fractional playerCamPos{playerCoord + playerCameraOffset}; //positio
 
 static pos::Fractional spectatorCoord{ playerCoord };
 
-static Camera playerCamera {
+static Camera playerCamera{
 	aspect,
 	90.0 / 180.0 * misc::pi,
 	0.001,
@@ -1165,34 +1165,36 @@ void genTrees(chunk::Chunk chunk, vec3i &start, vec3i &end) {
 
 void genChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk, vec3i &start, vec3i &end) {
 	auto const &pos{ chunk.position() };
-	auto &data{ chunk.data() };
+	auto &blocks{ chunk.data() };
 	auto &emitters{ chunk.emitters() };
 	
-	for(int z = 0; z < units::blocksInChunkDim; ++z)
-	for(int y = 0; y < units::blocksInChunkDim; ++y) 
-	for(int x = 0; x < units::blocksInChunkDim; ++x) {
+	for(int z{}; z < units::blocksInChunkDim; ++z)
+	for(int y{}; y < units::blocksInChunkDim; ++y) 
+	for(int x{}; x < units::blocksInChunkDim; ++x) {
 		vec3i const blockCoord{ x, y, z };
 		
 		auto const height{ heights[z * units::blocksInChunkDim + x] };
-		auto const index{ chunk::blockIndex(blockCoord) };
+		
 		//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * units::blocksInChunkDim + y + 1), 9)) { //repeated floor
 		double const diff{ height - double(pos.y * units::blocksInChunkDim + y) };
 		if(diff >= 0) {
-			uint16_t block = 0;
+			uint16_t block;
+			
 			if(diff < 1) block = 1; //grass
 			else if(diff < 5) block = 2; //dirt
 			else block = 6; //stone
-			data[index] = chunk::Block::fullBlock(block);
 			
 			start = start.min(blockCoord);
 			end   = end  .max(blockCoord);
+			
+			blocks[blockCoord] = chunk::Block::fullBlock(block);
 		}
 		else {
-			data[index] = chunk::Block::emptyBlock();
+			blocks[blockCoord] = chunk::Block::emptyBlock();
 		}
 		
 		
-		if(isBlockEmitter(data[index].id())) emitters.add(blockCoord);
+		if(isBlockEmitter(blocks[blockCoord].id())) emitters.add(blockCoord);
 	}
 		
 	genTrees(chunk, *&start, *&end);	
