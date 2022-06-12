@@ -124,3 +124,8 @@ namespace units {
 		static_assert((test(), true)); //supress 'unused function' test
 	}
 }
+
+using uChunk = units::Chunk;
+using uBlock = units::Block;
+using uCube  = units::Cube;
+using uFrac  = units::Fractional;

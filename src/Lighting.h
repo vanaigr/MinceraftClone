@@ -38,6 +38,40 @@ enum class LightingCubeType {
 	
 	static uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube);
 };*/
+
+struct ConfigInstance { //type erased config I guess
+private:
+	template<typename Type> struct T {}; //is used to pass template arguments to the constructor
+public:
+	template<typename Config>
+	static constexpr ConfigInstance from() {
+		return ConfigInstance{ T<Config>{} };
+	}
+	
+private:
+	chunk::ChunkLighting& (  *getLighting_      )(chunk::Chunk chunk);
+	uint8_t&              (  *getLight_         )(chunk::Chunk chunk, vec3i const cubeInChunkCoord);
+	LightingCubeType      (  *getType_          )(uint16_t const blockId, bool const cube);
+	uint8_t               (  *propagationRule_  )(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube);
+
+	template<typename Config, template <typename> typename T>
+	constexpr ConfigInstance(T<Config>) :
+		getLighting_{ &Config::getLighting },
+		getLight_{ &Config::getLight },
+		getType_{ &Config::getType },
+		propagationRule_{ &Config::propagationRule }
+	{}
+public:
+	chunk::ChunkLighting &getLighting(chunk::Chunk chunk) const { return getLighting_(chunk); }
+	
+	uint8_t &getLight(chunk::Chunk chunk, vec3i const cubeInChunkCoord) const { return getLight_(chunk, cubeInChunkCoord); }
+	
+	LightingCubeType getType(uint16_t const blockId, bool const cube) const { return getType_(blockId, cube); }
+	
+	uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube) const { 
+		return propagationRule_(lighting, fromDir, toBlockId, cube); 
+	}
+};
  
 namespace AddLighting {
 	namespace {

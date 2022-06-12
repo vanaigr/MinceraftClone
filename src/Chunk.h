@@ -11,44 +11,103 @@
 #include<tuple>
 #include<utility>
 #include<algorithm>
+#include<type_traits>
+
+
+
 
 
 namespace chunk {
+	namespace {
+		template<typename V, typename Tag> struct Wrapper {
+			using value_type = V; 
+			using tag = Tag;
+		private:
+			value_type value_;
+		public:
+			constexpr Wrapper() = default;
+			
+			template<typename To> constexpr Wrapper(To);
+			template<typename To> constexpr operator To() const;
+			
+			constexpr Wrapper(value_type v) : value_{ v } {}
+			constexpr operator value_type() const { return value_; }
+			
+			constexpr value_type operator *() const { return value_; }
+			constexpr value_type value() const { return value_; }
+			constexpr value_type get() const { return value_; }
+		};
+		
+		struct BlockInChunk;
+		struct CubeInChunk;
+	}
+	
+	using BlockInChunkIndex = Wrapper<uint16_t, BlockInChunk>; static_assert( pos::cubed((uChunk{1}.as<uBlock>() - 1).val()) < (1 << 15) );
+	using CubeInChunkIndex  = Wrapper<uint16_t, CubeInChunk>; static_assert( pos::cubed((uChunk{1}.as<uCube >() - 1).val()) < (1 << 15) );
+	
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
 	static constexpr bool checkBlockCoordInChunkValid(vec3i const coord) {
 		return coord.inMMX(vec3i{0}, vec3i{units::blocksInChunkDim}).all();
 	}
 	static constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
-		return index < pos::blocksInChunkCount;
-	}
-	
-	//used in main.shader
-	inline static constexpr int16_t blockIndex(vec3i const coord) {
-		assert(checkBlockCoordInChunkValid(coord));
-		return coord.x + coord.y*units::blocksInChunkDim + coord.z*units::blocksInChunkDim*units::blocksInChunkDim;
-	}
-	inline static constexpr vec3i indexBlock(int16_t index) {
-		assert(checkBlockIndexInChunkValid(index));
-		return vec3i{ index % units::blocksInChunkDim, (index / units::blocksInChunkDim) % units::blocksInChunkDim, (index / units::blocksInChunkDim / units::blocksInChunkDim) };
+		return index >= 0 && index < pos::blocksInChunkCount;
 	}
 	
 	static constexpr bool checkCubeCoordInChunkValid(vec3i const coord) {
 		return coord.inMMX(vec3i{0}, vec3i{units::cubesInChunkDim}).all();
 	}
-	static constexpr bool checkCubeIndexInChunkValid(uint32_t const index) {
-		return index < pos::cubesInChunkCount;
+	static constexpr bool checkCubeIndexInChunkValid(uint16_t const index) {
+		return index >= 0 && index < pos::cubesInChunkCount;
 	}
+  #pragma clang diagnostic pop
 	
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-	static vec3i cubeCoordInChunk(uint32_t const index) { ///used in main.shader
-#pragma clang diagnostic pop
+	template</*-_-*/> template<> constexpr BlockInChunkIndex::operator vec3i() const {
+		auto const index{ get() };
+		assert(checkBlockIndexInChunkValid(index));
+		return vec3i{ 
+			index % units::blocksInChunkDim, 
+			(index / units::blocksInChunkDim) % units::blocksInChunkDim, 
+			(index / units::blocksInChunkDim / units::blocksInChunkDim) 
+		};
+	}
+	template<> template<> constexpr BlockInChunkIndex::Wrapper(vec3i coord) : value_( [&]() -> auto {
+		assert(checkBlockCoordInChunkValid(coord));
+		return coord.x + coord.y*units::blocksInChunkDim + coord.z*units::blocksInChunkDim*units::blocksInChunkDim;
+	}() ) {}
+	
+	template<> template<> constexpr CubeInChunkIndex::operator vec3i() const {
+		auto const index{ get() };
 		assert(checkCubeIndexInChunkValid(index));
-		return vec3i( index % units::cubesInChunkDim, (index / units::cubesInChunkDim) % units::cubesInChunkDim, (index / units::cubesInChunkDim / units::cubesInChunkDim) );
+		return vec3i{
+			index % units::cubesInChunkDim, 
+			(index / units::cubesInChunkDim) % units::cubesInChunkDim, 
+			(index / units::cubesInChunkDim / units::cubesInChunkDim) 
+		};
 	}
-	static uint32_t cubeIndexInChunk(vec3i const coord) { ///used in main.shader
+	template<> template<> constexpr CubeInChunkIndex::Wrapper(vec3i coord) : value_( [&]() -> auto {
 		assert(checkCubeCoordInChunkValid(coord));
-		return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim;
-	}
+		return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim; 
+	}() ) {}
+	  
+	//used in main.shader
+	  inline static constexpr int16_t blockIndex(vec3i const coord) {
+		  return static_cast<BlockInChunkIndex>(coord).get();
+	  }
+	  inline static constexpr vec3i indexBlock(uint16_t index) {
+		  return //static_cast<vec3i>( //Visual Studio error c2440
+			  BlockInChunkIndex{ index }.operator vec3i();
+		  //);
+	  }
+	  
+	  static vec3i cubeCoordInChunk(uint16_t const index) {
+		  return //static_cast<vec3i>(
+			  CubeInChunkIndex{ index }.operator vec3i();
+		  //);
+	  }
+	  static uint32_t cubeIndexInChunk(vec3i const coord) {
+		  return static_cast<CubeInChunkIndex>(coord).get();
+	  }
 	
 	template<typename Chunks>
 	struct Chunk_{
@@ -202,7 +261,7 @@ namespace chunk {
 		OptionalChunkIndex(int chunkIndex) : n{ -chunkIndex - 1 } {}
 		explicit operator int() const { return get(); }
 		
-		operator bool() const { return is(); }
+		//operator bool() const { return is(); }
 		bool is() const {
 			return n != 0;
 		}
@@ -394,13 +453,11 @@ namespace chunk {
 		
 		vec3i operator()(int const index) const { assert(inRange(index)); return indexBlock(list[index]); }
 		
-		value_type *begin() { return &list[0];      } 
-		value_type *end  () { return &list[size()]; } 		
+		decltype(auto) begin() { return list.begin(); } 
+		decltype(auto) end  () { return list.end();   }
 		
-		value_type const *cbegin() const { return &(*this)[0]; } 
-		value_type const *cend  () const { return &(*this)[size()]; } 
-		
-		
+		decltype(auto) cbegin() const { return list.cbegin(); }
+		decltype(auto) cend  () const { return list.cend();   }
 		
 		void add(vec3i const blockCoord) {
 			assert(size() != capacity);
@@ -460,17 +517,17 @@ namespace chunk {
 			return coord.in(-units::blocksInChunkDim, units::blocksInChunkDim + units::blocksInChunkDim-1).all();
 		}
 		
-		static int32_t coordToIndex(vec3i const coord) {
+		static uint32_t coordToIndex(vec3i const coord) {
 			return (coord.x + units::blocksInChunkDim)
 				 + (coord.y + units::blocksInChunkDim) * sidelength
 				 + (coord.z + units::blocksInChunkDim) * sidelength * sidelength;
 		}
-		static vec3i indexToCoord(int32_t const index) {
-			return vec3i{
+		static vec3i indexToCoord(uint32_t const index) {
+			return vec3i(
 				index % sidelength,
 				(index / sidelength) % sidelength,
 				index / sidelength / sidelength
-			} - units::blocksInChunkDim;
+			) - units::blocksInChunkDim;
 		}
 	private:
 
@@ -484,11 +541,11 @@ namespace chunk {
 		vec3i operator()(int const position) const { return indexToCoord((*this)[position]); }
 		
 		void clear() { bits = 0; }
-		void fillRepeated(std::array<vec3i, 30> const &coords, int const count) {
+		void fillRepeated(std::array<vec3i, capacity> const &coords, int const count) {
 			assert(count >= 0);
 			if(count == 0) { clear(); return; }
 			
-			uint32_t coordsBits{ 1 };
+			uint32_t coordsBits{ 0 };
 			for(int i{}; i < capacity; i++) {
 				auto const blockIndex{ coordToIndex(coords[i % count]) };
 				coords16[i] = uint16_t(blockIndex);
