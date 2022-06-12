@@ -334,12 +334,12 @@ restrict readonly buffer ChunksNeighbourngEmitters {
   const int neSidelength = 3 * blocksInChunkDim;
   const int neCapacity = 30;
   
-  int neCoordToIndex(const ivec3 coord) {
+  uint neCoordToIndex(const ivec3 coord) {
   	return (coord.x + blocksInChunkDim)
   		 + (coord.y + blocksInChunkDim) * neSidelength
   		 + (coord.z + blocksInChunkDim) * neSidelength * neSidelength;
   }
-  ivec3 neIndexToCoord(const int index) {
+  ivec3 neIndexToCoord(const uint index) {
   	return ivec3(
   		index % neSidelength,
   		(index / neSidelength) % neSidelength,
@@ -348,15 +348,16 @@ restrict readonly buffer ChunksNeighbourngEmitters {
   }
 
   struct NE { ivec3 coord; bool is; };
-  NE neFromChunk(const int chunkIndex, const int neIndex) { 
+  NE neFromChunk(const int chunkIndex, const int someindex) { 
+	const int neIndex = someindex % neCapacity;
 	const int chunkOffset = chunkIndex * 16;
 	const int neOffset = neIndex / 2;
 	const int neShift = (neIndex % 2) * 16;
 	
 	const uint first = emitters.data[chunkOffset];
-	const uint ne16 = (emitters.data[chunkOffset + 1 + neOffset] >> neShift) & 0xffff;
+	const uint ne16 = (emitters.data[chunkOffset + 1 + neOffset] >> neShift) & 0xffffu;
 	
-	const uint ne_index = ne16 | (((first >> (2 + neIndex))&1)<<16);
+	const uint ne_index = ne16 | (((first >> (2 + neIndex))&1u)<<16);
 	const ivec3 ne_coord = neIndexToCoord(int(ne_index));
 	
 	return NE(ne_coord, bool(first & 1));
@@ -596,7 +597,14 @@ bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, co
 
 IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*must be loaded*/ startChunkIndex, const int startBias, const float stopAtLen /*and return no intersection with chunkIndex*/) { 
 	const vec3 dir = ray.dir;
-	const vec3 dirSign = sign(dir);
+	const vec3 dirSign = vec3(greaterThanEqual(dir, vec3(0))) * 2 - 1;/*
+		dirSign components must not be 0, because subsequent operations rely on the fact that
+		someValue * dirSign * dirSign == someValue
+		
+		sign(dir) can cause the algorithm to go into an infinite loop.
+		This for example happens when trying go compute ray-to-emitter intersection
+		when starting position is on the same x, y, or z coordinate as the emitter.
+	*/
 	const vec3 positive_ = max(+dirSign, vec3(0));
 	const vec3 negative_ = max(-dirSign, vec3(0));
 
@@ -633,8 +641,7 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 		);
 		
 	}
-	
-	int steps = 0;
+
 	while(true) {
 		if(curChunkIndex == -1) break;
 		
@@ -767,6 +774,7 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 				const vec3 candCoords = floor(curCoord * skipDistance * dirSign + (hnn ? 2 : 1)) / skipDistance * dirSign;
 	
 				const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
+				
 				const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
 				const bvec3 nextMinAxisB = equal(nextLenghts, vec3(nextMinLen));
 				
@@ -885,12 +893,6 @@ void writeResult(const Result it, const int position) {
 	stack[offset+0] = packHalf2x16(it.color.xy);
 	stack[offset+1] = packHalf2x16(vec2(it.color.z, it.depth));
 	
-	//stack[offset+0] = floatBitsToUint(it.color.x);
-	//stack[offset+1] = floatBitsToUint(it.color.y);
-	//stack[offset+2] = floatBitsToUint(it.color.z);
-	
-	//stack[offset+3] = floatBitsToUint(it.depth);
-	
 	stack[offset+2] = it.surface.data;
 	stack[offset+3] = (uint(it.parent) & 0xffffu) | (it.type << 16);
 }
@@ -904,12 +906,8 @@ Result readResult(const int position) {
 			v1.x,
 			v1.y,
 			v2.x
-			//uintBitsToFloat(stack[offset+0]),
-			//uintBitsToFloat(stack[offset+1]),
-			//uintBitsToFloat(stack[offset+2])
 		),
 		v2.y,
-		//uintBitsToFloat(stack[offset+3]),
 		Surface(stack[offset+2]),
 		stack[offset+3] >> 16,
 		int(stack[offset+3] << 16) >> 16 //sign extended shift
@@ -1005,7 +1003,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 		const float playerT = isPlayer ? length(playerIntersection.at - ray.orig) : 1.0 / 0.0;
 		
 		const IntersectionInfo i = isInters(ray, chunkPosition(chunkIndex) - startChunkPosition, chunkIndex, startBias, playerT);
-		
+
 		if(i.fromBlockId_toBlockId != 0) { //block
 			const vec3 coord = i.coord;        
 			const vec3 localSpaceCoord = i.localSpaceCoord;
@@ -1156,6 +1154,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 						
 						pushParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 1u, curFrame));
 					}
+					
 					if(emitters && canPushParams()) {
 						const NE ne = neFromChunk(intersectionChunkIndex, dirIndex);
 						
@@ -1163,7 +1162,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 							const vec3 relativeCoord = position - relativeToChunk * blocksInChunkDim;
 							const vec3 newDir = normalize(ne.coord+0.5 - relativeCoord);
 							const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
-							
+
 							pushParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 2u, curFrame));
 						}
 					}
@@ -1192,7 +1191,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 			continue;
 		}
 	}
-	
+		
 	if(curResultPos() < 0) return vec3(1, 0, 1);
 	
 	for(int curFrame = curResultPos(); curFrame >= 0; curFrame--) {
@@ -1204,7 +1203,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 
 		const Result res = combineSteps(outerResult, currentResult);
 		writeResult(res, currentParent);
-	}
+	}	
 
 	return readResult(0).color;
 }
