@@ -39,8 +39,6 @@ const int cubesInChunkDimAsPow2 = cubesInBlockDimAsPow2 + blocksInChunkDimAsPow2
 const int cubesInChunkDim = 1 << cubesInChunkDimAsPow2;
 const int cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
 
-
-
 restrict readonly buffer ChunksBlocks {
      uint data[][16*16*16];
 } chunksBlocks;
@@ -826,8 +824,8 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 
 vec3 background(const vec3 dir) {
 	const float t = 0.5 * (dir.y + 1.0);
-	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
-	return pow(res, vec3(2.2));
+	const vec3 res = (1.0 - t) * vec3(2.0, 2.0, 2.0) + t * vec3(0.5, 0.7, 1.0);
+	return pow(res*1.5, vec3(2.2));
 }
 
 
@@ -964,7 +962,7 @@ int mapInteger(int value) {//based on https://stackoverflow.com/a/24771093/18704
 Result combineSteps(const Result current, const Result inner) {
 	const vec3 curColor = current.color;
 	
-	const bool curShadow = current.type == 1;
+	const bool curShadow = current.type == 1 || current.type == 2;
 	const bool innerShadow = inner.type == 1 || inner.type == 2;
 	
 	const Surface resultingSurface = innerShadow ? inner.surface : current.surface;
@@ -975,7 +973,7 @@ Result combineSteps(const Result current, const Result inner) {
 		const bool emitter = innerSurface == 13 || innerSurface == 14;
 		const vec3 shadowTint = lighting ? vec3(1) : (surfaceType(resultingSurface) == 0 ? inner.color : vec3(0.4));
 		return Result(
-			curColor * shadowTint + (lighting && emitter ? (inner.color / (0.01 + inner.depth*inner.depth)) : vec3(0)), 
+			curColor * shadowTint + (lighting && emitter ? (inner.color / (0.4 + inner.depth*inner.depth)) : vec3(0)), 
 			current.depth + inner.depth, 
 			current.surface, 
 			current.type,
@@ -1083,25 +1081,21 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 			
 			
 			if(blockId == 7) {	
-				const vec3 glassOffset = vec3( 
+				const vec3 offset = vec3( 
 					sin(localSpaceCoord.x*9)/2, 
 					sin(localSpaceCoord.z*9)/8, 
 					sin(localSpaceCoord.y*6 + localSpaceCoord.x*4)/8
 				) / 100;
 				
-				const vec3 glassBlockCoord = localSpaceCoord - glassOffset;
+				const vec3 newBlockCoord = localSpaceCoord - offset;
 				
-				vec2 glassUv = blockUv(glassBlockCoord, intersectionSide, dirSign);// vec2(
-				//	dot(intersectionSide, glassBlockCoord.zxx),
-				//	dot(intersectionSide, glassBlockCoord.yzy)
-				//);
-				const vec2 offset = atlasAt(blockId, side);
-				const vec3 color_ = sampleAtlas(atlasOffset, clamp(glassUv, 0.0001, 0.9999)) * light * mix(0.6, 1.0, ambient);
+				const vec2 newUV = blockUv(newBlockCoord, intersectionSide, dirSign);
+				const vec3 color_ = sampleAtlas(atlasOffset, clamp(newUV, 0.0001, 0.9999)) * light * mix(0.5, 1.0, ambient);
 				const vec3 color = fade(color_, t);
 
 				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
 				if(canPushParams()) {
-					const vec3 incoming = ray.dir - glassOffset * vec3(1-intersectionSide);
+					const vec3 incoming = ray.dir - offset * vec3(1-intersectionSide);
 				
 					const vec3 refracted_ = refract(normalize(incoming), normalize(normal), 1 );
 					const bool isRefracted = refracted_ != vec3(0);
@@ -1113,12 +1107,17 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				continue;
 			}
 			else if(blockId == 8) {
-				const vec3 color_ = sampleAtlas(atlasOffset, uv) * light * mix(0.5, 1.0, ambient);
+				const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
+				
+				const vec3 newBlockCoord = localSpaceCoord - offset;
+				const vec2 newUv = blockUv(newBlockCoord, intersectionSide, dirSign);
+				
+				const vec3 color_ = sampleAtlas(atlasOffset, newUv) * light * mix(0.3, 1.0, ambient);
 				const vec3 color = fade(color_, t);
+				
 				
 				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
 				if(canPushParams()) {
-					const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
 					const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
 					const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
 				
@@ -1129,10 +1128,10 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 			else {
 				const bool emitter = blockId == 13 || blockId == 14;
 				const ivec3 relativeToChunk = chunkPosition(intersectionChunkIndex) - startChunkPosition;
-				const vec3 color_ = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.4, 1.0, ambient));
+				const vec3 color_ = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.3, 1.0, ambient));
 				const vec3 color = fade(color_, t);
 				
-				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
+				pushResult(Result( color * (emitter ? 2 : 1), t, surfaceBlock(blockId), type, parent));
 				
 				if(!shadow && !emitter) {
 					const int shadowOffsetsCount = 4;
@@ -1160,7 +1159,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 							shadowOffsets[ int(mod(floor(coord.z * shadowSubdiv), shadowOffsetsCount)) ]
 						);
 						const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
-						const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
+						const vec4 q = vec4(normalize(-vec3(1+sin(time/4)/10,-3,-2)), cos(time/4)/5);
 						const vec3 v = normalize(vec3(-1, 4, 2) + offset);
 						const vec3 temp = cross(q.xyz, v) + q.w * v;
 						const vec3 rotated = v + 2.0*cross(q.xyz, temp);
@@ -1239,8 +1238,12 @@ void main() {
 	
 	const float bw = 0.299 * col.r + 0.587 * col.g + 0.114 * col.b;
 	const vec3 c = rgb2hsv(col);
-	const vec3 c2 = hsv2rgb(vec3(c.x, 1 - exp(-2 / (bw+2)), c.z));
+	const vec3 c2 = hsv2rgb(vec3(
+		c.x,
+		(c.y+0.03) / pow(c.z+1.0, 1.0 / 29),
+		pow(log(c.z + 1.0) / log(bw + 2.1), 1.1)
+	));
 	
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) color = vec4(vec3(0.98), 1);
-	else color = vec4(col, 1);
+	else color = vec4(c2, 1);
 }	
