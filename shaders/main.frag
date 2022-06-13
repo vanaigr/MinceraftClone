@@ -573,13 +573,24 @@ IntersectionInfo noIntersectionInfo() {
 
 bvec3 and3b/*seems that glsl has no && for bvec_*/(const bvec3 a, const bvec3 b) { return bvec3(a.x && b.x, a.y && b.y, a.z && b.z); }
 
-bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, const vec3 blockCoord, const uint blockId) {
-	const vec3 localBlockCoord = atPosition - blockCoord;
+vec2 blockUv(const vec3 localBlockCoord, const vec3 intersectionSide, const vec3 dirSign) {
+	const float intersectionUSign = dot(dirSign, intersectionSide);
 	
 	const vec2 uv = vec2(
-		dot(intersectionSide, localBlockCoord.zxx),
+		dot(intersectionSide, vec3(localBlockCoord.zx, 1-localBlockCoord.x)),
 		dot(intersectionSide, localBlockCoord.yzy)
 	);
+	
+	return clamp(vec2(
+		mix(uv.x, 1 - uv.x, (intersectionUSign+1) / 2),
+		uv.y
+	), vec2(0.00001), vec2(0.99999));
+}
+
+bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, const vec3 dirSign, const vec3 blockCoord, const uint blockId) {
+	const vec3 localBlockCoord = atPosition - blockCoord;
+	const vec2 uv = blockUv(localBlockCoord, intersectionSide, dirSign);
+	
 	const float index = dot(floor(atPosition), vec3(7, 13, 17));
 	const float cindex = mod(index, 4);
 	const float sindex = mod(1 - index, 4);//sinA = cos(90deg - A)
@@ -595,16 +606,20 @@ bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, co
 	return sampleAtlas(alphaAt(blockId), alphaUv).x > 0.5;
 }
 
-IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*must be loaded*/ startChunkIndex, const int startBias, const float stopAtLen /*and return no intersection with chunkIndex*/) { 
-	const vec3 dir = ray.dir;
-	const vec3 dirSign = vec3(greaterThanEqual(dir, vec3(0))) * 2 - 1;/*
-		dirSign components must not be 0, because subsequent operations rely on the fact that
+vec3 calcDirSign(const vec3 dir) {
+	return vec3(greaterThanEqual(dir, vec3(0))) * 2 - 1;/*
+		dirSign components must not be 0, because isInters relies on the fact that
 		someValue * dirSign * dirSign == someValue
 		
 		sign(dir) can cause the algorithm to go into an infinite loop.
 		This for example happens when trying go compute ray-to-emitter intersection
 		when starting position is on the same x, y, or z coordinate as the emitter.
 	*/
+}
+
+IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*must be loaded*/ startChunkIndex, const int startBias, const float stopAtLen /*and return no intersection with chunkIndex*/) { 
+	const vec3 dir = ray.dir;
+	const vec3 dirSign = calcDirSign(dir);
 	const vec3 positive_ = max(+dirSign, vec3(0));
 	const vec3 negative_ = max(-dirSign, vec3(0));
 
@@ -752,7 +767,7 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 							const vec3 blockCoord = blocksCoord[bias+1];
 							
 							if(blockId != 0) { 
-								if(!alphaTest(curCoord, vec3(intersectionSide), blockCoord, blockId)) continue;
+								if(!alphaTest(curCoord, vec3(intersectionSide), dirSign, blockCoord, blockId)) continue;
 								
 								const vec3 localBlockCoord = curCoord - blockCoord;
 								return IntersectionInfo(
@@ -988,6 +1003,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 		const Params p = popParams();
 		//if(!canPushResult()) ???; //this check is not needed because sizeof(Result) < sizeof(Params), so we would have space for at least 1 Result
 		const Ray ray = p.ray;
+		const vec3 dirSign = calcDirSign(ray.dir);
 		const int chunkIndex = p.chunkIndex;
 		const uint type = p.type;
 		const int startBias = p.bias;
@@ -1020,10 +1036,10 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 			const bool backside = dot(vec3(side), ray.dir) > 0;
 			const ivec3 normal = side * ( backside ? -1 : 1 );
 			
-			const vec2 uv = clamp(vec2(
-				dot(intersectionSide, localSpaceCoord.zxx),
-				dot(intersectionSide, localSpaceCoord.yzy)
-			), 0.0001, 0.9999);
+			const vec2 uv = blockUv(localSpaceCoord, intersectionSide, dirSign); //clamp(vec2(
+			//	dot(intersectionSide, localSpaceCoord.zxx),
+			//	dot(intersectionSide, localSpaceCoord.yzy)
+			//), 0.0001, 0.9999);
 			
 			const vec2 atlasOffset = atlasAt(blockId, side);
 			
@@ -1075,10 +1091,10 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				
 				const vec3 glassBlockCoord = localSpaceCoord - glassOffset;
 				
-				vec2 glassUv = vec2(
-					dot(intersectionSide, glassBlockCoord.zxx),
-					dot(intersectionSide, glassBlockCoord.yzy)
-				);
+				vec2 glassUv = blockUv(glassBlockCoord, intersectionSide, dirSign);// vec2(
+				//	dot(intersectionSide, glassBlockCoord.zxx),
+				//	dot(intersectionSide, glassBlockCoord.yzy)
+				//);
 				const vec2 offset = atlasAt(blockId, side);
 				const vec3 color_ = sampleAtlas(atlasOffset, clamp(glassUv, 0.0001, 0.9999)) * light * mix(0.6, 1.0, ambient);
 				const vec3 color = fade(color_, t);
