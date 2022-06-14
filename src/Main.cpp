@@ -21,9 +21,7 @@
 #include"PerlinNoise.h"
 #include"Counter.h"
 
-#include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <math.h>
 #include<iostream>
 #include<chrono>
@@ -31,7 +29,6 @@
 #include<vector>
 #include<array>
 #include<limits>
-#include<tuple>
 #include<sstream>
 #include<fstream>
 
@@ -41,11 +38,11 @@ static constexpr int chunkColumnChunkYMin = -16;
 //#define FULLSCREEN
 
 #ifdef FULLSCREEN
-static const vec2<uint32_t> windowSize{ 1920, 1080 };
+static const vec2i windowSize{ 1920, 1080 };
 #else
-static const vec2<uint32_t> windowSize{ 1280, 720 };
+static const vec2i windowSize{ 1280, 720 };
 #endif // FULLSCREEN
-static const vec2<double> windowSize_d{ windowSize.convertedTo<double>() };
+static const vec2d windowSize_d{ windowSize.convertedTo<double>() };
 static double const aspect{ windowSize_d.y / windowSize_d.x };
 
 static constexpr bool loadChunks = false, saveChunks = false;
@@ -1017,19 +1014,23 @@ static bool isBlockEmitter(uint16_t const id) {
 }
 
 struct Bounds {
+	using T = int32_t;
 	static Bounds emptyBlocksInChunk() { return Bounds{units::blocksInChunkDim-1, 0}; }
-	static Bounds emptyLimits() { return Bounds{std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::lowest()}; }
+	static Bounds emptyLimits() { return Bounds{std::numeric_limits<T>::max(), std::numeric_limits<T>::lowest()}; }
 	
 	static Bounds blocksInChunk() { return Bounds{0, units::blocksInChunkDim-1}; }
-	static Bounds limits() { return Bounds{std::numeric_limits<int32_t>::lowest(), std::numeric_limits<int32_t>::max()}; }
+	static Bounds limits() { return Bounds{std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()}; }
 	
-	vec3i start; //'lowest' nonempty block/cube/...
-	vec3i end; //'highest' nonempty block/cube/...
+	vec3<T> start; //'lowest' nonempty block/cube/...
+	vec3<T> end; //'highest' nonempty block/cube/...
 	
 	bool isEmpty() {
 		return (start > end).any();
 	}
 };
+
+using BlockBounds = Bounds;
+using CubeBounds = Bounds;
 
 struct SkyLightingConfig {
 	static chunk::ChunkLighting &getLighting(chunk::Chunk chunk) {
@@ -1145,56 +1146,52 @@ static void setNeighboursLightingUpdate(chunk::Chunks &chunks, vec3i const minCh
 template<typename Config>
 static void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	chunk::Chunk chunk, 
-	vec3i const dir, vec3i const otherAxis1, vec3i const otherAxis2, 
-	Bounds const bounds,
-	Bounds &newBounds
+	vec3i const dir, 
+	vec3i const otherAxis1, vec3i const otherAxis2, 
+	CubeBounds const bounds,
+	CubeBounds &newBounds
 ) {
-	vec3i const fromCube{ bounds.start };
-	vec3i const toCube{ bounds.end };
+	auto const fromCube{ bounds.start };
+	auto const toCube{ bounds.end };
 	
 	auto const chunkIndex{ chunk.chunkIndex() };
 	auto const chunkCoord{ chunk.position() };
 	auto &chunks{ chunk.chunks() };
 	auto &lighting{ Config::getLighting(chunk) };
 	
-	vec3i const axis{ dir.abs() };
+	auto const axis{ dir.abs() };
 	auto const dirPositive{ (dir > 0).any() };
 	
 	
-	vec3i const beginCoordsCubeAxisUnbound{
+	pCube const beginCoordsCubeAxisUnbound{
 		fromCube.dot(axis),
 		fromCube.dot(otherAxis1),
 		fromCube.dot(otherAxis2)
 	}; /*coords along specified axis, in cubes*/
-	vec3i const endCoordsCubeAxisUnbound{
+	pCube const endCoordsCubeAxisUnbound{
 		toCube.dot(axis),
 		toCube.dot(otherAxis1),
 		toCube.dot(otherAxis2)
 	};
 	
-	vec3i const chunkCoordAxis( vec3i(chunkCoord).dot(axis), vec3i(chunkCoord).dot(otherAxis1), vec3i(chunkCoord).dot(otherAxis2) );/*
+
+	pChunk const chunkCoordAxis{ vec3i(chunkCoord).dot(axis), vec3i(chunkCoord).dot(otherAxis1), vec3i(chunkCoord).dot(otherAxis2) };/*
 		chunk coords alond specified axis, in chunks
 	*/
+
+	auto const beginInChunkCoordsAxis{ (beginCoordsCubeAxisUnbound - chunkCoordAxis).valAs<pCube>().clamp(0, units::cubesInChunkDim - 1) };
+	auto const endInChunkCoordsAxis  { (endCoordsCubeAxisUnbound   - chunkCoordAxis).valAs<pCube>().clamp(0, units::cubesInChunkDim - 1) };
 	
-	auto const chunkFirstCoordCubeAxis{  chunkCoordAxis    * units::cubesInChunkDim };
-	auto const chunkLastCoordCubeAxis { (chunkCoordAxis+1) * units::cubesInChunkDim - 1 };
-	
-	auto const beginCoordsAxis{ beginCoordsCubeAxisUnbound.clamp(chunkFirstCoordCubeAxis, chunkLastCoordCubeAxis) };
-	auto const endCoordsAxis  { endCoordsCubeAxisUnbound  .clamp(chunkFirstCoordCubeAxis, chunkLastCoordCubeAxis) };
-	
-	auto const dirCoordDiff{ endCoordsAxis.x - beginCoordsAxis.x };
+	auto const dirCoordDiff{ endInChunkCoordsAxis.x - beginInChunkCoordsAxis.x };
 	
 	
-	chunk::Move_to_neighbour_Chunk const mtnChunk{chunk};
-	
-	auto const startCubeCoord{
-		  axis       * (dirPositive ? beginCoordsAxis.x : endCoordsAxis.x)
-		+ otherAxis1 * beginCoordsAxis.y
-		+ otherAxis2 * beginCoordsAxis.z
+	auto const startCubeInChunkCoord{
+		  axis       * (dirPositive ? beginInChunkCoordsAxis.x : endInChunkCoordsAxis.x)
+		+ otherAxis1 * beginInChunkCoordsAxis.y
+		+ otherAxis2 * beginInChunkCoordsAxis.z
 	};
-	auto const beforeStartCubeCoord{ vec3i(startCubeCoord - vec3i(dir)) };
-	pos::Cube const beforeStartCubePos{ beforeStartCubeCoord };
-	auto const chunkBeforeIndex{ chunk::Move_to_neighbour_Chunk{mtnChunk}.move(beforeStartCubePos.valAs<pos::Chunk>()).get() };
+	auto const beforeStartCubePos{ pChunk{chunkCoord} + pCube{startCubeInChunkCoord - dir} };
+	auto const chunkBeforeIndex{ chunk::Move_to_neighbour_Chunk{chunk}.move(beforeStartCubePos.valAs<pChunk>()).get() };
 	
 	auto const isBefore{ chunkBeforeIndex != chunkIndex };
 	
@@ -1203,53 +1200,26 @@ static void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 		this check is not preformed in other places where it should be preformed (for example in AddLighting::)
 	*/
 	
-	if((canUseSkyLighting || chunkBeforeIndex != -1) && isBefore) {
-		auto &lightingBefore{ 
-			chunkBeforeIndex == -1 /*=> canUseSkyLighting*/ ? 
-			  skyLighting 
-			: Config::getLighting(chunks[chunkBeforeIndex])
-		};
-		{
-			for(auto o1{beginCoordsAxis.y}; o1 <= endCoordsAxis.y; o1++)
-			for(auto o2{beginCoordsAxis.z}; o2 <= endCoordsAxis.z; o2++) {
-				auto const cubeCoord{
-					axis       * (dirPositive ? beginCoordsAxis.x : endCoordsAxis.x)
-					+ otherAxis1 * o1
-					+ otherAxis2 * o2
-				};
-				vec3i const cubeInChunkCoord(
-					cubeCoord - chunkCoord * units::cubesInChunkDim
-				);
-				
-				auto const cube{ chunk.data().cubeAt(cubeInChunkCoord) };
-				auto const type{ Config::getType(cube.block.id(), cube.isSolid) };
-				if(type != LightingCubeType::medium) continue;
-
-				auto const cubeCoordBefore{ (cubeInChunkCoord - dir).mod(units::cubesInChunkDim) };
-				
-				auto const candLighting{ Config::propagationRule(lightingBefore[cubeCoordBefore], dir, cube.block.id(), cube.isSolid) };
-				auto &cubeLighting{ lighting[cubeInChunkCoord] };
-				
-				if(cubeLighting < candLighting) {
-					cubeLighting = candLighting;
-					
-					newBounds.start = newBounds.start.min(cubeCoord);
-					newBounds.end = newBounds.end.max(cubeCoord);
-				}
-			}
-		}
-	}
+	CubeBounds updatedCubesBounds = CubeBounds::emptyLimits();
 	
-	for(auto i{decltype(dirCoordDiff)(isBefore)}; i <= dirCoordDiff; i++) {
-		for(auto o1{beginCoordsAxis.y}; o1 <= endCoordsAxis.y; o1++)
-		for(auto o2{beginCoordsAxis.z}; o2 <= endCoordsAxis.z; o2++) {
-			auto const cubeCoord{
-				  axis       * (dirPositive ? (beginCoordsAxis.x + i) : (endCoordsAxis.x - i))
+	auto const updateLayer = [&](
+		auto FIRST_LAYER /*
+			Templating on some type. For some reason, creating template instantiations
+			for the first layer and for all the other layers is faster to run.
+			It may be because actually only the first layer needs mod() to calculate cubeCoordBefore.
+			Adding or remoing ternary operator in cubeCoordBefore's constructor doesn't change the total time
+			but the operator is kept there just in case.
+		*/, 
+		int layerIndex, chunk::ChunkLighting &curChunkLighting, chunk::ChunkLighting const &lightingBefore
+	) -> bool {
+		bool layerLighting0{ true };/*if all cubes in this layer have no lighting*/
+		
+		for(auto o1{beginInChunkCoordsAxis.y}; o1 <= endInChunkCoordsAxis.y; o1++)
+		for(auto o2{beginInChunkCoordsAxis.z}; o2 <= endInChunkCoordsAxis.z; o2++) {
+			vec3i const cubeInChunkCoord(
+				  axis       * (dirPositive ? beginInChunkCoordsAxis.x + layerIndex : endInChunkCoordsAxis.x - layerIndex)
 				+ otherAxis1 * o1
 				+ otherAxis2 * o2
-			};
-			vec3i const cubeInChunkCoord(
-				cubeCoord - vec3i(chunkCoord) * units::cubesInChunkDim
 			);
 			
 			auto const cube{ chunk.data().cubeAt(cubeInChunkCoord) };
@@ -1258,19 +1228,48 @@ static void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 			
 			auto const type{ Config::getType(blockId, isCube) };
 			if(type != LightingCubeType::medium) continue;
+			auto const cubeCoordBefore{
+				decltype(FIRST_LAYER)::value 
+				? (cubeInChunkCoord - dir).mod(units::cubesInChunkDim) 
+				: (cubeInChunkCoord - dir)
+			};
 			
-			auto const cubeCoordBefore{ (cubeInChunkCoord - dir) };
-			
-			auto const candLighting{ Config::propagationRule(lighting[cubeCoordBefore], dir, blockId, isCube) };
+			auto const candLighting{ Config::propagationRule(lightingBefore[cubeCoordBefore], dir, blockId, isCube) };
 			auto &cubeLighting{ lighting[cubeInChunkCoord] };
 			
-			auto const updateLight{ cubeLighting < candLighting };
+			auto const updateLight{ cubeLighting < candLighting && candLighting > 0 };
 			if(updateLight) {
 				cubeLighting = candLighting;
-				newBounds.start = newBounds.start.min(cubeCoord);
-				newBounds.end = newBounds.end.max(cubeCoord);
-			}		
+				updatedCubesBounds.start = updatedCubesBounds.start.min(cubeInChunkCoord);
+				updatedCubesBounds.end = updatedCubesBounds.end.max(cubeInChunkCoord);
+			}
+			
+			layerLighting0 = layerLighting0 && cubeLighting == 0;
 		}
+		
+		return layerLighting0;
+	};
+	
+	bool prevLevelAll0;
+	
+	if((canUseSkyLighting || chunkBeforeIndex != -1) && isBefore) {
+		auto &lightingBefore{ 
+			chunkBeforeIndex == -1 /*=> canUseSkyLighting (the opposite is not always true)*/ ? 
+			  skyLighting 
+			: Config::getLighting(chunks[chunkBeforeIndex])
+		};
+		
+		prevLevelAll0 = updateLayer(std::true_type{}, 0, lighting, lightingBefore);
+	} 
+	else prevLevelAll0 = true;
+
+	for(auto i{int(isBefore) + prevLevelAll0}; i <= dirCoordDiff; i += 1 + int(prevLevelAll0)) {
+		prevLevelAll0 = updateLayer(std::false_type{}, i, lighting, lighting);
+	}
+	
+	if(!updatedCubesBounds.isEmpty()) {
+		newBounds.start = newBounds.start.min(pChunk{chunkCoord}.valAs<pCube>() + updatedCubesBounds.start);
+		newBounds.end   = newBounds.end  .max(pChunk{chunkCoord}.valAs<pCube>() + updatedCubesBounds.end  );
 	}
 }
 
@@ -1324,10 +1323,10 @@ static void fillEmittersBlockLighting(chunk::Chunk chunk) {
 
 template<typename Config>
 static void updateLightingInChunks(chunk::Chunks &chunks, pChunk const fromChunk, pChunk const toChunk) {
-	Bounds cubesBounds = Bounds::limits();
+	CubeBounds cubesBounds{ fromChunk.valAs<pCube>(), toChunk.valAs<pCube>() + units::cubesInChunkDim-1 };
 	
 	for(int iters{}; iters < 10; iters++) {
-		Bounds newCubesBounds = Bounds::emptyLimits();
+		CubeBounds newCubesBounds = CubeBounds::emptyLimits();
 		
 		for(int dirIndex{}; dirIndex < 2; dirIndex++) {
 			auto const dir{ dirIndex*2 - 1 };
@@ -1451,23 +1450,31 @@ static void updateNeighbouringEmitters(chunk::Chunk chunk) {
 }
 
 
-static uint8_t calcAO(chunk::Chunks &chunks, chunk::Move_to_neighbour_Chunk chunk, vec3i const chunkPos, vec3i const cubeCoordInChunk) {
+template<typename C, typename Action> 
+std::enable_if_t<std::is_same_v< decltype(std::declval<Action>() ( std::declval<vec3<C>>() )), void >>
+iterateAreaX(vec3<C> const begin, vec3<C> const end, Action &&action) {
+	vec3<C> const dir{ (end - begin).sign() };
+	for(C z{begin.z}; z != end.z; z += dir.z)
+	for(C y{begin.y}; y != end.y; y += dir.y)
+	for(C x{begin.x}; x != end.x; x += dir.x) {
+		action(vec3<C>{x, y, z});
+	}
+}
+
+static uint8_t calcAO(chunk::Chunk chunk, pChunk const chunkPos, pCube const cubeCoordInChunk) {
+	auto &chunks{ chunk.chunks() };
+	
 	uint8_t cubes{};
-	for(int j{}; j < 8; j ++) {
-		auto const offsetcubeCoordInChunk_unnormalized{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0) };
-		auto const offsetCubePos{ pos::Chunk{chunkPos} + pos::Cube{ offsetcubeCoordInChunk_unnormalized } };
+	for(int j{}; j < chunk::ChunkAO::dirsCount; j ++) {
+		auto const offsetcubeCoordInChunk_unnormalized{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0)/*-1, 0*/ };
+		auto const offsetCubePos{ chunkPos + offsetcubeCoordInChunk_unnormalized };
 		
-		auto const offsetCubeChunkIndex{ chunk.move(offsetCubePos.valAs<pos::Chunk>()) };
+		auto const offsetCubeChunkIndex{ chunk::chunkAt(chunks, offsetCubePos.valAs<pos::Chunk>()) };
 		if(!offsetCubeChunkIndex.is()) continue;
 		
-		auto const offsetCubeBlockCoord{ offsetCubePos.as<pos::Block>().valIn<pos::Chunk>() };
-		auto const offsetCubeLocalCoord{ offsetCubePos.valAs<pos::Cube>() & 1 };
-		
 		auto offsetCubeChunk{ chunks[offsetCubeChunkIndex.get()] };
-		
-		auto const solidCube{ offsetCubeChunk.data()[chunk::blockIndex(offsetCubeBlockCoord)].cube(vec3i(offsetCubeLocalCoord)) };
-		
-		if(solidCube) cubes |= 1 << j;
+		auto offsetedCube{ offsetCubeChunk.data().cubeAt(offsetCubePos.in<pos::Chunk>()) };
+		cubes = cubes | (int(offsetedCube.isSolid) << j);
 	}
 	
 	return cubes;
@@ -1477,7 +1484,7 @@ static void updateBlocks(chunk::Chunk chunk) {
 	auto &chunks{ chunk.chunks() };
 	auto const aabb{ chunk.aabb() };
 	auto const start{ aabb.start() };
-	auto const end{ aabb.end() };
+	auto const end{ aabb.onePastEnd() };
 	auto const chunkCoord{ chunk.position() };
 	auto &blocks{ chunk.data() };
 	auto &emitters{ chunk.emitters() };
@@ -1485,25 +1492,17 @@ static void updateBlocks(chunk::Chunk chunk) {
 	auto &ao{ chunk.ao() };
 	ao.reset();
 	
-	chunk::Move_to_neighbour_Chunk const mtnChunk{chunk};
 	if(!aabb.empty()) {
 		//AO
-		static constexpr int cnb{ units::cubesInBlockDim };
-		for(int z{start.z*cnb}; z < (end.z+1)*cnb; z++) 
-		for(int y{start.y*cnb}; y < (end.y+1)*cnb; y++) 
-		for(int x{start.x*cnb}; x < (end.x+1)*cnb; x++) {
-			vec3i const cubeCoordInChunk{ x, y, z };
-			ao[cubeCoordInChunk] = calcAO(chunks, mtnChunk, chunkCoord, cubeCoordInChunk);
-		}
+		iterateAreaX(pBlock{start}.valAs<pCube>(), pBlock{end}.valAs<pCube>(), [&](vec3i const coord) {
+			pCube const cubeCoordInChunk{ coord };
+			ao[cubeCoordInChunk] = calcAO(chunk, pChunk{chunkCoord}, cubeCoordInChunk);
+		});
 		
-		
-		auto const offsetedStart{ start.max(1) };
-		auto const offsetedEnd  { start.min(units::blocksInChunkDim-1) };
 		//blocks with no neighbours
-		for(int z{offsetedStart.z}; z < (offsetedEnd.z+1); z++) 
-		for(int y{offsetedStart.y}; y < (offsetedEnd.y+1); y++) 
-		for(int x{offsetedStart.x}; x < (offsetedEnd.x+1); x++) {
-			vec3i const blockInChunkCoord{ x, y, z };
+		auto const offsetedStart{ start.max(1) };
+		auto const offsetedEnd  { end.min(units::blocksInChunkDim-1) };
+		iterateAreaX(offsetedStart, offsetedEnd, [&](vec3i const blockInChunkCoord) {
 			auto &chunkBlocks{ chunk.data() };
 			auto &block{ chunkBlocks[blockInChunkCoord] };
 			
@@ -1526,15 +1525,14 @@ static void updateBlocks(chunk::Chunk chunk) {
 			
 			if(noNeighbours) block = chunk::Block::noNeighboursBlock(block);
 			else             block = chunk::Block::  neighboursBlock(block);
-		}
+		});
 		
-		for(int z{start.z}; z <= end.z; z++) 
-		for(int y{start.y}; y <= end.y; y++) 
-		for(int x{start.x}; x <= end.x; x++) {
-			vec3i const blockInChunkCoord{ x, y, z };
+		//emitters
+		iterateAreaX(start, end, [&](vec3i const blockInChunkCoord) {
 			if(isBlockEmitter(blocks[blockInChunkCoord].id())) emitters.add(blockInChunkCoord);
-		}
+		});
 		
+		//set 'update neighbouring emitters' flag for this and all the other neighbouring chunks
 		iterate3by3Volume([&](vec3i const dir, int const i) {
 			auto const neighbourIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(dir).get() };
 			if(neighbourIndex != -1) {
@@ -1718,7 +1716,7 @@ void writeChunk(chunk::Chunk &chunk) {
 	}
 }
 
-bool tryReadChunk(chunk::Chunk chunk, Bounds &bounds) {
+bool tryReadChunk(chunk::Chunk chunk, BlockBounds &bounds) {
 	auto &data{ chunk.data() };
 	auto &emitters{ chunk.emitters() };
 	
@@ -1785,7 +1783,7 @@ bool tryReadChunk(chunk::Chunk chunk, Bounds &bounds) {
 	return false;
 }
 
-static void genTrees(chunk::Chunk chunk, Bounds &bounds) {	
+static void genTrees(chunk::Chunk chunk, BlockBounds &bounds) {	
 	auto const &chunkCoord{ chunk.position() };
 	auto &data{ chunk.data() };
 	auto &emitters{ chunk.emitters() };
@@ -1831,7 +1829,7 @@ static void genTrees(chunk::Chunk chunk, Bounds &bounds) {
 	}
 }
 
-static void genChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk, Bounds &bounds) {
+static void genChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk, BlockBounds &bounds) {
 	auto const &pos{ chunk.position() };
 	auto &blocks{ chunk.data() };
 	auto &emitters{ chunk.emitters() };
@@ -1868,7 +1866,7 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 	genTrees(chunk, bounds);	
 }
 
-static void fillChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk, Bounds &bounds) {
+static void fillChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk, BlockBounds &bounds) {
 	if(loadChunks  && tryReadChunk(         chunk, bounds)) chunk.modified() = false;
 	else {            genChunkData(heights, chunk, bounds); chunk.modified() = true ; }
 	
@@ -1953,7 +1951,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 			return neighbours;
 		}();
 		
-		Bounds chunkBounds = Bounds::emptyBlocksInChunk();
+		BlockBounds chunkBounds = BlockBounds::emptyBlocksInChunk();
 		fillChunkData(heights, chunk, chunkBounds);
 		
 		fillEmittersBlockLighting(chunk);
@@ -2747,7 +2745,8 @@ void drawBlockHitbox(vec3f const blockRelativePos, float const size, float const
 	glDisable(GL_DEPTH_TEST);
 }
 
-int main(void) {	
+int main(void) {
+	auto const startupTime{ std::chrono::steady_clock::now() };
     if (!glfwInit()) return -1;
 
     GLFWmonitor* monitor;
@@ -2847,13 +2846,16 @@ int main(void) {
         std::cout << err << std::endl;
     }
 
-    auto start = std::chrono::steady_clock::now();
 	
 	updateChunks(chunks);
 	
 	reloadShaders();
 	
+    auto const completionTime = std::chrono::steady_clock::now();
+	std::cout << "Ttime to start (ms): " << ( double(std::chrono::duration_cast<std::chrono::microseconds>(completionTime - startupTime).count()) / 1000.0 ) << '\n';
+	
 	Counter<150> mc{};	
+	
     while (!glfwWindowShouldClose(window)) {
 		auto startFrame = std::chrono::steady_clock::now();
 		
@@ -2903,7 +2905,7 @@ int main(void) {
         glUniform1f(far_u , currentCam.far );
 
 		static double lastTime{};
-		double curTime{ std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0 };
+		double curTime{ std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - completionTime).count() / 1000.0 };
 		
 		static double offset{};
 		if(numpad[2]) offset += curTime - lastTime;
@@ -2946,7 +2948,7 @@ int main(void) {
 				}
 				if(updated) updatedCount++; 
 			}
-			if(updatedCount > 0) std::cout << updatedCount << '\n';
+			//if(updatedCount > 0) std::cout << updatedCount << '\n';
 
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 		}

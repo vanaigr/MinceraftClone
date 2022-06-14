@@ -367,12 +367,13 @@ namespace chunk {
 	struct ChunkAO {
 		static constexpr int size = pos::cubesInChunkCount;
 		
+		static constexpr int dirsCount = 8; //8 cubes share 1 vertex
 		static vec3i dirsForIndex(const int index) { //used in main.shader
-			assert(index < 8); //at most 8 cubes share 1 vertex
+			assert(index >= 0 && index < dirsCount); 
 			const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
 			const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
 			const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
-			return vec3i{x,y,z} * 2 - 1;
+			return vec3i{ x, y, z } * 2 - 1;
 		}
 	private:
 		std::array<uint8_t, size> vertsBlocks;
@@ -382,8 +383,11 @@ namespace chunk {
 		uint8_t       &operator[](int const index)       { return vertsBlocks[index]; }
 		uint8_t const &operator[](int const index) const { return vertsBlocks[index]; }
 		
-		uint8_t       &operator[](vec3i const cubeCoord)       { return vertsBlocks[cubeIndexInChunk(cubeCoord)]; }
-		uint8_t const &operator[](vec3i const cubeCoord) const { return vertsBlocks[cubeIndexInChunk(cubeCoord)]; }
+		uint8_t       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
+		uint8_t const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }	
+		
+		uint8_t       &operator[](pCube const cubeCoord)       { return (*this)[cubeCoord.val()]; }
+		uint8_t const &operator[](pCube const cubeCoord) const { return (*this)[cubeCoord.val()]; }
 		
 		void reset() { vertsBlocks.fill(0); }
 	};
@@ -504,6 +508,8 @@ namespace chunk {
 			
 			return { block, isCube };
 		}
+		
+		Cube cubeAt(pCube const cubeCoord) const { return cubeAt(cubeCoord.val()); }
 	};
 	
 	struct Chunk3x3BlocksList {
@@ -728,4 +734,8 @@ namespace chunk {
 		
 		bool is() const { return valid; }
 	};
+	
+	OptionalChunkIndex chunkAt(Chunks &chunks, vec3i const chunkCoord) {
+		return Move_to_neighbour_Chunk{chunks}.move(chunkCoord);
+	}
 }

@@ -8,8 +8,9 @@
 #include <algorithm>
 
 template<typename C>
-struct vec2
-{
+struct vec2 {
+	using value_type = C;
+	
 	C x, y;
 
 public:
@@ -153,8 +154,9 @@ constexpr inline std::ostream& operator<<(std::ostream& stream, vec2<C>const& v)
 }
 
 template<typename C>
-struct vec3
-{
+struct vec3 {	
+	using value_type = C;
+
 	C x, y, z;
 
 public:

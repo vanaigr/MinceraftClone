@@ -39,22 +39,22 @@ namespace misc {
 
 	template<>
     int32_t mod<int32_t>(int32_t x, int32_t y) {
-        int32_t mod = x % y;
-        // if the signs are different and modulo not zero, adjust result
-        if ((x ^ y) < 0 && mod != 0) {
-            mod += y;
-        }
-        return mod;
-    }
+		return ((x % y) + y) % y;
+    } /*
+		for some reason the code above performs better than {
+			auto mod = x % y;
+			//if the signs are different and modulo not zero, adjust result
+			if ((x ^ y) < 0ll && mod != 0) {
+				mod += y;
+			}
+			return mod;
+		}
+		and it seems that they produce the same results 
+	*/
 	
 	template<>
 	int64_t mod<int64_t>(int64_t x, int64_t y) {
-        auto mod = x % y;
-        // if the signs are different and modulo not zero, adjust result
-        if ((x ^ y) < 0ll && mod != 0ll) {
-            mod += y;
-        }
-        return mod;
+		return ((x % y) + y) % y;
     }
 
     template<class Type>
