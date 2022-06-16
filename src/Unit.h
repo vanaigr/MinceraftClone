@@ -92,7 +92,7 @@ namespace unit {
 		value_type value_;
 	public:
 		constexpr Unit() = default;
-		constexpr Unit(value_type const src) : value_(src) {}	
+		explicit constexpr Unit(value_type const src) : value_(src) {}	
 		template<typename... Args, typename = decltype(value_type{ std::forward<Args>(std::declval<Args>())... } /*brace constructor!*/)> 
 		constexpr Unit(Args &&...args) : value_{ std::forward<Args>(args)... } {}	
 		

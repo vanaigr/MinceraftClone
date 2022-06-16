@@ -320,7 +320,6 @@ namespace chunk {
 	private:
 		uint8_t status : 2;
 		
-		uint8_t updateBlocks : 1;
 		uint8_t updateLightingAdd : 1;
 		uint8_t updateNeighbouringEmitters : 1;
 		
@@ -340,7 +339,7 @@ namespace chunk {
 		
 		
 		bool isInvalidated() const { return blocksUpdated || lightingUpdated || neighbouringEmittersUpdated; }
-		bool needsUpdate()   const { return updateBlocks || updateLightingAdd || updateNeighbouringEmitters; }
+		bool needsUpdate()   const { return updateLightingAdd || updateNeighbouringEmitters; }
 		
 		bool isBlocksUpdated  () const { return blocksUpdated; }
 		void setBlocksUpdated  (bool const val) { blocksUpdated = val; } 
@@ -350,10 +349,6 @@ namespace chunk {
 		
 		bool isNeighbouringEmittersUpdated() const { return neighbouringEmittersUpdated; }
 		void setNeighbouringEmittersUpdated(bool const val) { neighbouringEmittersUpdated = val; }
-	
-		
-		void setUpdateBlocks(bool const val) { updateBlocks = val; } 
-		bool isUpdateBlocks() const { return updateBlocks; }
 		
 		bool isUpdateLightingAdd() const { return updateLightingAdd; }
 		void setUpdateLightingAdd(bool const val) { updateLightingAdd = val; }
@@ -441,8 +436,6 @@ namespace chunk {
 	
 	
 	struct ChunkBlocksList {
-		static constexpr int16_t capacity = pos::blocksInChunkCount;
-		
 		using value_type = int16_t; static_assert(pos::blocksInChunkCount < (1 << 15));
 	private:
 		std::vector<value_type> list;
@@ -464,8 +457,15 @@ namespace chunk {
 		decltype(auto) cend  () const { return list.cend();   }
 		
 		void add(vec3i const blockCoord) {
-			assert(size() != capacity);
-			list.push_back(blockIndex(blockCoord));
+			auto const newElement{ blockIndex(blockCoord) };
+			assert(std::find(begin(), end(), newElement) == end());
+			list.push_back(newElement);
+		}
+		
+		void remove(vec3i const blockCoord) {
+			auto const result{ std::find(begin(), end(), blockIndex(blockCoord)) };
+			assert(result != end());
+			list.erase(result);
 		}
 		
 		void clear() {
@@ -691,19 +691,21 @@ namespace chunk {
 		}
 		
 		OptionalChunkIndex move(vec3i const otherChunk) {
-			auto const dir{ otherChunk - chunk.position() };
-			if(valid && Neighbours::checkDirValid(dir)) return offset(dir);
-			if(valid && diagonalNeighbourDirValid(dir)) return offsetDiagonal(dir);
-			if(valid && otherChunk == chunk.position()) return optChunk();
+			if(valid) {
+				auto const dir{ otherChunk - chunk.position() };
+				if(otherChunk == chunk.position()) return optChunk();
+				if(Neighbours::checkDirValid(dir)) return offset(dir);
+				if(diagonalNeighbourDirValid(dir)) return offsetDiagonal(dir);
+			}
 			*this = Move_to_neighbour_Chunk(chunk.chunks(), otherChunk);
 			return optChunk();
 		}
 		
 		OptionalChunkIndex moveToNeighbour/*offset to neighbour*/(vec3i const neighbour) {
 			if(!valid) return {};
+			if(neighbour == 0) return optChunk();
 			if(Neighbours::checkDirValid(neighbour)) return offset(neighbour);
 			if(diagonalNeighbourDirValid(neighbour)) return offsetDiagonal(neighbour);
-			if(neighbour == 0) return optChunk();
 			*this = Move_to_neighbour_Chunk(chunk.chunks(), chunk.position() + neighbour);
 			return optChunk();
 		}
