@@ -824,8 +824,8 @@ IntersectionInfo isInters(const Ray ray, ivec3 relativeToChunk_, const int /*mus
 
 vec3 background(const vec3 dir) {
 	const float t = 0.5 * (dir.y + 1.0);
-	const vec3 res = (1.0 - t) * vec3(2.0, 2.0, 2.0) + t * vec3(0.5, 0.7, 1.0);
-	return pow(res*1.5, vec3(2.2));
+	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.02) + t * vec3(0.5, 0.7, 1.0);
+	return pow(res*1.2, vec3(2.2));
 }
 
 
@@ -1055,6 +1055,9 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				
 				ambient = 0;
 				if(!backside) {
+					#if 0
+					ambient = lightForChunkVertexDir(intersectionChunkIndex, vertexCoord, normal);
+					#else
 					for(int i = 0 ; i < 4; i++) {
 						const ivec2 offset_ = ivec2(i%2, i/2);
 						const ivec3 offset = offset_.x * otherAxis1 + offset_.y * otherAxis2;
@@ -1066,8 +1069,14 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 						const float diffY = abs(offset_.y - mod(dot(localSpaceCoord, otherAxis2)*2, 1));
 						ambient += mix(mix(vertexLight, 0, diffY), 0, diffX);
 					}
+					#endif
 				}
 				else ambient = 0.5;
+				
+				#if 0
+				ambient -= 0.5;
+				ambient *= 3;
+				#endif
 				
 				const ivec3 dirSignI = ivec3(sign(ray.dir));
 				const ivec3 positive_ = max(dirSignI, ivec3(0));

@@ -106,7 +106,7 @@ namespace units {
 		};
 		
 		constexpr void test() {
-			TestConversion<Block, 5>::to<Fractional , fracInBlockDim  * 5>::check();
+			TestConversion<Block, 5>::to<Fractional, fracInBlockDim  * 5>::check();
 			TestConversion<Block, 5>::to<Cube, cubesInBlockDim * 5>::check();
 			TestConversion<Chunk, 5>::to<Cube, cubesInChunkDim * 5>::check();
 			TestConversion<Fractional, 5 * fracInBlockDim>::to<Block, 5>::check();

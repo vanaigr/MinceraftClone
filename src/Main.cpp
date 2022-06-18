@@ -32,10 +32,11 @@
 #include<sstream>
 #include<fstream>
 
+
 static constexpr int chunkColumnChunkYMax = 15;
 static constexpr int chunkColumnChunkYMin = -16;
 
-constexpr int chunksCoumnChunksCount{ chunkColumnChunkYMax - chunkColumnChunkYMin + 1 };
+static constexpr int chunksCoumnChunksCount{ chunkColumnChunkYMax - chunkColumnChunkYMin + 1 };
 //#define FULLSCREEN
 
 #ifdef FULLSCREEN
@@ -53,7 +54,7 @@ static double const fixedDeltaTime{ 16.0/1000.0 };
 
 GLFWwindow* window;
 
-static int viewDistance = 2;
+static int const viewDistance = 1;
 
 
 static double const playerHeight{ 1.95 };
@@ -1024,24 +1025,39 @@ static bool isBlockEmitter(uint16_t const id) {
 	return id == 13 || id == 14;
 }
 
-struct Bounds {
-	using T = int32_t;
-	static Bounds emptyBlocksInChunk() { return Bounds{units::blocksInChunkDim-1, 0}; }
-	static Bounds emptyLimits() { return Bounds{std::numeric_limits<T>::max(), std::numeric_limits<T>::lowest()}; }
+
+struct Bounds {		
+	vec3i first;
+	vec3i last;
 	
-	static Bounds blocksInChunk() { return Bounds{0, units::blocksInChunkDim-1}; }
-	static Bounds limits() { return Bounds{std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()}; }
-	
-	vec3<T> start; //'lowest' nonempty block/cube/...
-	vec3<T> end; //'highest' nonempty block/cube/...
-	
-	bool isEmpty() {
-		return (start > end).any();
+	constexpr bool isEmpty() const {
+		return (last >= first).all();
 	}
 };
 
-using BlockBounds = Bounds;
-using CubeBounds = Bounds;
+struct BlockBounds : Bounds {
+	constexpr static BlockBounds oneChunk() {
+		return BlockBounds{ vec3i{0}, vec3i{units::blocksInChunkDim - 1} };
+	}
+	
+	constexpr static BlockBounds emptyChunk() {
+		return BlockBounds{ vec3i{units::blocksInChunkDim - 1}, vec3i{0} };
+	}
+};
+
+struct CubeBounds : Bounds {
+	constexpr static CubeBounds oneChunk() {
+		return CubeBounds{ vec3i{0}, vec3i{units::cubesInChunkDim - 1} };
+	}
+	
+	constexpr static CubeBounds emptyChunk() {
+		return CubeBounds{ vec3i{units::cubesInChunkDim - 1}, vec3i{0} };
+	}
+	
+	constexpr static CubeBounds emptyLimits() {
+		return CubeBounds{ std::numeric_limits<vec3i::value_type>::max(), std::numeric_limits<vec3i::value_type>::lowest() };
+	}
+};
 
 struct SkyLightingConfig {
 	static chunk::ChunkLighting &getLighting(chunk::Chunk chunk) {
@@ -1162,8 +1178,8 @@ static void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	CubeBounds const bounds,
 	CubeBounds &newBounds
 ) {
-	auto const fromCube{ bounds.start };
-	auto const toCube{ bounds.end };
+	auto const fromCube{ bounds.first };
+	auto const toCube{ bounds.last };
 	
 	auto const chunkIndex{ chunk.chunkIndex() };
 	auto const chunkCoord{ chunk.position() };
@@ -1251,8 +1267,8 @@ static void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 			auto const updateLight{ cubeLighting < candLighting && candLighting > 0 };
 			if(updateLight) {
 				cubeLighting = candLighting;
-				updatedCubesBounds.start = updatedCubesBounds.start.min(cubeInChunkCoord);
-				updatedCubesBounds.end = updatedCubesBounds.end.max(cubeInChunkCoord);
+				updatedCubesBounds.first = updatedCubesBounds.first.min(cubeInChunkCoord);
+				updatedCubesBounds.last  = updatedCubesBounds.last .max(cubeInChunkCoord);
 			}
 			
 			layerLighting0 = layerLighting0 && cubeLighting == 0;
@@ -1279,8 +1295,8 @@ static void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	}
 	
 	if(!updatedCubesBounds.isEmpty()) {
-		newBounds.start = newBounds.start.min(pChunk{chunkCoord}.valAs<pCube>() + updatedCubesBounds.start);
-		newBounds.end   = newBounds.end  .max(pChunk{chunkCoord}.valAs<pCube>() + updatedCubesBounds.end  );
+		newBounds.first = newBounds.first.min(pChunk{chunkCoord}.valAs<pCube>() + updatedCubesBounds.first);
+		newBounds.last  = newBounds.last .max(pChunk{chunkCoord}.valAs<pCube>() + updatedCubesBounds.last );
 	}
 }
 
@@ -1460,7 +1476,6 @@ static void updateNeighbouringEmitters(chunk::Chunk chunk) {
 	curChunkNeighbouringEmitters.fillRepeated(neighbouringEmitters, neighbouringEmittersCount);
 }
 
-
 template<typename C, typename Action> 
 std::enable_if_t<std::is_same_v< decltype(std::declval<Action>() ( std::declval<vec3<C>>() )), void >>
 iterateAreaX(vec3<C> const begin, vec3<C> const end, Action &&action) {
@@ -1545,6 +1560,7 @@ static void updateAOInArea(chunk::Chunk chunk, pCube const first, pCube const la
 		) };
 	*/
 	
+
 	iterateArea(first.val(), last.val(), [&](vec3i const coord) {
 		pCube const startCoord{ coord };
 		auto const startChunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(startCoord.valAs<pChunk>()).get() };
@@ -1631,8 +1647,12 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 	
 	bool modified = false;
 	
+	static constexpr bool updateChunkDebug = false;
+	
+	#define UPDATE_CHUNK_DEBUG
 	if(!maxUpdated && status.needsUpdate()) { 
-		std::cout << "u ";
+		if constexpr(updateChunkDebug) std::cout << "u ";
+		
 		auto &chunks{ chunk.chunks() };
 		
 		if(status.isUpdateLightingAdd()) {
@@ -1680,7 +1700,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		
 		
 		if(status.isBlocksUpdated()) {
-			std::cout << "b ";
+			if constexpr(updateChunkDebug) std::cout << "b ";
 			uint32_t const aabbData{ chunk.aabb().getData() };
 			auto const &neighbours{ chunk.neighbours() };
 			auto const &ao{ chunk.ao() };
@@ -1717,7 +1737,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		}					
 
 		if(status.isLightingUpdated()) {
-			std::cout << "l ";
+			if constexpr(updateChunkDebug) std::cout << "l ";
 			showUpdated = true;
 			auto const &skyLighting{ chunk.skyLighting() };
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksSkyLighting_ssbo);
@@ -1733,7 +1753,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		}
 		
 		if(status.isNeighbouringEmittersUpdated()) {	
-			std::cout << "e ";
+			if constexpr(updateChunkDebug) std::cout << "e ";
 			auto const &emittersGPU{ chunk.neighbouringEmitters() };
 			
 			static_assert(sizeof(chunk::Chunk3x3BlocksList) == sizeof(uint32_t)*16);
@@ -1751,7 +1771,6 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 	
 	return modified;
 }
-
 
 std::string chunkFilename(chunk::Chunk const chunk) {
 	auto const &pos{ chunk.position() };
@@ -1821,8 +1840,8 @@ bool tryReadChunk(chunk::Chunk chunk, BlockBounds &bounds) {
 			
 			data[chunk::blockIndex(blockCoord)] = chunk::Block(block);
 			if(block != 0) {
-				bounds.start = bounds.start.min(blockCoord);
-				bounds.end   = bounds.end  .max(blockCoord);
+				bounds.first = bounds.first.min(blockCoord);
+				bounds.last  = bounds.last .max(blockCoord);
 			}
 			
 			if(isBlockEmitter(block)) emitters.add(blockCoord);
@@ -1848,8 +1867,8 @@ bool tryReadChunk(chunk::Chunk chunk, BlockBounds &bounds) {
 			
 			data[chunk::blockIndex(blockCoord)] = chunk::Block::fullBlock(block);
 			if(block != 0) {
-				bounds.start = bounds.start.min(blockCoord);
-				bounds.end   = bounds.end  .max(blockCoord);
+				bounds.first = bounds.first.min(blockCoord);
+				bounds.last  = bounds.last .max(blockCoord);
 			}
 			
 			if(isBlockEmitter(block)) emitters.add(blockCoord);
@@ -1899,8 +1918,8 @@ static void genTrees(chunk::Chunk chunk, BlockBounds &bounds) {
 					if(isBlockEmitter(curBlock.id())) emitters.add(blk);
 
 					if(is) {
-						bounds.start = bounds.start.min(blk);
-						bounds.end   = bounds.end  .max(blk);
+						bounds.first = bounds.first.min(blk);
+						bounds.last  = bounds.last .max(blk);
 					}
 				}
 			}
@@ -1929,8 +1948,8 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 			else if(diff < 5) block = 2; //dirt
 			else block = 6; //stone
 			
-			bounds.start = bounds.start.min(blockCoord);
-			bounds.end   = bounds.end  .max(blockCoord);
+			bounds.first = bounds.first.min(blockCoord);
+			bounds.last  = bounds.last .max(blockCoord);
 			
 			blocks[blockCoord] = chunk::Block::fullBlock(block);
 		}
@@ -2056,12 +2075,12 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 			return neighbours;
 		}();
 		
-		BlockBounds chunkBounds = BlockBounds::emptyBlocksInChunk();
+		BlockBounds chunkBounds = BlockBounds::emptyChunk();
 		fillChunkData(heights, chunk, chunkBounds);
 		
 		fillEmittersBlockLighting(chunk);
 		
-		chunk.aabb() = chunk::AABB(chunkBounds.start, chunkBounds.end);
+		chunk.aabb() = chunk::AABB(chunkBounds.first, chunkBounds.last);
 		
 		if(emptyBefore && chunk.aabb().empty()) {
 			chunk.skyLighting().fill(31u);

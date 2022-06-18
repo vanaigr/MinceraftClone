@@ -362,6 +362,8 @@ namespace chunk {
 	struct ChunkAO {
 		static constexpr int size = pos::cubesInChunkCount;
 		
+		using value_type = uint8_t;
+		
 		static constexpr int dirsCount = 8; //8 cubes share 1 vertex
 		static vec3i dirsForIndex(const int index) { //used in main.shader
 			assert(index >= 0 && index < dirsCount); 
@@ -371,18 +373,18 @@ namespace chunk {
 			return vec3i{ x, y, z } * 2 - 1;
 		}
 	private:
-		std::array<uint8_t, size> vertsBlocks;
+		std::array<value_type, size> vertsBlocks;
 	public:
 		//ChunkAO() = default;
 		
-		uint8_t       &operator[](int const index)       { return vertsBlocks[index]; }
-		uint8_t const &operator[](int const index) const { return vertsBlocks[index]; }
+		value_type       &operator[](int const index)       { return vertsBlocks[index]; }
+		value_type const &operator[](int const index) const { return vertsBlocks[index]; }
 		
-		uint8_t       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
-		uint8_t const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }	
+		value_type       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
+		value_type const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }	
 		
-		uint8_t       &operator[](pCube const cubeCoord)       { return (*this)[cubeCoord.val()]; }
-		uint8_t const &operator[](pCube const cubeCoord) const { return (*this)[cubeCoord.val()]; }
+		value_type       &operator[](pCube const cubeCoord)       { return (*this)[cubeCoord.val()]; }
+		value_type const &operator[](pCube const cubeCoord) const { return (*this)[cubeCoord.val()]; }
 		
 		void reset() { vertsBlocks.fill(0); }
 	};
@@ -737,7 +739,7 @@ namespace chunk {
 		bool is() const { return valid; }
 	};
 	
-	OptionalChunkIndex chunkAt(Chunks &chunks, vec3i const chunkCoord) {
+	inline OptionalChunkIndex chunkAt(Chunks &chunks, vec3i const chunkCoord) {
 		return Move_to_neighbour_Chunk{chunks}.move(chunkCoord);
 	}
 }

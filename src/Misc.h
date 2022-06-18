@@ -30,15 +30,15 @@ namespace misc {
     inline float modf(const float x, const float y) noexcept {
         return x - static_cast<double>(y) * floor(x / static_cast<double>(y));
     }
-	template<> float mod<float>(float x, float y) {return modf(x,y);}
+	template<> inline float mod<float>(float x, float y) {return modf(x,y);}
 	
 	inline double modd(const double x, const double y) noexcept {
         return x - y * floor(x / y);
     }
-	template<> double mod<double>(double x, double y) {return modf(x,y);}
+	template<> inline double mod<double>(double x, double y) {return modf(x,y);}
 
 	template<>
-    int32_t mod<int32_t>(int32_t x, int32_t y) {
+    inline int32_t mod<int32_t>(int32_t x, int32_t y) {
 		return ((x % y) + y) % y;
     } /*
 		for some reason the code above performs better than {
@@ -53,7 +53,7 @@ namespace misc {
 	*/
 	
 	template<>
-	int64_t mod<int64_t>(int64_t x, int64_t y) {
+	inline int64_t mod<int64_t>(int64_t x, int64_t y) {
 		return ((x % y) + y) % y;
     }
 
@@ -221,32 +221,5 @@ namespace misc {
 	template <typename T> 
 	inline constexpr int sign(T val) {
 		return (T(0) < val) - (val < T(0));
-	}
-	
-	//https://en.wikipedia.org/wiki/Integer_square_root
-	int32_t integerSqrtF(int32_t const n){
-		if(n < 2) {
-			assert(n >= 0);
-			return n;
-		}
-		
-		int32_t shift = 2;
-		while((n >> shift) != 0) shift += 2;
-
-		int32_t result = 0;
-		while(shift >= 0) {
-			result = result << 1;
-			int32_t large_cand = result + 1;
-			if(large_cand * large_cand <= (n >> shift))
-				result = large_cand;
-			shift -= 2;
-		}
-	
-		return result;
-	}
-		
-	int32_t integerSqrtC(int32_t const n) {
-		int32_t r = integerSqrtF(n);
-		return r + (r*r!=n);
 	}
 }
