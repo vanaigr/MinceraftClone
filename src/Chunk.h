@@ -393,6 +393,9 @@ namespace chunk {
 	struct ChunkLighting {
 		static constexpr int size = pos::cubesInChunkCount;
 		
+		using value_type = uint8_t;
+		static constexpr value_type maxValue = std::numeric_limits<value_type>::max();
+		
 		static constexpr int dirsCount{ 6 };
 		
 		static constexpr bool checkIndexValid(uint8_t const index) {
@@ -419,20 +422,20 @@ namespace chunk {
 		}
 
 	private:
-		std::array<uint8_t, size> lighting;
+		std::array<value_type, size> lighting;
 	public:
 		ChunkLighting() = default;
-		ChunkLighting(uint8_t const val) {
+		ChunkLighting(value_type const val) {
 			fill(val);
 		}
 		
-		uint8_t       &operator[](int const cubeIndex)       { return lighting[cubeIndex]; }
-		uint8_t const &operator[](int const cubeIndex) const { return lighting[cubeIndex]; }		
+		value_type       &operator[](int const cubeIndex)       { return lighting[cubeIndex]; }
+		value_type const &operator[](int const cubeIndex) const { return lighting[cubeIndex]; }		
 		
-		uint8_t       &operator[](vec3i const cubeCoord)       { return lighting[cubeIndexInChunk(cubeCoord)]; }
-		uint8_t const &operator[](vec3i const cubeCoord) const { return lighting[cubeIndexInChunk(cubeCoord)]; }
+		value_type       &operator[](vec3i const cubeCoord)       { return lighting[cubeIndexInChunk(cubeCoord)]; }
+		value_type const &operator[](vec3i const cubeCoord) const { return lighting[cubeIndexInChunk(cubeCoord)]; }
 		
-		void fill(uint8_t const val) { lighting.fill(val); }
+		void fill(value_type const val) { lighting.fill(val); }
 		void reset() { fill(0); }
 	};
 	

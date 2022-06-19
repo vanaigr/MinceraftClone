@@ -1017,6 +1017,15 @@ vec3i getTreeBlock(vec2i const flatChunk) {
 	return vec3i{ it.x, int32_t(std::floor(height))+1, it.y };
 }
 
+static int lightingLost(uint16_t const id) {
+	     if(id == 0) return 0;
+	else if(id == 5) return 3;
+	else if(id == 7) return 2;
+	else             return 0;
+}
+
+static constexpr int cubeLightingLosses = misc::divCeil<int>(chunk::ChunkLighting::maxValue, 32/*cubes*/); //lighting value will be at most 0 after 32 cubes
+
 static bool isBlockTranslucent(uint16_t const id) {
 	return id == 0 || id == 5 || id == 7;
 }
@@ -1059,6 +1068,8 @@ struct CubeBounds : Bounds {
 	}
 };
 
+
+
 struct SkyLightingConfig {
 	static chunk::ChunkLighting &getLighting(chunk::Chunk chunk) {
 		return chunk.skyLighting();
@@ -1074,7 +1085,17 @@ struct SkyLightingConfig {
 	
 	static uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube) {
 		assert(chunk::ChunkLighting::checkDirValid(fromDir));
-		return (fromDir == vec3i{0,-1,0}) ? lighting : uint8_t(misc::max(int(lighting) - 1, 0));
+		
+		int const loss{ lightingLost(toBlockId * cube) };
+		
+		return misc::max(
+			(fromDir == vec3i{0,-1,0} ? 
+				int(lighting)
+				: 
+				int(lighting) - cubeLightingLosses)
+			 - loss, 
+			int(0)
+		);
 	}
 };
 
@@ -1094,7 +1115,13 @@ struct BlocksLightingConfig {
 	
 	static uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube) {
 		assert(chunk::ChunkLighting::checkDirValid(fromDir));
-		return uint8_t(misc::max(int(lighting) - 1, 0));
+		
+		int const loss{ lightingLost(toBlockId * cube) };
+		
+		return misc::max(
+			int(lighting) - cubeLightingLosses - loss, 
+			int(0)
+		);
 	}
 };
 
@@ -1222,7 +1249,7 @@ static void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	
 	auto const isBefore{ chunkBeforeIndex != chunkIndex };
 	
-	static /*constexpr*/ chunk::ChunkLighting const skyLighting{ 31u };
+	static /*constexpr*/ chunk::ChunkLighting const skyLighting{ chunk::ChunkLighting::maxValue };
 	auto const canUseSkyLighting{ std::is_same_v<SkyLightingConfig, Config> && dir == vec3i{0,-1,0} };/*
 		this check is not preformed in other places where it should be preformed (for example in AddLighting::)
 	*/
@@ -1326,7 +1353,7 @@ static void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 					
 					auto const cubeInChunkCoord{ blockInChunkCoord*units::cubesInBlockDim + cubeInBlockCoord };
 					
-					blockLighting[cubeInChunkCoord] = 31u;
+					blockLighting[cubeInChunkCoord] = chunk::ChunkLighting::maxValue;
 				}
 			}
 		}
@@ -1343,7 +1370,7 @@ static void fillEmittersBlockLighting(chunk::Chunk chunk) {
 			
 			auto const cubeInChunkCoord{ (blockInChunkCoord + cubeInBlockCoord).valAs<pos::Cube>() };
 			
-			blockLighting[cubeInChunkCoord] = 31u;
+			blockLighting[cubeInChunkCoord] = chunk::ChunkLighting::maxValue;
 		}
 	}
 }
@@ -2083,7 +2110,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		chunk.aabb() = chunk::AABB(chunkBounds.first, chunkBounds.last);
 		
 		if(emptyBefore && chunk.aabb().empty()) {
-			chunk.skyLighting().fill(31u);
+			chunk.skyLighting().fill(chunk::ChunkLighting::maxValue);
 		}
 		else {
 			chunk.skyLighting().reset();
@@ -2775,7 +2802,7 @@ bool performBlockAction() {
 			if(emitter) {
 				for(int i{}; i < pos::cubesInBlockCount; i++) {
 					auto const curCubeCoord{ blockInChunkCoord * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
-					BlocksLightingConfig::getLight(chunk, curCubeCoord) = 31u;		
+					BlocksLightingConfig::getLight(chunk, curCubeCoord) = chunk::ChunkLighting::maxValue;		
 				}
 					
 				for(int i{}; i < pos::cubesInBlockCount; i++) {
