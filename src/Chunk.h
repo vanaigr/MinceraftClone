@@ -320,9 +320,12 @@ namespace chunk {
 	private:
 		uint8_t status : 2;
 		
+		uint8_t updateAO : 1;
 		uint8_t updateLightingAdd : 1;
 		uint8_t updateNeighbouringEmitters : 1;
 		
+		uint8_t neighboursUpdated : 1;
+		uint8_t aoUpdated : 1;
 		uint8_t blocksUpdated : 1;
 		uint8_t lightingUpdated : 1;
 		uint8_t neighbouringEmittersUpdated : 1;
@@ -337,18 +340,37 @@ namespace chunk {
 		
 		void resetStatus() { status = 0; }
 		
+		void setEverythingUpdated() {
+			setNeighboursUpdated(true);
+			setAOUpdated(true);
+			setBlocksUpdated(true);
+			setLightingUpdated(true);
+			setNeighbouringEmittersUpdated(true);
+		}
 		
-		bool isInvalidated() const { return blocksUpdated || lightingUpdated || neighbouringEmittersUpdated; }
-		bool needsUpdate()   const { return updateLightingAdd || updateNeighbouringEmitters; }
 		
-		bool isBlocksUpdated  () const { return blocksUpdated; }
-		void setBlocksUpdated  (bool const val) { blocksUpdated = val; } 
+		bool isInvalidated() const { return neighboursUpdated || aoUpdated || blocksUpdated || lightingUpdated || neighbouringEmittersUpdated; }
+		bool needsUpdate()   const { return updateAO || updateLightingAdd || updateNeighbouringEmitters; }
+		
+		
+		bool isNeighboursUpdated() const { return neighboursUpdated; }
+		void setNeighboursUpdated(bool const val) { neighboursUpdated = val; }	
+		
+		bool isAOUpdated() const { return aoUpdated; }
+		void setAOUpdated(bool const val) { aoUpdated = val; }		
+		
+		bool isBlocksUpdated() const { return blocksUpdated; }
+		void setBlocksUpdated(bool const val) { blocksUpdated = val; } 
 		
 		bool isLightingUpdated() const { return lightingUpdated; }
 		void setLightingUpdated(bool const val) { lightingUpdated = val; }		
-		
+
 		bool isNeighbouringEmittersUpdated() const { return neighbouringEmittersUpdated; }
 		void setNeighbouringEmittersUpdated(bool const val) { neighbouringEmittersUpdated = val; }
+		
+
+		bool isUpdateAO() const { return updateAO; }
+		void setUpdateAO(bool const val) { updateAO = val; }		
 		
 		bool isUpdateLightingAdd() const { return updateLightingAdd; }
 		void setUpdateLightingAdd(bool const val) { updateLightingAdd = val; }

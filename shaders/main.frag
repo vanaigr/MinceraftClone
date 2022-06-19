@@ -1074,7 +1074,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				else ambient = 0.5;
 				
 				#if 0
-				ambient -= 0.5;
+				ambient -= 0.7;
 				ambient *= 3;
 				#endif
 				
@@ -1168,7 +1168,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 							shadowOffsets[ int(mod(floor(coord.z * shadowSubdiv), shadowOffsetsCount)) ]
 						);
 						const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
-						const vec4 q = vec4(normalize(-vec3(1+sin(time/4)/10,-3,-2)), cos(time/4)/5);
+						const vec4 q = vec4(normalize(vec3(-1-sin(time/4)/10,3,2)), cos(time/4)/5);
 						const vec3 v = normalize(vec3(-1, 4, 2) + offset);
 						const vec3 temp = cross(q.xyz, v) + q.w * v;
 						const vec3 rotated = v + 2.0*cross(q.xyz, temp);
@@ -1232,6 +1232,17 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 	return readResult(0).color;
 }
 
+vec3 colorMapping(const vec3 col) {
+	const float bw = 0.299 * col.r + 0.587 * col.g + 0.114 * col.b;
+	
+	const vec3 c = rgb2hsv(col);
+	return hsv2rgb(vec3(
+		c.x,
+		(c.y+0.03) / pow(c.z+1.0, 1.0 / 29),
+		pow(log(c.z + 1.0) / log(bw + 2.1), 1.1)
+	));
+}
+
 void main() {
 	const vec2 uv = gl_FragCoord.xy / windowSize.xy;
     const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
@@ -1245,13 +1256,7 @@ void main() {
 
 	const vec3 col = trace(ray, startChunkIndex);
 	
-	const float bw = 0.299 * col.r + 0.587 * col.g + 0.114 * col.b;
-	const vec3 c = rgb2hsv(col);
-	const vec3 c2 = hsv2rgb(vec3(
-		c.x,
-		(c.y+0.03) / pow(c.z+1.0, 1.0 / 29),
-		pow(log(c.z + 1.0) / log(bw + 2.1), 1.1)
-	));
+	const vec3 c2 = colorMapping(col);
 	
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) color = vec4(vec3(0.98), 1);
 	else color = vec4(c2, 1);

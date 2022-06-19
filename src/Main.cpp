@@ -54,7 +54,7 @@ static double const fixedDeltaTime{ 16.0/1000.0 };
 
 GLFWwindow* window;
 
-static int const viewDistance = 1;
+static int const viewDistance = 3;
 
 
 static double const playerHeight{ 1.95 };
@@ -340,9 +340,7 @@ void resizeGPUBuffers() {
 	
 	for(auto &status : it) {
 		status.resetStatus();
-		status.setBlocksUpdated(true);
-		status.setLightingUpdated(true);
-		status.setNeighbouringEmittersUpdated(true);
+		status.setEverythingUpdated();
 	}
 	
 	
@@ -1524,17 +1522,20 @@ iterateArea(vec3<C> const begin, vec3<C> const end, Action &&action) {
 	}
 }
 
-template<typename T> struct Area{ T first; T last; };
+template<typename T> struct Area{
+	T first; T last; 
+	
+	bool isEmpty() const {
+		return (last < first).any();
+	}
+};
 template<typename T> static constexpr Area<vec3<T>> intersectAreas3(Area<vec3<T>> const a1, Area<vec3<T>> const a2) {
 	auto const i = [](T const v1, T const v2, T const u1, T const u2) -> Area<T> {
-		auto const iv{ misc::min(v1, v2) }; //mIn
-		auto const av{ misc::max(v1, v2) }; //mAx
-		auto const iu{ misc::min(u1, u2) }; //mIn
-		auto const au{ misc::max(u1, u2) }; //mAx
-		
-		//assert(misc::clamp(v1, u1, u2) == misc::max(iv, iu) && misc::clamp(v2, u1, u2) == misc::min(av, au)); false
-		return { misc::clamp(v1, u1, u2), misc::clamp(v2, u1, u2) };//{ misc::max(iv, iu), misc::min(av, au) };
+		return { misc::clamp(v1, u1, u2), misc::clamp(v2, u1, u2) };
 	};
+	
+	if(a1.isEmpty()) return a1;
+	if(a2.isEmpty()) return a2;
 	
 	Area<T> const is[] = { 
 		i(a1.first.x, a1.last.x, a2.first.x, a2.last.x),
@@ -1667,71 +1668,55 @@ static void setChunksUpdateNeighbouringEmitters(chunk::Chunk chunk) {
 }
 
 static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool const maxUpdated, bool &showUpdated) {
-	auto const chunkIndex{ chunk.chunkIndex() };
-	chunk::ChunkData &chunkData{ chunk.data() };
-	vec3i const &chunkCoord{ chunk.position() };
-	auto &status{ chunk.status() };
-	
-	bool modified = false;
-	
 	static constexpr bool updateChunkDebug = false;
 	
-	#define UPDATE_CHUNK_DEBUG
-	if(!maxUpdated && status.needsUpdate()) { 
-		if constexpr(updateChunkDebug) std::cout << "u ";
-		
-		auto &chunks{ chunk.chunks() };
-		
-		if(status.isUpdateLightingAdd()) {
-			fillEmittersBlockLighting(chunk);
-			
-			updateLightingInChunks<SkyLightingConfig>   (chunks, chunkCoord, chunkCoord);
-			updateLightingInChunks<BlocksLightingConfig>(chunks, chunkCoord, chunkCoord);
-			
-			setNeighboursLightingUpdate<SkyLightingConfig, BlocksLightingConfig>(chunks, chunkCoord, chunkCoord);
-			
-			status.setUpdateLightingAdd(false);
-			status.setLightingUpdated(true);
-		}
-		if(status.isUpdateNeighbouringEmitters()) {
-			updateNeighbouringEmitters(chunk);
-			
-			status.setUpdateNeighbouringEmitters(false);
-			status.setNeighbouringEmittersUpdated(true);
-		}
-		
-		modified = true; 
-	}
+	auto &status{ chunk.status() };
 	
-	if(status.isInvalidated() || !status.isFullyLoadedGPU()) {
-		auto const inRenderDistance{ (chunkCoord - cameraChunkCoord).in(vec3i{-viewDistance}, vec3i{viewDistance}).all() };
-						
-		if(cameraChunkCoord != chunkCoord && (maxUpdated || !inRenderDistance)) {
-			if(status.isStubLoadedGPU()) return modified;
-			if(status.isFullyLoadedGPU() && status.isInvalidated()) return modified;
-
-			chunk::Neighbours const neighbours{};
+	if(!status.needsUpdate() && !status.isInvalidated() && status.isFullyLoadedGPU()) return false;
+					
+	auto const &chunkCoord{ chunk.position() };
+	auto const chunkIndex{ chunk.chunkIndex() };
+	
+	auto const inRenderDistance{ (chunkCoord - cameraChunkCoord).in(vec3i{-viewDistance}, vec3i{viewDistance}).all() };
+	if(cameraChunkCoord == chunkCoord || (inRenderDistance && !maxUpdated)) {
+		if(status.isNeighboursUpdated()) {
+			auto const &neighbours{ chunk.neighbours() };
+			
 			static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
-			glBufferSubData(
-				GL_SHADER_STORAGE_BUFFER, 
-				sizeof(int32_t) * chunk::Neighbours::neighboursCount * chunkIndex, 
-				chunk::Neighbours::neighboursCount * sizeof(uint32_t), 
-				&neighbours
-			);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(neighbours) * chunkIndex, sizeof(neighbours), &neighbours);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 			
-			status.markStubLoadedGPU();
-			return modified;
+			status.setNeighboursUpdated(false);
+		}
+		
+		if(status.isUpdateAO()) {
+			auto const &aabb{ chunk.aabb() };
+			auto const first{ aabb.start() };
+			auto const last { aabb.end  () };
+			updateAOInArea(chunk, pBlock{first}, pBlock{last});
+
+			status.setUpdateAO(false);
+			status.setAOUpdated(true);
+		}
+		if(status.isAOUpdated()) {
+			auto const &ao{ chunk.ao() };
+			
+			static_assert(sizeof(chunk::ChunkAO) == sizeof(uint8_t) * chunk::ChunkAO::size);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkAO), sizeof(chunk::ChunkAO), &ao);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+			
+			status.setAOUpdated(false);
 		}
 		
 		
 		if(status.isBlocksUpdated()) {
 			if constexpr(updateChunkDebug) std::cout << "b ";
+			
 			uint32_t const aabbData{ chunk.aabb().getData() };
-			auto const &neighbours{ chunk.neighbours() };
-			auto const &ao{ chunk.ao() };
-
+			chunk::ChunkData &chunkData{ chunk.data() };
+	
 			static_assert(sizeof chunkData == 16384);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo); 
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(chunkData) * chunkIndex, sizeof(chunkData), &chunkData);
@@ -1744,25 +1729,23 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksPostions_ssbo); 
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(vec3i) * chunkIndex, sizeof(vec3i), &chunkCoord);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-	
-			static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
-			glBufferSubData(
-				GL_SHADER_STORAGE_BUFFER, 
-				sizeof(int32_t) * chunk::Neighbours::neighboursCount * chunkIndex, 
-				chunk::Neighbours::neighboursCount * sizeof(uint32_t), 
-				&neighbours
-			);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 			
-			static_assert(sizeof(chunk::ChunkAO) == sizeof(uint8_t) * chunk::ChunkAO::size);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkAO), sizeof(chunk::ChunkAO), &ao);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
-
 			status.setBlocksUpdated(false);
 		}					
-
+	
+		if(status.isUpdateLightingAdd()) {
+			auto &chunks{ chunk.chunks() };
+			
+			fillEmittersBlockLighting(chunk);
+			
+			updateLightingInChunks<SkyLightingConfig>   (chunks, chunkCoord, chunkCoord);
+			updateLightingInChunks<BlocksLightingConfig>(chunks, chunkCoord, chunkCoord);
+			
+			setNeighboursLightingUpdate<SkyLightingConfig, BlocksLightingConfig>(chunks, chunkCoord, chunkCoord);
+			
+			status.setUpdateLightingAdd(false);
+			status.setLightingUpdated(true);
+		}
 		if(status.isLightingUpdated()) {
 			if constexpr(updateChunkDebug) std::cout << "l ";
 			showUpdated = true;
@@ -1779,6 +1762,12 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			status.setLightingUpdated(false);
 		}
 		
+		if(status.isUpdateNeighbouringEmitters()) {
+			updateNeighbouringEmitters(chunk);
+			
+			status.setUpdateNeighbouringEmitters(false);
+			status.setNeighbouringEmittersUpdated(true);
+		}
 		if(status.isNeighbouringEmittersUpdated()) {	
 			if constexpr(updateChunkDebug) std::cout << "e ";
 			auto const &emittersGPU{ chunk.neighbouringEmitters() };
@@ -1791,13 +1780,26 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			status.setNeighbouringEmittersUpdated(false);
 		}
 		
-		
-		modified = true;
 		status.markFullyLoadedGPU();
+		
+		return true;
 	}
-	
-	return modified;
+	else {
+		if(status.isStubLoadedGPU() || status.isFullyLoadedGPU() /*&& status.isInvalidated()*/) return false;
+
+		chunk::Neighbours const neighbours{};
+		static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
+		glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(neighbours) * chunkIndex, sizeof(neighbours), &neighbours);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+		
+		status.markStubLoadedGPU();
+		return false;
+	}
+
+	assert(false && "unreachable");
 }
+
 
 std::string chunkFilename(chunk::Chunk const chunk) {
 	auto const &pos{ chunk.position() };
@@ -2066,7 +2068,9 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		
 		chunk.position() = chunkPosition;
 		chunk.status() = chunk::ChunkStatus{};
-		chunk.status().setLightingUpdated(true);
+		chunk.status().setEverythingUpdated();
+		chunk.status().setUpdateAO(true);
+		chunk.ao().reset();
 		chunk.blockLighting().reset();
 		chunk.emitters().clear();
 		chunk.neighbouringEmitters().clear();
@@ -2144,20 +2148,37 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		auto const offset{ chunkInfo.offset() };
 		
 		auto chunk{ chunks[chunkIndex] };
+		auto const &aabb{ chunk.aabb() };
+		auto const first{ aabb.start() };
+		auto const last { aabb.end  () };
 		
-		auto const updatedAreaCubes{ intersectAreas3i(
-			{ vec3i{-1} - offset*units::cubesInChunkDim, vec3i{units::cubesInChunkDim} - offset*units::cubesInChunkDim },
-			{ 0, units::cubesInChunkDim-1 })
-		};
-		updateAOInArea(chunk, pCube{updatedAreaCubes.first}, pCube{updatedAreaCubes.last});
+		if(!chunk.status().isUpdateAO()) { //AO
+			auto const updatedAreaCubes_{ intersectAreas3i(
+				{ vec3i{-1} - offset*units::cubesInChunkDim, vec3i{units::cubesInChunkDim-1} - offset*units::cubesInChunkDim },
+				{ 0, units::cubesInChunkDim-1 })
+			};
+			auto const updatedAreaCubes{ intersectAreas3i(updatedAreaCubes_, {first * units::cubesInBlockDim, (last+1) * units::cubesInBlockDim - 1}) };
+			
+			if(!updatedAreaCubes.isEmpty()) {
+				updateAOInArea(chunk, pCube{updatedAreaCubes.first}, pCube{updatedAreaCubes.last});
+				chunk.status().setAOUpdated(true);
+			}
+		}
 		
-		auto const updatedAreaBlocks{ intersectAreas3i(
-			{ vec3i{-1} - offset*units::blocksInChunkDim, vec3i{units::blocksInChunkDim} - offset*units::blocksInChunkDim },
-			{ 0, units::blocksInChunkDim-1 })
-		};
-		updateBlocksWithNoNeighboursInArea(chunk, pBlock{updatedAreaBlocks.first}, pBlock{updatedAreaBlocks.last});
+		{ //blocks with no neighbours
+			auto const updatedAreaBlocks_{ intersectAreas3i(
+				{ vec3i{-1} - offset*units::blocksInChunkDim, vec3i{units::blocksInChunkDim} - offset*units::blocksInChunkDim },
+				{ 0, units::blocksInChunkDim-1 })
+			};
+			auto const updatedAreaBlocks{ intersectAreas3i(updatedAreaBlocks_, {first, last}) };
+			
+			if(!updatedAreaBlocks.isEmpty()) {
+				updateBlocksWithNoNeighboursInArea(chunk, pBlock{updatedAreaBlocks.first}, pBlock{updatedAreaBlocks.last});
+				chunk.status().setBlocksUpdated(true);
+			}
+		}
 		
-		chunk.status().setBlocksUpdated(true);
+		chunk.status().setNeighboursUpdated(true);
 		chunk.status().setUpdateNeighbouringEmitters(true);
 	}
 	
@@ -2229,7 +2250,7 @@ static void updateChunks(chunk::Chunks &chunks) {
 						but it is not critical
 					*/
 					
-					chunks[neighbourIndex].status().setBlocksUpdated(true); //to update neighbours
+					chunks[neighbourIndex].status().setNeighboursUpdated(true);
 				}
 			}
 		}
@@ -2747,7 +2768,10 @@ bool performBlockAction() {
 		iterate3by3Volume([&](vec3i const dir, int const index) {
 			auto const chunkIndex{ chunk::chunkAt(chunks, (chunkPos + blockInChunkPos + pBlock{dir}).valAs<pChunk>()) };
 			if(!chunkIndex.is()) return;
-			chunks[chunkIndex.get()].status().setBlocksUpdated(true);
+			auto &chunkStatus{ chunks[chunkIndex.get()].status() };
+			
+			chunkStatus.setAOUpdated(true);
+			chunkStatus.setBlocksUpdated(true);
 		});
 	}
 	else {
@@ -2820,7 +2844,10 @@ bool performBlockAction() {
 			iterate3by3Volume([&](vec3i const dir, int const index) {
 				auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour((blockInChunkPos + pBlock{dir}).valAs<pChunk>()) };
 				if(!chunkIndex.is()) return;
-				chunks[chunkIndex.get()].status().setBlocksUpdated(true);
+				auto &chunkStatus{ chunks[chunkIndex.get()].status() };
+			
+				chunkStatus.setAOUpdated(true);
+				chunkStatus.setBlocksUpdated(true);
 			});
 		}
 		else std::cout << "!\n";
@@ -3128,7 +3155,7 @@ int main(void) {
 		static double offset{};
 		if(numpad[2]) offset += curTime - lastTime;
 		lastTime = curTime;
-		glUniform1f(time_u, offset);
+		glUniform1f(time_u, offset / 1000.0);
 		
 		if(testInfo) {
 			std::cout.precision(17);
