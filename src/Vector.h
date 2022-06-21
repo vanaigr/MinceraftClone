@@ -453,6 +453,14 @@ public:
 		//	return misc::mix(from[i], to[i], coord);
 		//});
 	}
+	
+	inline constexpr vec3<C> atLeast(vec3<C> const other) const {
+		return this->max(other);
+	}	
+	
+	inline constexpr vec3<C> atMost(vec3<C> const other) const {
+		return this->min(other);
+	}
 };
 
 template<typename C>

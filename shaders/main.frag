@@ -1238,8 +1238,8 @@ vec3 colorMapping(const vec3 col) {
 	const vec3 c = rgb2hsv(col);
 	return hsv2rgb(vec3(
 		c.x,
-		(c.y+0.03) / pow(c.z+1.0, 1.0 / 29),
-		pow(log(c.z + 1.0) / log(bw + 2.1), 1.1)
+		(c.y+0.03) / pow(c.z+1.0, 1.0 / 10),
+		pow(log(c.z + 1.0) / log(bw + 2.35), 1.2)
 	));
 }
 

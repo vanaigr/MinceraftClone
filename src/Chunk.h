@@ -13,10 +13,6 @@
 #include<algorithm>
 #include<type_traits>
 
-
-
-
-
 namespace chunk {
 	namespace {
 		template<typename V, typename Tag> struct Wrapper {
@@ -739,8 +735,8 @@ namespace chunk {
 		
 
 		OptionalChunkIndex offset/*to immediate neighbour*/(vec3i const dir) {
-			if(dir == 0) return { chunk.chunkIndex() };
 			if(!valid) return {};
+			if(dir == 0) return optChunk();
 			
 			auto const optChunkIndex{ chunk.neighbours()[dir] };
 			valid = optChunkIndex.is();
@@ -764,7 +760,69 @@ namespace chunk {
 		bool is() const { return valid; }
 	};
 	
-	inline OptionalChunkIndex chunkAt(Chunks &chunks, vec3i const chunkCoord) {
-		return Move_to_neighbour_Chunk{chunks}.move(chunkCoord);
-	}
+	//same as Move_to_neighbour_Chunk but better
+	struct MovingChunk {
+	public:
+		static bool diagonalNeighbourDirValid(vec3i const dir) {
+			return (dir.abs() <= vec3i{1}).all() && dir.abs().equal(1).any();
+		}
+	private:
+		Chunks *chunks_;
+		OptionalChunkIndex chunkIndex;
+	public:
+		MovingChunk() = delete;
+		
+		MovingChunk(Chunks &chunks__, OptionalChunkIndex chunkIndex_ = {}) : chunks_{ &chunks__ }, chunkIndex{ chunkIndex_ } {}
+		MovingChunk(Chunk src) : chunks_{ &src.chunks() }, chunkIndex{ src.chunkIndex() } {}
+		MovingChunk(Chunks &chunks__, vec3i const chunkCoord) : chunks_{ &chunks__ } {
+			auto const chunkIndexP{ chunks_->chunksIndex_position.find(chunkCoord) };
+			
+			bool const valid{ chunkIndexP != chunks_->chunksIndex_position.end() };
+			
+			if(valid) chunkIndex = { chunkIndexP->second };
+			else chunkIndex = {};
+		}
+		
+		Chunks &chunks() const { return *chunks_; }
+		OptionalChunkIndex getIndex() const { return chunkIndex; }
+		bool is() const { return chunkIndex.is(); }
+		Chunk get() const { assert(is()); return chunks()[chunkIndex.get()]; }
+		
+		MovingChunk moved(vec3i const otherChunkCoord) const {
+			if(is()) {
+				auto const dir{ otherChunkCoord - get().position() };
+				if(dir == 0) return { *this };
+				if(Neighbours::checkDirValid(dir)) return offsetedToImmediate(dir);
+				if(diagonalNeighbourDirValid(dir)) return offsetedDiagonal(dir);
+			}
+			return MovingChunk(chunks(), otherChunkCoord);
+		}
+		
+		MovingChunk offseted(vec3i const dir) const {
+			if(!is()) return { chunks() };
+			if(dir == 0) return { *this };
+			if(Neighbours::checkDirValid(dir)) return offsetedToImmediate(dir);
+			if(diagonalNeighbourDirValid(dir)) return offsetedDiagonal(dir);
+			return MovingChunk{ chunks(), get().position() + dir };
+		}
+
+		MovingChunk offsetedToImmediate(vec3i const dir) const {
+			if(!is()) return { chunks() };
+			if(dir == 0) return { *this };
+			
+			return { chunks(), get().neighbours()[dir] };
+		}
+		
+		MovingChunk offsetedDiagonal(vec3i const dir) const {
+			if(!is()) return { chunks() };
+			if(dir == 0) return { *this };
+			assert(diagonalNeighbourDirValid(dir));
+			
+			auto  outChunk{ *this };
+			if(dir.x != 0) outChunk = outChunk.offsetedToImmediate(vec3i(dir.x,0,0));
+			if(dir.y != 0) outChunk = outChunk.offsetedToImmediate(vec3i(0,dir.y,0));
+			if(dir.z != 0) outChunk = outChunk.offsetedToImmediate(vec3i(0,0,dir.z));
+			return outChunk;
+		}		
+	};
 }
