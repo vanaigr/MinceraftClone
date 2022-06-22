@@ -1481,6 +1481,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 	
 	int chunkIndices[chunksCoumnChunksCount];
 	
+	auto lowestEmptyY{ chunkColumnChunkYMax + 1 };
 	auto lowestNotFullY  { chunkColumnChunkYMax + 1 };
 	auto highestNotEmptyY{ chunkColumnChunkYMin - 1 };
 	auto emptyBefore{ true };
@@ -1555,6 +1556,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		
 		if(emptyBefore && chunk.aabb().empty()) {
 			chunk.skyLighting().fill(chunk::ChunkLighting::maxValue);
+			lowestEmptyY = misc::min(lowestEmptyY, chunkPosition.y);
 		}
 		else {
 			chunk.skyLighting().reset();
@@ -1646,6 +1648,9 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		}
 	}
 	
+	calculateLighting(chunks, chunkIndices, columnPosition, lowestNotFullY, highestNotEmptyY, lowestEmptyY);
+	
+	#if 0
 	updateLightingInChunks<SkyLightingConfig>( 
 		chunks, 
 		vec3i{columnPosition.x, lowestNotFullY, columnPosition.y}, 
@@ -1658,22 +1663,12 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		vec3i{columnPosition.x, chunkColumnChunkYMax, columnPosition.y}
 	);
 	
-	#if 0
-	updateLightingInChunks<BlocksLightingConfig>(
-		chunks, 
-		vec3i{columnPosition.x, lowestWithBlockLighting - 1, columnPosition.y}, 
-		vec3i{columnPosition.x, highestWithBlockLighting + 1, columnPosition.y}
-	); /*
-		+1 and -1 are ajustments for the case when block lighting from the highest/lowest chunk with this type of lighting
-		reaches chunk above/below it
-	*/
-	#endif
-	
 	setNeighboursLightingUpdate<SkyLightingConfig, BlocksLightingConfig>(
 		chunks, 
 		vec3i{columnPosition.x, chunkColumnChunkYMin, columnPosition.y}, 
 		vec3i{columnPosition.x, chunkColumnChunkYMax, columnPosition.y}
 	);
+	#endif
 }
 
 static void updateChunks(chunk::Chunks &chunks) {
@@ -2632,7 +2627,7 @@ int main(void) {
 			int updatedCount{};
 			for(auto const chunkIndex : chunks.usedChunks()) {
 				bool showUpdated = false;
-				const bool updated{ updateChunk(chunks[chunkIndex], cameraChunk, false && updatedCount > 2, *&showUpdated) };
+				const bool updated{ updateChunk(chunks[chunkIndex], cameraChunk, updatedCount > 5, *&showUpdated) };
 				if(showUpdated) {
 					// -- // updatedChunks.push_back(chunkIndex); 
 				}

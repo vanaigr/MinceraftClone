@@ -31,6 +31,11 @@ template<typename T> struct Area {
 	bool isEmpty() const {
 		return (last < first).any();
 	}
+	
+	bool contains(T const value) const {
+		if(isEmpty()) return false;
+		else return value.clamp(first, last) == value;
+	}
 };
 template<typename T> inline constexpr Area<vec3<T>> intersectAreas3(Area<vec3<T>> const a1, Area<vec3<T>> const a2) {
 	auto const i = [](T const v1, T const v2, T const u1, T const u2) -> Area<T> {

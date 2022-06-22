@@ -413,6 +413,7 @@ namespace chunk {
 		
 		using value_type = uint8_t;
 		static constexpr value_type maxValue = std::numeric_limits<value_type>::max();
+		static constexpr value_type minValue = std::numeric_limits<value_type>::lowest();
 		
 		static constexpr int dirsCount{ 6 };
 		

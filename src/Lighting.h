@@ -166,6 +166,8 @@ inline void setNeighboursLightingUpdate(chunk::Chunks &chunks, vec3i const minCh
 	}
 }
 
+static /*constexpr*/ chunk::ChunkLighting const skyLighting{ chunk::ChunkLighting::maxValue };
+	
 template<typename Config>
 inline void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	chunk::Chunk chunk, 
@@ -218,7 +220,6 @@ inline void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	
 	auto const isBefore{ chunkBeforeIndex != chunkIndex };
 	
-	static /*constexpr*/ chunk::ChunkLighting const skyLighting{ chunk::ChunkLighting::maxValue };
 	auto const canUseSkyLighting{ std::is_same_v<SkyLightingConfig, Config> && dir == vec3i{0,-1,0} };/*
 		this check is not preformed in other places where it should be preformed (for example in AddLighting::)
 	*/
@@ -418,3 +419,6 @@ inline void updateLightingInChunks(chunk::Chunks &chunks, pChunk const fromChunk
 	}
 }
 
+
+void calculateLighting(chunk::Chunks &chunks, int (&chunkIndices)[32], 
+vec2i const columnPosition, int const lowestNotFullY, int const highestNotEmptyY, int const lowestEmptyY);

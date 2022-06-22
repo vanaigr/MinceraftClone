@@ -26,6 +26,13 @@ public:
 		};
 	}
 
+	inline constexpr vec2<bool> operator>(const vec2<C> o) const {
+		return vec2<bool>(x > o.x, y > o.y);
+	}
+	inline constexpr vec2<bool> operator>=(const vec2<C> o) const {
+		return vec2<bool>(x >= o.x, y >= o.y);
+	}
+	
 	inline constexpr vec2<bool> operator<(const vec2<C> o) const {
 		return vec2<bool>(x < o.x, y < o.y);
 	}
@@ -145,6 +152,18 @@ public:
 	
 	inline constexpr vec2<C> clamp(vec2<C> const b1, vec2<C>  const b2) const {
 		return this->applied([&](C const &it, size_t const index) -> C { return misc::clamp<C>(it, b1[index], b2[index]); });
+	}
+	
+	inline constexpr vec2<C> max(vec2<C> const o) const {
+		return this->applied([&](C const &it, size_t const index) -> C { return std::max({it, o[index]}); });
+	}
+	
+	inline constexpr vec2<C> min(vec2<C> const o) const {
+		return this->applied([&](C const &it, size_t const index) -> C { return std::min({it, o[index]}); });
+	}
+	
+	inline constexpr auto any() const {
+		return x || y;
 	}
 };
 
@@ -449,9 +468,6 @@ public:
 	
 	inline constexpr vec3<C> mix(vec3<C> const from, vec3<C> const to) {
 		return misc::mix<vec3<C>>(from, to, *this);
-		//return this->applied([from, to](auto const coord, auto i) -> C {
-		//	return misc::mix(from[i], to[i], coord);
-		//});
 	}
 	
 	inline constexpr vec3<C> atLeast(vec3<C> const other) const {
