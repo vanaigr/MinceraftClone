@@ -7,6 +7,7 @@ struct Config {
 	bool saveChunks;
 	double playerCameraFovDeg;
 	vec2d mouseSensitivity;
+	int chunkUpdatesPerFrame;
 };
 
 void parseConfigFromFile(Config &dst);

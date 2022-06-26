@@ -11,7 +11,6 @@ using Field = std::variant<NoValue, int, double, bool>;
 enum class FT { NO_VALUE, INT, REAL, BOOL };
 
 
-static constexpr int fieldCount = 6;
 
 //cofig fields
 enum class CF {
@@ -21,7 +20,9 @@ enum class CF {
 	playerCameraFovDeg,
 	mouseSensitivityX,
 	mouseSensitivityY,
+	chunkUpdatesPerFrame,
 };
+static constexpr int fieldCount = 7;
 
 //Config field names
 static constexpr char const *CFN[] = {
@@ -31,16 +32,18 @@ static constexpr char const *CFN[] = {
 	"playerCameraFovDeg",
 	"mouseSensitivity_x",
 	"mouseSensitivity_y",
+	"chunkUpdatesPerFrame",
 };
 
 //Config field types
 static constexpr FT CFT[] = {
-	FT::INT,
+	FT::INT ,
 	FT::BOOL,
 	FT::BOOL,
 	FT::REAL,
 	FT::REAL,
 	FT::REAL,
+	FT::INT ,
 };
 
 
@@ -115,12 +118,13 @@ void parseConfigFromFile(Config &dst) {
 		try{
 			#define result(FIELD) std::get<indexOf(CFT[indexOf(FIELD)])>(parsedValue)
 			switch(static_cast<CF>(field)) {
-				break; case CF::viewDistance      : dst.viewDistance       = result(CF::viewDistance);
-				break; case CF::loadChunks        : dst.loadChunks         = result(CF::loadChunks);
-				break; case CF::saveChunks        : dst.saveChunks         = result(CF::saveChunks);
-				break; case CF::playerCameraFovDeg: dst.playerCameraFovDeg = result(CF::playerCameraFovDeg);
-				break; case CF::mouseSensitivityX : dst.mouseSensitivity.x = result(CF::mouseSensitivityX);
-				break; case CF::mouseSensitivityY : dst.mouseSensitivity.y = result(CF::mouseSensitivityY);
+				break; case CF::viewDistance         : dst.viewDistance         = result(CF::viewDistance);
+				break; case CF::loadChunks           : dst.loadChunks           = result(CF::loadChunks);
+				break; case CF::saveChunks           : dst.saveChunks           = result(CF::saveChunks);
+				break; case CF::playerCameraFovDeg   : dst.playerCameraFovDeg   = result(CF::playerCameraFovDeg);
+				break; case CF::mouseSensitivityX    : dst.mouseSensitivity.x   = result(CF::mouseSensitivityX);
+				break; case CF::mouseSensitivityY    : dst.mouseSensitivity.y   = result(CF::mouseSensitivityY);
+				break; case CF::chunkUpdatesPerFrame : dst.chunkUpdatesPerFrame = result(CF::chunkUpdatesPerFrame);
 			}
 			#undef result
 		}

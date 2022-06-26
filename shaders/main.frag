@@ -973,7 +973,7 @@ Result combineSteps(const Result current, const Result inner) {
 		const bool emitter = innerSurface == 13 || innerSurface == 14;
 		const vec3 shadowTint = lighting ? vec3(1) : (surfaceType(resultingSurface) == 0 ? inner.color : vec3(0.4));
 		return Result(
-			curColor * shadowTint + (lighting && emitter ? (inner.color / (0.4 + inner.depth*inner.depth)) : vec3(0)), 
+			curColor * shadowTint + (lighting && emitter ? (inner.color ) : vec3(0)), 
 			current.depth + inner.depth, 
 			current.surface, 
 			current.type,
@@ -1150,7 +1150,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 					const float shadowSmoothness = 32;
 					const int shadowsInChunkDim = blocksInChunkDim * shadowSubdiv;		
 					
-					const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*0.5 )/shadowSubdiv;
+					const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*vec3(0.499, 0.5, 0.501) )/shadowSubdiv;
 					
 					const ivec3 shadowInChunkCoord = ivec3(floor(mod(coord * shadowSubdiv, vec3(shadowsInChunkDim))));
 					const int shadowInChunkIndex = 
@@ -1184,7 +1184,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 						
 						if(ne.is) {
 							const vec3 relativeCoord = position - relativeToChunk * blocksInChunkDim;
-							const vec3 newDir = normalize(ne.coord+0.5 - relativeCoord);
+							const vec3 newDir = normalize(ne.coord+0.499 - relativeCoord);
 							const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
 
 							pushParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 2u, curFrame));
