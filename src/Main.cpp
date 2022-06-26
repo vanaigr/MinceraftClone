@@ -1161,7 +1161,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			auto const &aabb{ chunk.aabb() };
 			auto const first{ aabb.start() };
 			auto const last { aabb.end  () };
-			updateAOInArea(chunk, pBlock{first}, pBlock{last+1} - pCube{1});
+			updateAOInArea(chunk, pBlock{first}.as<pCube>(), pBlock{last+1} - pCube{1});
 
 			status.setUpdateAO(false);
 			status.setAOUpdated(true);
@@ -2161,7 +2161,7 @@ bool performBlockAction() {
 		
 		pCube const cubeInChunkPos{ blockInChunkPos + cubeInBlockPos };
 		
-		pCube const first{ breakFullBlock ? blockInChunkPos                         : cubeInChunkPos };
+		pCube const first{ breakFullBlock ? blockInChunkPos.as<pCube>()             : cubeInChunkPos };
 		pCube const last { breakFullBlock ? blockInChunkPos + pBlock{1} - pCube{1}  : cubeInChunkPos };
 		
 		if(breakFullBlock) {

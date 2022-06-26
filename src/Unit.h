@@ -99,16 +99,18 @@ namespace unit {
 		template<typename Other, typename = std::enable_if_t<
 			!std::is_same_v<remove_cvref_t<Other>, This> //this constructor is disabled if argument is of type This
 			&& CanCast<Hierarchy, Other, This>::value
-			&& IsCastExplicit<Hierarchy, Other, This>::value
+			//&& IsCastExplicit<Hierarchy, Other, This>::value
 		>> constexpr explicit Unit(Other const other) : Unit{ Cast<Hierarchy, Other, This>::castUnit(other).val() } {}
 		
-		template<typename Other, typename = std::enable_if_t<
+		//implicit conversion opeator is disabled to prevent conversion for function arguments
+		//different types can still be added and subtracted implicitly
+		/* template<typename Other, typename = std::enable_if_t<
 			!std::is_same_v<remove_cvref_t<Other>, This> //this constructor is disabled if argument is of type This
 			&& CanCast<Hierarchy, This, Other>::value
 			&& !IsCastExplicit<Hierarchy, This, Other>::value
 		>> constexpr operator Other() const {
 			return Cast<Hierarchy, This, Other>::castUnit(*this);
-		}
+		} */
 		
 		constexpr value_type value() const { return value_; };
 		constexpr value_type val  () const { return value_; };
@@ -119,7 +121,7 @@ namespace unit {
 		constexpr friend This operator-(This const c1,This const c2) { return This{value_type(c1.val() - c2.val()) }; }
 		constexpr friend This &operator-=(This &c1, This const c2) { return c1 = c1 - c2; }
 	
-		template<typename Other, std::enable_if_t<HaveCommon<Hierarchy, This, Other>::val, int> = 0> 
+		template<typename Other, std::enable_if_t<HaveCommon<Hierarchy, This, Other>::value, int> = 0> 
 		constexpr friend auto operator+(This const c1, Other const c2) {
 			using common = typename CommonType<Hierarchy, This, Other>::type;
 			
@@ -127,26 +129,12 @@ namespace unit {
 				 + Cast<Hierarchy, Other, common>::castUnit(c2);
 		}
 		
-		template<typename Other, std::enable_if_t<HaveCommon<Hierarchy, This, Other>::val, int> = 0> 
+		template<typename Other, std::enable_if_t<HaveCommon<Hierarchy, This, Other>::value, int> = 0> 
 		constexpr friend auto operator-(This const c1, Other const c2) {
 			using common = typename CommonType<Hierarchy, This, Other>::type;
 			
 			return Cast<Hierarchy, This , common>::castUnit(c1)
 				 - Cast<Hierarchy, Other, common>::castUnit(c2);
-		}
-		
-		template<typename Other, std::enable_if_t<
-			  !HaveCommon<Hierarchy, This, Other>::val
-			&& std::is_convertible_v<Other, This>, int
-		> = 0> constexpr friend auto operator+(This const c1, Other const c2) {
-			return c1 + static_cast<This>(c2);
-		}
-		
-		template<typename Other, std::enable_if_t<
-			  !HaveCommon<Hierarchy, This, Other>::val
-			&& std::is_convertible_v<Other, This>, int
-		> = 0> constexpr friend auto operator-(This const c1, Other const c2) {
-			return c1 - static_cast<This>(c2);;
 		}
 		
 		template<typename T>
