@@ -18,6 +18,7 @@
 #include"Area.h"
 #include"BlockProperties.h"
 
+#include"Config.h"
 #include"Font.h"
 #include"ShaderLoader.h"
 #include"Read.h"
@@ -36,7 +37,6 @@
 #include<sstream>
 #include<fstream>
 
-
 static constexpr int chunkColumnChunkYMax = 15;
 static constexpr int chunkColumnChunkYMin = -16;
 
@@ -51,14 +51,15 @@ static const vec2i windowSize{ 1280, 720 };
 static const vec2d windowSize_d{ windowSize.convertedTo<double>() };
 static double const aspect{ windowSize_d.y / windowSize_d.x };
 
-static constexpr bool loadChunks = false, saveChunks = false;
 
 static double       deltaTime{ 16.0/1000.0 };
 static double const fixedDeltaTime{ 16.0/1000.0 };
 
 GLFWwindow* window;
 
-static int const viewDistance = 3;
+static int  viewDistance = 3;
+static bool loadChunks = false, saveChunks = false;
+static vec2d mouseSensitivity{ 0.8, -0.8 };
 
 
 static double const playerHeight{ 1.95 };
@@ -80,12 +81,13 @@ static pos::Fractional playerCamPos{playerCoord + playerCameraOffset}; //positio
 
 static pos::Fractional spectatorCoord{ playerCoord };
 
-static Camera playerCamera{
+static Camera desiredPlayerCamera{
 	aspect,
 	90.0 / 180.0 * misc::pi,
 	0.001,
 	800
 };
+static Camera playerCamera{ desiredPlayerCamera };
 
 
 static Viewport viewportCurrent{ /*angles=*/vec2d{ misc::pi / 2.0, 0 } };
@@ -248,7 +250,7 @@ static void cursor_position_callback(GLFWwindow* window, double mousex, double m
     vec2<double> const mousePos = vec2<double>(relativeTo.x + mousePos_.x, relativeTo.y + mousePos_.y);
 	
 	if( mouseCentered) {
-		deltaRotation += (mousePos - pmousePos) / windowSize_d;
+		deltaRotation += (mousePos - pmousePos) / windowSize_d * mouseSensitivity;
 	}
 	
 	pmousePos = mousePos;
@@ -338,16 +340,18 @@ static GLuint blockHitbox_p;
 
 chunk::Chunks chunks{};
 
-void resizeGPUBuffers() {
-	auto const gpuChunksCount{ chunks.usedChunks().size() };
+void resizeGPUBuffers(size_t const gpuChunksCount) {
+	static size_t lastGPUBuffersSize{};
+	if(gpuChunksCount == lastGPUBuffersSize) return;
+	lastGPUBuffersSize = gpuChunksCount;
+			
 	auto &it = chunks.chunksStatus;
 	
 	for(auto &status : it) {
 		status.resetStatus();
 		status.setEverythingUpdated();
 	}
-	
-	
+		
 	static_assert(sizeof(chunk::ChunkData) == 16384);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::ChunkData{}), NULL, GL_DYNAMIC_DRAW);
@@ -365,7 +369,7 @@ void resizeGPUBuffers() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * chunk::Neighbours::neighboursCount * sizeof(int32_t), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::Neighbours), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_b, chunksNeighbours_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
@@ -408,7 +412,26 @@ void printLinkErrors(GLuint const prog, char const *const name) {
 	delete[] msg;
 } 
 
-static void reloadShaders() {	
+static void reloadShaders() {
+	{ //reload config as well
+		Config cfg{};
+			cfg.viewDistance =  3;
+			cfg.loadChunks = false;
+			cfg.saveChunks = false;
+			cfg.playerCameraFovDeg = 90;
+			cfg.mouseSensitivity = { 0.8, -0.8 };
+			
+		parseConfigFromFile(cfg);
+		
+		viewDistance = cfg.viewDistance;
+		loadChunks = cfg.loadChunks;
+		saveChunks = cfg.saveChunks;
+		desiredPlayerCamera.fov = cfg.playerCameraFovDeg / 180.0 * misc::pi;
+		mouseSensitivity = cfg.mouseSensitivity;
+		
+		playerCamera = desiredPlayerCamera;
+	}
+	
 	/*{
 		//color
 		glActiveTexture(GL_TEXTURE0 + framebufferColor_it);
@@ -551,7 +574,7 @@ static void reloadShaders() {
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksBlockLighting"), chunksBlockLighting_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksNeighbourngEmitters"), chunksEmittersGPU_b);
 		
-		resizeGPUBuffers();
+		resizeGPUBuffers(0);
 	}
 	
 	{ //font program
@@ -1131,7 +1154,6 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(neighbours) * chunkIndex, sizeof(neighbours), &neighbours);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-			
 			status.setNeighboursUpdated(false);
 		}
 		
@@ -1151,7 +1173,6 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksAO_ssbo);
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkAO), sizeof(chunk::ChunkAO), &ao);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
-			
 			status.setAOUpdated(false);
 		}
 		
@@ -1174,7 +1195,6 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksPostions_ssbo); 
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(vec3i) * chunkIndex, sizeof(vec3i), &chunkCoord);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-			
 			status.setBlocksUpdated(false);
 		}					
 	
@@ -1203,7 +1223,6 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlockLighting_ssbo);
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::ChunkLighting), sizeof(chunk::ChunkLighting), &blockLighting);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-			
 			status.setLightingUpdated(false);
 		}
 		
@@ -1221,7 +1240,6 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksEmittersGPU_ssbo);
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunkIndex * sizeof(chunk::Chunk3x3BlocksList), sizeof(chunk::Chunk3x3BlocksList), &emittersGPU);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-			
 			status.setNeighbouringEmittersUpdated(false);
 		}
 		
@@ -1675,8 +1693,8 @@ static void updateChunks(chunk::Chunks &chunks) {
 	if(numpad[1]) return;
 	static std::vector<bool> chunksPresent{};
 	auto const viewWidth = (viewDistance*2+1);
+	chunksPresent.clear();
 	chunksPresent.resize(viewWidth*viewWidth);
-	chunksPresent.assign(chunksPresent.size(), false);
 	
 	vec3i const playerChunk{ currentCoord().valAs<pos::Chunk>() };
 	
@@ -2380,7 +2398,7 @@ static void update(chunk::Chunks &chunks) {
 		playerInput = Input();
 	}
 
-	viewportDesired.rotation += deltaRotation * (2 * misc::pi) * (vec2d{ 0.8, -0.8 } / curZoom);
+	viewportDesired.rotation += deltaRotation * (2 * misc::pi) / curZoom;
 	viewportDesired.rotation.y = misc::clamp(viewportDesired.rotation.y, -misc::pi / 2 + 0.001, misc::pi / 2 - 0.001);
 	deltaRotation = 0;
 	
@@ -2391,7 +2409,7 @@ static void update(chunk::Chunks &chunks) {
 		viewportCurrent.rotation = viewportDesired.rotation;
 	}
 	
-	playerCamera.fov = misc::lerp( playerCamera.fov, 90.0 / 180 * misc::pi / curZoom, 0.1 );
+	playerCamera.fov = misc::lerp( playerCamera.fov, desiredPlayerCamera.fov / curZoom, 0.1 );
 	
 	updateChunks(chunks);
 	
@@ -2624,7 +2642,13 @@ int main(void) {
 			
 			glUniform1i(drawPlayer_u, isSpectator);
 			
+			static size_t lastSize{};
+	
+			auto const gpuChunksCount{ chunks.chunksPos.size() }; //chunksPos is used to get chunks count right
+			resizeGPUBuffers(gpuChunksCount);
+			
 			int updatedCount{};
+			
 			for(auto const chunkIndex : chunks.usedChunks()) {
 				bool showUpdated = false;
 				const bool updated{ updateChunk(chunks[chunkIndex], cameraChunk, updatedCount > 5, *&showUpdated) };
@@ -2638,7 +2662,6 @@ int main(void) {
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 		}
 		else glClear(GL_COLOR_BUFFER_BIT);
-		
 		// -- // 
 		/*{
 			for(auto const chunkIndex : updatedChunks) {
@@ -2671,7 +2694,6 @@ int main(void) {
 			}
 		}
 		
-		
 		{
 			glUseProgram(currentBlockProgram);
 			glUniform1ui(cb_blockIndex_u, blockPlaceId);
@@ -2693,7 +2715,7 @@ int main(void) {
 			glDrawArrays(GL_POINTS, 0, relativePositions.size());
 			glBindVertexArray(0);
 		}*/
-	
+
 		{ //font
 			glEnable(GL_BLEND);
 			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -2747,7 +2769,7 @@ int main(void) {
 			auto const lineH = font.base();
 			auto const lineHeight = font.lineHeight();
 			float const scale = 5;
-			
+
 			vec2f currentPoint(startPoint);
 			for(uint64_t i{}; i != textCount; i++) {
 				auto const ch{ text[i] };
@@ -2782,7 +2804,6 @@ int main(void) {
 			
 			glDisable(GL_BLEND);
 		}
-		
 		
 		testInfo = false; 
 		glfwSwapBuffers(window);
