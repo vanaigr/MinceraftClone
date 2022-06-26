@@ -2721,21 +2721,16 @@ int main(void) {
 					auto const blockInChunkCoord{ chunk::indexBlock(result.blockIndex) };
 					auto const cubeInBlockCoord{ chunk::Block::cubeIndexPos(result.cubeIndex) };
 					
+					pCube const cubeInChunkPos{ pBlock{blockInChunkCoord} + pCube{cubeInBlockCoord} };
+					
 					ss.precision(1);
 					auto const block{ chunk.data()[blockInChunkCoord] };
 					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << (vec3f(blockInChunkCoord*units::cubesInBlockDim + cubeInBlockCoord)/units::cubesInBlockDim)  << " : block id=" << block.id() << '\n';
+					ss << "sky lighting: " << int(chunk.skyLighting()[cubeInChunkPos.val()]) << " block lighting: " << int(chunk.blockLighting()[cubeInChunkPos.val()]) << '\n';
 				};
 				
 				ss.precision(4);
 				ss << "camera in: chunk=" << currentCoord().valAs<pos::Chunk>() << " inside chunk=" << pos::fracToPos(currentCoord().valIn<pos::Chunk>()) << '\n';
-				if(playerChunkCand != -1) ss << "emitters count in camera chunk=" << chunks[playerChunkCand].emitters().size() << '\n';
-				if(playerChunkCand != -1) {
-					ss << "neighbouring emitters in camera chunk=" ;
-					//for(int i{}; i < chunks[playerChunkCand].emitters().size(); i++)
-					//	ss << chunks[playerChunkCand].emitters()(i) << '\n';
-					for(int i{}; i < chunk::Chunk3x3BlocksList::capacity; i++)
-						ss << chunks[playerChunkCand].neighbouringEmitters()(i) << '\n';
-				}
 				ss << "camera forward=" << forwardDir << '\n';
 			}
 			ss.precision(1);

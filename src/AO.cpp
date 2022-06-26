@@ -2,6 +2,7 @@
 #include"Area.h"
 #include"Position.h"
 #include"Units.h"
+#include"BlockProperties.h"
 
 static uint8_t calcAO(chunk::Chunk chunk, pCube const cubeCoordInChunk) {
 	pChunk const chunkPos{ chunk.position() };
@@ -15,9 +16,9 @@ static uint8_t calcAO(chunk::Chunk chunk, pCube const cubeCoordInChunk) {
 		auto const offsetCubeChunkIndex{ chunk::Move_to_neighbour_Chunk(chunk).move(offsetCubePos.valAs<pos::Chunk>()) };
 		if(!offsetCubeChunkIndex.is()) continue;
 		
-		auto offsetCubeChunk{ chunks[offsetCubeChunkIndex.get()] };
-		auto offsetedCube{ offsetCubeChunk.data().cubeAt(offsetCubePos.in<pos::Chunk>()) };
-		cubes = cubes | (int(offsetedCube.isSolid) << j);
+		auto const offsetCubeChunk{ chunks[offsetCubeChunkIndex.get()] };
+		auto const offsetedCube{ offsetCubeChunk.data().cubeAt(offsetCubePos.in<pos::Chunk>()) };
+		cubes = cubes | (int(useInAO(offsetedCube)) << j);
 	}
 	
 	return cubes;
@@ -31,7 +32,7 @@ static uint8_t calcAOInChunk(chunk::Chunk chunk, pCube const cubeCoordInChunk) {
 		auto const offsetcubeCoordInChunk{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0)/*-1, 0*/ };
 
 		auto offsetedCube{ chunkBlocks.cubeAt(offsetcubeCoordInChunk.val()) };
-		cubes = cubes | (int(offsetedCube.isSolid) << j);
+		cubes = cubes | (int(useInAO(offsetedCube)) << j);
 	}
 	
 	return cubes;

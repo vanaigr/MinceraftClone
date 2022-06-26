@@ -58,10 +58,8 @@ struct SkyLightingConfig {
 		int const loss{ lightingLost(toBlockId * cube) };
 		
 		return misc::max(
-			(fromDir == vec3i{0,-1,0} ? 
-				int(lighting)
-				: 
-				int(lighting) - cubeLightingLosses)
+			int(lighting)
+			 - (fromDir == vec3i{0,-1,0} ? 0 : cubeLightingLosses)
 			 - loss, 
 			int(0)
 		);

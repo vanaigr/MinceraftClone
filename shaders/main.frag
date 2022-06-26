@@ -1099,7 +1099,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				const vec3 newBlockCoord = localSpaceCoord - offset;
 				
 				const vec2 newUV = blockUv(newBlockCoord, intersectionSide, dirSign);
-				const vec3 color_ = sampleAtlas(atlasOffset, clamp(newUV, 0.0001, 0.9999)) * light * mix(0.5, 1.0, ambient);
+				const vec3 color_ = sampleAtlas(atlasOffset, clamp(newUV, 0.0001, 0.9999)) * mix(0.5, 1.0, ambient);
 				const vec3 color = fade(color_, t);
 
 				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
