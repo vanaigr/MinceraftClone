@@ -973,7 +973,7 @@ Result combineSteps(const Result current, const Result inner) {
 		const bool emitter = innerSurface == 13 || innerSurface == 14;
 		const vec3 shadowTint = lighting ? vec3(1) : (surfaceType(resultingSurface) == 0 ? inner.color : vec3(0.4));
 		return Result(
-			curColor * shadowTint + (lighting && emitter ? (inner.color ) : vec3(0)), 
+			curColor * shadowTint + (lighting && emitter ? (inner.color / (0.4 + inner.depth*inner.depth)) : vec3(0)),
 			current.depth + inner.depth, 
 			current.surface, 
 			current.type,
@@ -1139,7 +1139,7 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 				const ivec3 relativeToChunk = chunkPosition(intersectionChunkIndex) - startChunkPosition;
 				const vec3 color_ = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.3, 1.0, ambient));
 				const vec3 color = fade(color_, t);
-				
+
 				pushResult(Result( color * (emitter ? 2 : 1), t, surfaceBlock(blockId), type, parent));
 				
 				if(!shadow && !emitter) {
@@ -1183,11 +1183,38 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 						const NE ne = neFromChunk(intersectionChunkIndex, dirIndex);
 						
 						if(ne.is) {
+							//calculate random vector that hits the sphere inside emitter block//
+							
 							const vec3 relativeCoord = position - relativeToChunk * blocksInChunkDim;
-							const vec3 newDir = normalize(ne.coord+0.499 - relativeCoord);
+							const vec3 diff = ne.coord+0.4999 - relativeCoord;
+							const vec3 dir1 = normalize(diff);
+							
+							const float angularDiam = 2.0 * asin(1.0 / (0.001 + 2.0 * length(diff))); //angular diameter of a sphere with diameter of 1 block
+							
+							//https://math.stackexchange.com/a/211195
+							vec3 dir2 = vec3(dir1.z, dir1.z, -dir1.x - dir1.y);
+							if(abs(dot(dir2, dir2)) < 0.01) dir2 = vec3(-dir1.y-dir1.z,dir1.x,dir1.x);
+							dir2 = normalize(dir2);
+							const vec3 dir3 = cross(dir1, dir2);
+							
+							const vec2 random = vec2(rShadowInChunkIndex & 0xffff, int(uint(rShadowInChunkIndex) >> 16)) / 0xffff;
+							
+							const float twoPi = 6.28318530718;
+							const vec2 rotation = (vec2(cos(random.x * twoPi), sin(random.x * twoPi)) * angularDiam/2.0 * random.y)*0.99;/*
+								random point inside circle
+							*/
+							
+							const mat3 newDirMatrix = {
+								dir3, dir2, -dir1
+							}; //forward vector is (0, 0, -1)
+							
+							const vec3 newDir = newDirMatrix * vec3(cos(rotation.y) * sin(rotation.x), sin(rotation.y), -cos(rotation.y) * cos(rotation.x));
+							
 							const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
-
-							pushParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 2u, curFrame));
+							
+							if((abs(dot(newDir, newDir) - 1) < 0.01)) {
+								pushParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 2u, curFrame));
+							}
 						}
 					}
 				}
