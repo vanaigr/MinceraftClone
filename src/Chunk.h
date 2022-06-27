@@ -562,7 +562,7 @@ namespace chunk {
 	private:
 
 		
-		uint32_t bits; /*is list empty, spare bit, 30 bits for the last bit of all the coords*/
+		uint32_t bits; /*2 bits for capacity: 00 - empty, 01 - one emitter, 10 - 2+ emitters, 11 - nothing; 30 bits for the last bit of all the coords*/
 		std::array<uint16_t, capacity> coords16;
 	public:
 		bool isEmpty() const { return bool((bits & 1) == 0); }
@@ -575,6 +575,8 @@ namespace chunk {
 			assert(count >= 0);
 			if(count == 0) { clear(); return; }
 			
+			uint32_t const bitsCap{ count == 1 ? 0b01u : 0b10u };
+			
 			uint32_t coordsBits{ 0 };
 			for(int i{}; i < capacity; i++) {
 				auto const blockIndex{ coordToIndex(coords[i % count]) };
@@ -582,7 +584,7 @@ namespace chunk {
 				coordsBits = coordsBits | (((blockIndex >> 16)&1) << i);
 			}
 			
-			bits = 1 | (coordsBits << 2);
+			bits = bitsCap | (coordsBits << 2);
 		}
 	};
 	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);

@@ -345,7 +345,7 @@ restrict readonly buffer ChunksNeighbourngEmitters {
   	) - blocksInChunkDim;
   }
 
-  struct NE { ivec3 coord; bool is; };
+  struct NE { ivec3 coord; uint capacity; };
   NE neFromChunk(const int chunkIndex, const int someindex) { 
 	const int neIndex = someindex % neCapacity;
 	const int chunkOffset = chunkIndex * 16;
@@ -358,7 +358,7 @@ restrict readonly buffer ChunksNeighbourngEmitters {
 	const uint ne_index = ne16 | (((first >> (2 + neIndex))&1u)<<16);
 	const ivec3 ne_coord = neIndexToCoord(int(ne_index));
 	
-	return NE(ne_coord, bool(first & 1));
+	return NE(ne_coord, first & 3u);
   }
 
 /*uint emittersDataInChunk(const int chunkIndex, const int dataIndex) {
@@ -1159,7 +1159,6 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 						+ shadowInChunkCoord.z * shadowsInChunkDim * shadowsInChunkDim; //should fit in 31 bit
 					const int rShadowInChunkIndex = mapInteger(shadowInChunkIndex);
 					const int dirIndex = int(uint(rShadowInChunkIndex) % 42);
-					const bool emitters = dirIndex < 30;
 					
 					if(canPushParams()) { //shadow
 						const vec3 offset_ = vec3(
@@ -1179,10 +1178,11 @@ vec3 trace(const Ray startRay, const int startChunkIndex) {
 						pushParams(Params( Ray(position, newDir), intersectionChunkIndex, newBias, 1u, curFrame));
 					}
 					
-					if(emitters && canPushParams()) {
+					if(canPushParams()) {
 						const NE ne = neFromChunk(intersectionChunkIndex, dirIndex);
+						const bool emitters = ne.capacity != 0u && (ne.capacity == 1u ? dirIndex < 30 : true);
 						
-						if(ne.is) {
+						if(emitters) {
 							//calculate random vector that hits the sphere inside emitter block//
 							
 							const vec3 relativeCoord = position - relativeToChunk * blocksInChunkDim;
