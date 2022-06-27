@@ -60,6 +60,7 @@ GLFWwindow* window;
 static int  viewDistance = 3;
 static bool loadChunks = false, saveChunks = false;
 static vec2d mouseSensitivity{ 0.8, -0.8 };
+static int chunkUpdatesPerFrame = 5;
 
 
 static double const playerHeight{ 1.95 };
@@ -415,11 +416,12 @@ void printLinkErrors(GLuint const prog, char const *const name) {
 static void reloadShaders() {
 	{ //reload config as well
 		Config cfg{};
-			cfg.viewDistance =  3;
-			cfg.loadChunks = false;
-			cfg.saveChunks = false;
-			cfg.playerCameraFovDeg = 90;
-			cfg.mouseSensitivity = { 0.8, -0.8 };
+			cfg.viewDistance =  viewDistance;
+			cfg.loadChunks = saveChunks;
+			cfg.saveChunks = saveChunks;
+			cfg.playerCameraFovDeg = playerCamera.fov / misc::pi * 180.0;
+			cfg.mouseSensitivity = mouseSensitivity;
+			cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
 			
 		parseConfigFromFile(cfg);
 		
@@ -428,8 +430,8 @@ static void reloadShaders() {
 		saveChunks = cfg.saveChunks;
 		desiredPlayerCamera.fov = cfg.playerCameraFovDeg / 180.0 * misc::pi;
 		mouseSensitivity = cfg.mouseSensitivity;
-		
 		playerCamera = desiredPlayerCamera;
+		chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
 	}
 	
 	/*{
@@ -2191,6 +2193,8 @@ bool performBlockAction() {
 			AddLighting::fromCubeForcedFirst<SkyLightingConfig>(chunk, curCubeCoord);
 		}
 		
+		auto const wholeBlockRemoved{ block.isEmpty() };
+		
 		chunk.modified() = true;
 		
 		auto &aabb{ chunk.aabb() };
@@ -2213,7 +2217,7 @@ bool performBlockAction() {
 		aabb = chunk::AABB(start, end);
 		
 	
-		if(emitter) {
+		if(emitter && wholeBlockRemoved) {
 			chunk.emitters().remove(blockCoord);
 			setChunksUpdateNeighbouringEmitters(chunk);
 		}
@@ -2651,7 +2655,7 @@ int main(void) {
 			
 			for(auto const chunkIndex : chunks.usedChunks()) {
 				bool showUpdated = false;
-				const bool updated{ updateChunk(chunks[chunkIndex], cameraChunk, updatedCount > 5, *&showUpdated) };
+				const bool updated{ updateChunk(chunks[chunkIndex], cameraChunk, updatedCount >= chunkUpdatesPerFrame, *&showUpdated) };
 				if(showUpdated) {
 					// -- // updatedChunks.push_back(chunkIndex); 
 				}
