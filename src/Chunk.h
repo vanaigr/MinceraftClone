@@ -448,11 +448,11 @@ namespace chunk {
 			fill(val);
 		}
 		
-		value_type       &operator[](int const cubeIndex)       { return lighting[cubeIndex]; }
-		value_type const &operator[](int const cubeIndex) const { return lighting[cubeIndex]; }		
+		value_type       &operator[](int const cubeIndex)       { assert(cubeIndex >= 0 && cubeIndex < size); return lighting[cubeIndex]; }
+		value_type const &operator[](int const cubeIndex) const { assert(cubeIndex >= 0 && cubeIndex < size); return lighting[cubeIndex]; }		
 		
-		value_type       &operator[](vec3i const cubeCoord)       { return lighting[cubeIndexInChunk(cubeCoord)]; }
-		value_type const &operator[](vec3i const cubeCoord) const { return lighting[cubeIndexInChunk(cubeCoord)]; }
+		value_type       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
+		value_type const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }
 		
 		void fill(value_type const val) { lighting.fill(val); }
 		void reset() { fill(0); }

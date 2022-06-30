@@ -16,7 +16,9 @@ enum class LightingCubeType {
 	
 	static uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube);
 };*/
- 
+
+//all of the functions should probably be inline
+
 namespace AddLighting {
 	namespace {
 		template<typename Config>

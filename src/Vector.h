@@ -39,8 +39,8 @@ public:
 	inline constexpr vec2<bool> operator<=(const vec2<C> o) const {
 		return vec2<bool>(x <= o.x, y <= o.y);
 	}
-	inline constexpr vec2<C> operator==(vec2<C> o) const {
-		return vec2(x == o.x, y == o.y);
+	inline constexpr bool operator==(vec2<C> o) const {
+		return x == o.x && y == o.y;
 	}
 	inline constexpr vec2<C> operator+(const vec2<C>& o) const {
 		return vec2(x + o.x, y + o.y);
