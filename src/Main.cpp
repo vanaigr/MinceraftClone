@@ -77,7 +77,7 @@ static vec3d playerForce{};
 static bool isOnGround{false};
 
 static vec3l const playerCameraOffset{ 0, units::posToFrac(playerHeight*0.85).value(), 0 };
-static pos::Fractional playerCoord{ pos::posToFrac(vec3d{0.01,12.001,0.01}) };
+static pos::Fractional playerCoord{ pos::posToFrac(vec3d{0.5,12.001,0.5}) };
 static pos::Fractional playerCamPos{playerCoord + playerCameraOffset}; //position is lerp'ed
 
 static pos::Fractional spectatorCoord{ playerCoord };
@@ -1863,13 +1863,11 @@ public:
 	#undef G
 };
 
-static bool checkBlockIntersection(chunk::Chunks &chunks, pos::Fractional const coord1, pos::Fractional const coord2) {
-	pos::Fractional const c1{ coord1.val().min(coord2.val()) };
-	pos::Fractional const c2{ coord1.val().max(coord2.val()) };
-	chunk::Move_to_neighbour_Chunk mtnChunk{chunks, c1.valAs<pos::Chunk>() };
+static bool checkCanPlaceCollider(chunk::Chunks &chunks, pos::Fractional const coord1, pos::Fractional const coord2) {
+	chunk::Move_to_neighbour_Chunk mtnChunk{chunks, coord1.valAs<pos::Chunk>() };
 	
-	auto const c1c{ c1.valAs<pos::Cube>() };
-	auto const c2c{ c2.valAs<pos::Cube>() };
+	auto const c1c{ coord1.valAs<pos::Cube>() };
+	auto const c2c{ coord2.valAs<pos::Cube>() };
 	
 	for(auto z{ c1c.z }; z <= c2c.z; z++) 
 	for(auto y{ c1c.y }; y <= c2c.y; y++)
@@ -1877,18 +1875,17 @@ static bool checkBlockIntersection(chunk::Chunks &chunks, pos::Fractional const 
 		pos::Cube cubePos{{x, y, z}};
 		
 		auto const chunkIndex{ mtnChunk.move(cubePos.valAs<pos::Chunk>()).get() };
-		if(chunkIndex == -1) continue;
+		if(chunkIndex == -1) return false;
 		
 		auto cube{ chunks[chunkIndex].data().cubeAt(cubePos.valIn<pos::Chunk>()) };
-		
-		if(cube.isSolid) return true;
+		if(cube.isSolid) return false;
 	}
 	
-	return false;
+	return true;
 }
 
 static void updateCollision(chunk::Chunks &chunks, pos::Fractional &player, vec3d &playerForce, bool &isOnGround) {	
-	//auto const playerChunk{ player.chunk() };
+	//note: with this collision resolution it is possible to get stuck outside of the chunks if the player was spawned there
 	
 	vec3l playerPos{ player.val() };
 	vec3l force{ pos::posToFracTrunk(playerForce).val() };
@@ -1963,7 +1960,7 @@ static void updateCollision(chunk::Chunks &chunks, pos::Fractional &player, vec3
 			auto const upStepMin = (upStepCoord.val() - vec3l{width_i/2,0,width_i/2});
 			auto const upStepMax = (upStepCoord.val() + vec3l{width_i/2,height_i,width_i/2} - 1);
 			
-			auto const upStepPossible{ upStep && !checkBlockIntersection(chunks, upStepMin, upStepMax)};
+			auto const upStepPossible{ upStep && checkCanPlaceCollider(chunks, upStepMin, upStepMax)};
 			
 			auto const newCoordBigger{
 				axisPositive ? (axisNewCoord >= axisPlayerPos) : (axisNewCoord <= axisPlayerPos)
@@ -1987,14 +1984,18 @@ static void updateCollision(chunk::Chunks &chunks, pos::Fractional &player, vec3
 						
 				vec3i const blockChunk = coord.valAs<pos::Chunk>();
 				
-				auto const chunkIndex{ chunk.move(blockChunk).get() };
-				if(chunkIndex == -1) return { newPos, false, false };
+				auto const isWall{ [&]() {
+					auto const chunkIndex{ chunk.move(blockChunk).get() };
+					if(chunkIndex == -1) return true;
+					
+					auto const chunkData{ chunks.chunksData[chunkIndex] };
+					auto const index{ chunk::blockIndex(coord.as<pos::Block>().valIn<pos::Chunk>()) };
+					auto const block{ chunkData[index] };
+					
+					return block.id() != 0 && block.cube(cubeLocalCoord);
+				}() };
 				
-				auto const chunkData{ chunks.chunksData[chunkIndex] };
-				auto const index{ chunk::blockIndex(coord.as<pos::Block>().valIn<pos::Chunk>()) };
-				auto const block{ chunkData[index] };
-				
-				if(block.id() != 0 && block.cube(cubeLocalCoord)) {
+				if(isWall) {
 					if(newCoordBigger) {
 						auto const diff{ playerPos.y - coord.value().y };
 						if(upStepPossible && diff <= units::fracInCubeDim && diff >= 0) return { upStepCoord, false, true };
@@ -2552,10 +2553,9 @@ int main(void) {
         std::cout << err << std::endl;
     }
 
+	reloadShaders();
 	
 	updateChunks(chunks);
-	
-	reloadShaders();
 	
     auto const completionTime = std::chrono::steady_clock::now();
 	std::cout << "Time to start (ms): " << ( double(std::chrono::duration_cast<std::chrono::microseconds>(completionTime - startupTime).count()) / 1000.0 ) << '\n';
