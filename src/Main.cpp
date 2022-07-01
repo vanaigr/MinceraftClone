@@ -341,6 +341,9 @@ static GLuint blockHitbox_p;
 
 chunk::Chunks chunks{};
 
+static constexpr int chunkBlocksAndCubesCount = (pos::blocksInChunkCount + pos::blocksInChunkCount);
+using chunkBlocksAndCubes_t = uint16_t;
+
 void resizeGPUBuffers(size_t const gpuChunksCount) {
 	static size_t lastGPUBuffersSize{};
 	if(gpuChunksCount == lastGPUBuffersSize) return;
@@ -353,9 +356,9 @@ void resizeGPUBuffers(size_t const gpuChunksCount) {
 		status.setEverythingUpdated();
 	}
 		
-	static_assert(sizeof(chunk::ChunkData) == 16384);
+	//static_assert(sizeof(chunk::ChunkData) == 16384);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::ChunkData{}), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * chunkBlocksAndCubesCount * sizeof(chunkBlocksAndCubes_t), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, chunksBlocks_b, chunksBlocks_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
@@ -370,7 +373,7 @@ void resizeGPUBuffers(size_t const gpuChunksCount) {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::Neighbours), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(int32_t)*27, NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_b, chunksNeighbours_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
@@ -1150,11 +1153,18 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 	auto const inRenderDistance{ (chunkCoord - cameraChunkCoord).in(vec3i{-viewDistance}, vec3i{viewDistance}).all() };
 	if(cameraChunkCoord == chunkCoord || (inRenderDistance && !maxUpdated)) {
 		if(status.isNeighboursUpdated()) {
-			auto const &neighbours{ chunk.neighbours() };
+			//auto const &neighbours{ chunk.neighbours() };
 			
-			static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
+			//static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
+			chunk::MovingChunk const c{ chunk };
+			
+			chunk::OptionalChunkIndex neighbours[27];
+			for(int i{}; i < 27; i++) {
+				neighbours[i] = c.offseted(dirFromIndex3(i)).getIndex();
+			}
+					
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(neighbours) * chunkIndex, sizeof(neighbours), &neighbours);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(int32_t)*27 * chunkIndex, sizeof(int32_t)*27, &neighbours);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 			status.setNeighboursUpdated(false);
 		}
@@ -1185,9 +1195,20 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			uint32_t const aabbData{ chunk.aabb().getData() };
 			chunk::ChunkData &chunkData{ chunk.data() };
 	
-			static_assert(sizeof chunkData == 16384);
+	
+			chunkBlocksAndCubes_t data[chunkBlocksAndCubesCount];
+			
+			for(int i{}; i < pos::blocksInChunkCount; i++) {
+				data[i] = chunkData[i].id();
+			}
+			
+			for(int i{}; i < pos::blocksInChunkCount; i++) {
+				data[pos::blocksInChunkCount + i] = chunkBlocksAndCubes_t(chunkData[i].cubes()) | (chunkBlocksAndCubes_t(chunkData[i].hasNoNeighbours()) << 8);
+			}
+			
+			//static_assert(sizeof chunkData == 16384);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo); 
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(chunkData) * chunkIndex, sizeof(chunkData), &chunkData);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(data) * chunkIndex, sizeof(chunkData), &data);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 				
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
@@ -1252,10 +1273,13 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 	else {
 		if(status.isStubLoadedGPU() || status.isFullyLoadedGPU() /*&& status.isInvalidated()*/) return false;
 
-		chunk::Neighbours const neighbours{};
-		static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
+		//chunk::Neighbours const neighbours{};
+		chunk::OptionalChunkIndex neighbours[27];
+		for(int i{}; i < 27; i++) neighbours[i] = {};
+		 
+		//static_assert(sizeof(neighbours) == sizeof(int32_t) * chunk::Neighbours::neighboursCount);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksNeighbours_ssbo); 
-		glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(neighbours) * chunkIndex, sizeof(neighbours), &neighbours);
+		glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(int32_t)*27 * chunkIndex, sizeof(int32_t)*27, &neighbours);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 		
 		status.markStubLoadedGPU();
