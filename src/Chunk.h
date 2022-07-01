@@ -208,13 +208,13 @@ namespace chunk {
 		constexpr Block(uint16_t const id, uint8_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
 			if(id == 0 || cubes == 0) data_ = 0;
 		}		
-		constexpr Block(uint16_t const id, uint8_t const cubes, bool const noNeighbours) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) | (uint32_t(noNeighbours) << 17) } {
-			if(id == 0 || cubes == 0) data_ = (uint32_t(noNeighbours) << 17);
+		constexpr Block(uint16_t const id, uint8_t const cubes, bool const noNeighbours) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) | (uint32_t(noNeighbours) << 16) } {
+			if(id == 0 || cubes == 0) data_ = (uint32_t(noNeighbours) << 16);
 		}
 		uint32_t data() const { return data_; }
 		uint8_t cubes() const { return uint8_t(data_ >> 24); }
 		constexpr uint16_t id() const { return uint16_t(data_ & ((1 << 16) - 1)); }
-		constexpr bool hasNoNeighbours() const { return ((data_ >> 17)&1) == 1; }
+		constexpr bool hasNoNeighbours() const { return ((data_ >> 16)&1) == 1; }
 		
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cube(uint8_t const index) const { return blockCube(cubes(), index); }

@@ -39,10 +39,6 @@ const int cubesInChunkDimAsPow2 = cubesInBlockDimAsPow2 + blocksInChunkDimAsPow2
 const int cubesInChunkDim = 1 << cubesInChunkDimAsPow2;
 const int cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
 
-restrict readonly buffer ChunksBlocks {
-     uint data[][16*16*16];
-} chunksBlocks;
-
 struct Ray {
     vec3 orig;
     vec3 dir;
@@ -187,6 +183,10 @@ bool checkBoundaries(const ivec3 i) {
 	return all(equal( testBounds(i), ivec3(0) ));
 }
 
+restrict readonly buffer ChunksBlocks {
+     uint data[][16*16*16];
+} chunksBlocks;
+
 //copied from Chunks::Block
 struct Block {
 	uint data;
@@ -205,7 +205,7 @@ struct Block {
 	  return cubes == 255;
   }
   bool hasNoNeighbours(const Block block) {
-	  return ((block.data >> 17) & 1) != 0;
+	  return ((block.data >> 16) & 1) != 0;
   }
 
 Block blockAir() {
