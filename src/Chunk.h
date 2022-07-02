@@ -141,6 +141,7 @@ namespace chunk {
 			gs(blockLighting, chunksBlockLighting)
 			gs(emitters, chunksEmitters)
 			gs(neighbouringEmitters, chunksNeighbouringEmitters)
+			gs(gpuIndex, chunksGPUIndex)
 		#undef gs
 	};
 	
@@ -314,13 +315,10 @@ namespace chunk {
 	
 	struct ChunkStatus {
 	private:
-		uint8_t status : 2;
-		
 		uint8_t updateAO : 1;
 		uint8_t updateLightingAdd : 1;
 		uint8_t updateNeighbouringEmitters : 1;
 		
-		uint8_t neighboursUpdated : 1;
 		uint8_t aoUpdated : 1;
 		uint8_t blocksUpdated : 1;
 		uint8_t lightingUpdated : 1;
@@ -328,29 +326,15 @@ namespace chunk {
 	public:
 		ChunkStatus() = default;
 		
-		bool isFullyLoadedGPU() const { return (status & 1) != 0; }
-		void markFullyLoadedGPU() { resetStatus(); status = 1; }
-		
-		bool isStubLoadedGPU() const { return (status & 2) != 0; }
-		void markStubLoadedGPU() { resetStatus(); status = 2; }
-		
-		void resetStatus() { status = 0; }
-		
 		void setEverythingUpdated() {
-			setNeighboursUpdated(true);
 			setAOUpdated(true);
 			setBlocksUpdated(true);
 			setLightingUpdated(true);
 			setNeighbouringEmittersUpdated(true);
 		}
 		
-		
-		bool isInvalidated() const { return neighboursUpdated || aoUpdated || blocksUpdated || lightingUpdated || neighbouringEmittersUpdated; }
-		bool needsUpdate()   const { return updateAO || updateLightingAdd || updateNeighbouringEmitters; }
-		
-		
-		bool isNeighboursUpdated() const { return neighboursUpdated; }
-		void setNeighboursUpdated(bool const val) { neighboursUpdated = val; }	
+		bool isInvalidated() const { return aoUpdated || blocksUpdated || lightingUpdated || neighbouringEmittersUpdated; }
+		bool needsUpdate()   const { return updateAO || updateLightingAdd || updateNeighbouringEmitters; }	
 		
 		bool isAOUpdated() const { return aoUpdated; }
 		void setAOUpdated(bool const val) { aoUpdated = val; }		
@@ -375,7 +359,6 @@ namespace chunk {
 		void setUpdateNeighbouringEmitters(bool const it) { updateNeighbouringEmitters = it; }
 		
 	};
-	
 	
 	struct ChunkAO {
 		static constexpr int size = pos::cubesInChunkCount;
@@ -590,9 +573,10 @@ namespace chunk {
 	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);
 	
 	struct Chunks {	
+		using index_t = int32_t;
 	private:
-		std::vector<int> vacant{};
-		std::vector<int> used_{};
+		std::vector<index_t> vacant{};
+		std::vector<index_t> used_{};
 		
 		struct PosHash { 
 			inline std::size_t operator()(vec3i const &it) const noexcept { 
@@ -600,7 +584,7 @@ namespace chunk {
 			} 
 		};
 		
-		std::vector<int> used{};
+		std::vector<index_t> used{};
 	public:
 		std::vector<vec3i> chunksPos{};
 		std::vector<AABB> chunksAABB{};
@@ -613,18 +597,19 @@ namespace chunk {
 		std::vector<ChunkBlocksList> chunksEmitters{};
 		std::vector<Neighbours> chunksNeighbours{};
 		std::vector<Chunk3x3BlocksList> chunksNeighbouringEmitters;
-		std::unordered_map<vec3i, int, PosHash> chunksIndex_position{};
+		std::vector<index_t> chunksGPUIndex{};
+		std::unordered_map<vec3i, index_t, PosHash> chunksIndex_position{};
 	
-		std::vector<int>  const &usedChunks() const { return used; }
+		std::vector<index_t> const &usedChunks() const { return used; }
 		
 		Chunks() = default;
 		Chunks(Chunks const&) = delete; //prevent accidental pass-by-value
 		Chunks &operator=(Chunks const&) = delete;
 		
 		//returns used[] position
-		inline int reserve() {
-			int index;
-			int usedSize = used.size();
+		inline index_t reserve() {
+			index_t index;
+			auto usedSize = used.size();
 	
 			if(!vacant.empty()) { 
 				index = vacant[vacant.size()-1];
@@ -644,13 +629,14 @@ namespace chunk {
 				chunksEmitters.resize(index+1);
 				chunksNeighbours.resize(index+1);
 				chunksNeighbouringEmitters.resize(index+1);
+				chunksGPUIndex.resize(index+1);
 			}
 			used.push_back(index);
 			
 			return usedSize;
 		}
 	
-		inline void recycle(int const index) {
+		inline void recycle(index_t const index) {
 			auto chunkIndex = used[index];
 			used.erase(used.begin()+index);
 			vacant.push_back(chunkIndex);
@@ -678,7 +664,7 @@ namespace chunk {
 			used.swap(used_);
 		}
 		
-		inline Chunk operator[](int chunkIndex) {
+		inline Chunk operator[](index_t chunkIndex) {
 			return Chunk{ *this, chunkIndex };
 		}
 	};

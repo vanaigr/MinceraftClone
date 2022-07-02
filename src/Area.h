@@ -162,19 +162,37 @@ inline void iterateChunks(chunk::Chunk const startChunk, pChunk const first, pCh
 	
 	for(auto cz{ fChunk.z }; cz <= lChunk.z; cz++) {
 		zMTNChunk = zMTNChunk.moved({fChunk.x, fChunk.y, cz});
-		if(!zMTNChunk.is()) continue;
 		auto yMTNChunk{ zMTNChunk };
 		
 	for(auto cy{ fChunk.y }; cy <= lChunk.y; cy++) {
 		yMTNChunk = yMTNChunk.moved({fChunk.x, cy, cz});
-		if(!yMTNChunk.is()) continue;
 		auto xMTNChunk{ zMTNChunk };
 		
 	for(auto cx{ fChunk.x }; cx <= lChunk.x; cx++) {
 		xMTNChunk = xMTNChunk.moved({cx, cy, cz});
 		if(!xMTNChunk.is()) continue;
 		
-		assert(xMTNChunk.get().position() == (vec3i{cx, cy, cz}));
 		action(xMTNChunk.get(), vec3i{cx, cy, cz});
+	}}}
+}
+
+template<typename Action>
+inline void iterateAllChunks(chunk::Chunk const startChunk, pChunk const first, pChunk const last, Action &&action) {
+	auto const fChunk{ first.val() };
+	auto const lChunk{ last .val() };
+	chunk::MovingChunk zMTNChunk{ startChunk };
+	
+	for(auto cz{ fChunk.z }; cz <= lChunk.z; cz++) {
+		zMTNChunk = zMTNChunk.moved({fChunk.x, fChunk.y, cz});
+		auto yMTNChunk{ zMTNChunk };
+		
+	for(auto cy{ fChunk.y }; cy <= lChunk.y; cy++) {
+		yMTNChunk = yMTNChunk.moved({fChunk.x, cy, cz});
+		auto xMTNChunk{ zMTNChunk };
+		
+	for(auto cx{ fChunk.x }; cx <= lChunk.x; cx++) {
+		xMTNChunk = xMTNChunk.moved({cx, cy, cz});
+		
+		action(xMTNChunk.getIndex().get(), vec3i{cx, cy, cz});
 	}}}
 }
