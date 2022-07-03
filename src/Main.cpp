@@ -60,10 +60,6 @@ GLenum glCheckError_(const char *file, int line)
 }
 #define ce glCheckError_(__FILE__, __LINE__);
 
-static constexpr int chunkColumnChunkYMax = 15;
-static constexpr int chunkColumnChunkYMin = -16;
-
-static constexpr int chunksCoumnChunksCount{ chunkColumnChunkYMax - chunkColumnChunkYMin + 1 };
 //#define FULLSCREEN
 
 #ifdef FULLSCREEN
@@ -1577,7 +1573,6 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 	
 	auto lowestEmptyY{ chunkColumnChunkYMax + 1 };
 	auto lowestNotFullY  { chunkColumnChunkYMax + 1 };
-	auto highestNotEmptyY{ chunkColumnChunkYMin - 1 };
 	auto emptyBefore{ true };
 
 	auto lowestWithBlockLighting { chunkColumnChunkYMax + 1 };
@@ -1656,7 +1651,6 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		else {
 			chunk.skyLighting().reset();
 			emptyBefore = false;
-			highestNotEmptyY = std::max(highestNotEmptyY, chunkPosition.y);
 		}
 		if(chunk.emitters().size() != 0) {
 			highestWithBlockLighting = std::max(highestWithBlockLighting, chunkPosition.y);
@@ -1741,27 +1735,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		}
 	}
 	
-	calculateLighting(chunks, chunkIndices, columnPosition, lowestNotFullY, highestNotEmptyY, lowestEmptyY);
-	
-	#if 0
-	updateLightingInChunks<SkyLightingConfig>( 
-		chunks, 
-		vec3i{columnPosition.x, lowestNotFullY, columnPosition.y}, 
-		vec3i{columnPosition.x, highestNotEmptyY, columnPosition.y}
-	); //TODO: highestNotEmptyY does not work for chunks than have solid blocks with empty cubes	
-	
-	updateLightingInChunks<BlocksLightingConfig>(
-		chunks, 
-		vec3i{columnPosition.x, chunkColumnChunkYMin, columnPosition.y}, 
-		vec3i{columnPosition.x, chunkColumnChunkYMax, columnPosition.y}
-	);
-	
-	setNeighboursLightingUpdate<SkyLightingConfig, BlocksLightingConfig>(
-		chunks, 
-		vec3i{columnPosition.x, chunkColumnChunkYMin, columnPosition.y}, 
-		vec3i{columnPosition.x, chunkColumnChunkYMax, columnPosition.y}
-	);
-	#endif
+	calculateLighting(chunks, chunkIndices, columnPosition, lowestEmptyY, lowestNotFullY);
 }
 
 static void updateChunks(chunk::Chunks &chunks) {

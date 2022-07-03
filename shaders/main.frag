@@ -1122,7 +1122,7 @@ vec3 trace(const Ray startRay) {
 						  shadowInChunkCoord.x
 						+ shadowInChunkCoord.y * shadowsInChunkDim
 						+ shadowInChunkCoord.z * shadowsInChunkDim * shadowsInChunkDim; //should fit in 31 bit
-					const int rShadowInChunkIndex = mapInteger(shadowInChunkIndex);
+					const int rShadowInChunkIndex = mapInteger(shadowInChunkIndex) / 37;
 					const int dirIndex = int(uint(rShadowInChunkIndex) % 42);
 					
 					if(canPushParams()) { //shadow
@@ -1162,7 +1162,7 @@ vec3 trace(const Ray startRay) {
 							dir2 = normalize(dir2);
 							const vec3 dir3 = cross(dir1, dir2);
 							
-							const vec2 random = vec2(rShadowInChunkIndex & 0xffff, int(uint(rShadowInChunkIndex) >> 16)) / 0xffff;
+							const vec2 random = vec2(rShadowInChunkIndex & 0xfff, int(uint(rShadowInChunkIndex) >> 12) & 0xfff) / 0xfff;
 							
 							const float twoPi = 6.28318530718;
 							const vec2 rotation = (vec2(cos(random.x * twoPi), sin(random.x * twoPi)) * angularDiam/2.0 * random.y)*0.99;/*

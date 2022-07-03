@@ -418,5 +418,5 @@ inline void updateLightingInChunks(chunk::Chunks &chunks, pChunk const fromChunk
 }
 
 
-void calculateLighting(chunk::Chunks &chunks, int (&chunkIndices)[32], 
-vec2i const columnPosition, int const lowestNotFullY, int const highestNotEmptyY, int const lowestEmptyY);
+void calculateLighting(chunk::Chunks &chunks, int (&chunkIndices)[chunksCoumnChunksCount], 
+vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY);

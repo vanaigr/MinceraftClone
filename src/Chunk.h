@@ -13,6 +13,11 @@
 #include<algorithm>
 #include<type_traits>
 
+static constexpr int chunkColumnChunkYMax = 15;
+static constexpr int chunkColumnChunkYMin = -16;
+
+static constexpr int chunksCoumnChunksCount{ chunkColumnChunkYMax - chunkColumnChunkYMin + 1 };
+
 namespace chunk {
 	namespace {
 		template<typename V, typename Tag> struct Wrapper {

@@ -3,11 +3,6 @@
 #include"Area.h"
 #include"LightingPropagation.h"
 
-static constexpr int chunkColumnChunkYMax = 15;
-static constexpr int chunkColumnChunkYMin = -16;
-
-static constexpr int chunksCoumnChunksCount{ chunkColumnChunkYMax - chunkColumnChunkYMin + 1 };
-
 struct Sides {
 	bool sides[4]; //(-1, 0, 0), (0, 0, -1), (1, 0, 0), (0, 0, 1)
 	
@@ -180,7 +175,7 @@ static void propagateHorisontalLightingIn(
 }
 
 void calculateLighting(chunk::Chunks &chunks, int (&chunkIndices)[chunksCoumnChunksCount], 
-vec2i const columnPosition, int const lowestNotFullY, int const highestNotEmptyY, int const lowestEmptyY) {
+vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY) {
 	{//sky lighting
 		{ //sky cuhnks
 			/* Iterate over emptyChunks with maximum sky lighting's neighbours.
