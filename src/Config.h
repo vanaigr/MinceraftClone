@@ -8,6 +8,7 @@ struct Config {
 	double playerCameraFovDeg;
 	vec2d mouseSensitivity;
 	int chunkUpdatesPerFrame;
+	bool lockFramerate;
 };
 
 void parseConfigFromFile(Config &dst);

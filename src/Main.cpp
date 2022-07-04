@@ -70,6 +70,8 @@ static const vec2i windowSize{ 1280, 720 };
 static const vec2d windowSize_d{ windowSize.convertedTo<double>() };
 static double const aspect{ windowSize_d.y / windowSize_d.x };
 
+static bool lockFramerate = false;
+
 
 static double       deltaTime{ 16.0/1000.0 };
 static double const fixedDeltaTime{ 16.0/1000.0 };
@@ -90,7 +92,7 @@ static int64_t const width_i{ units::posToFracRAway(playerWidth).value() };
 
 static double speedModifier = 2.5;
 static double playerSpeed{ 2.7 };
-static double spectatorSpeed{ 0.03 };
+static double spectatorSpeed{ 6 };
 
 static vec3d playerForce{};
 static bool isOnGround{false};
@@ -501,6 +503,7 @@ static void reloadShaders() {
 			cfg.playerCameraFovDeg = playerCamera.fov / misc::pi * 180.0;
 			cfg.mouseSensitivity = mouseSensitivity;
 			cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
+			cfg.lockFramerate = lockFramerate;
 			
 		parseConfigFromFile(cfg);
 		
@@ -511,6 +514,7 @@ static void reloadShaders() {
 		mouseSensitivity = cfg.mouseSensitivity;
 		playerCamera = desiredPlayerCamera;
 		chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
+		lockFramerate = cfg.lockFramerate;
 	}
 	
 	/*{
@@ -2357,7 +2361,10 @@ bool performBlockAction() {
 				chunkStatus.setBlocksUpdated(true);
 			});
 		}
-		else std::cout << "!\n";
+		else {
+			std::cout << "!\n";
+			return false;
+		}
 	}
 	
 	return true;
@@ -2369,8 +2376,7 @@ static void update(chunk::Chunks &chunks) {
 	auto const now{std::chrono::steady_clock::now()};
 
 	auto const diffBlockMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBlockUpdate).count() };
-	auto const diffPhysicsMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPhysicsUpdate).count() };
-	
+	auto const diffPhysicsMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPhysicsUpdate).count() };	
 	
 	for(size_t i{}; i < sizeof(keys)/sizeof(keys[0]); ++i) {
 		auto &key{ keys[i] };
@@ -2402,6 +2408,7 @@ static void update(chunk::Chunks &chunks) {
 			* spectatorSpeed / curZoom
 			* (shift ? 1.0*speedModifier : 1)
 			* (ctrl  ? 1.0/speedModifier : 1)
+			* deltaTime
 		};
 		
 		spectatorCoord += pos::posToFrac(movement);
@@ -2422,7 +2429,7 @@ static void update(chunk::Chunks &chunks) {
 		) * deltaTime; 
 			
 		if(diffPhysicsMs > fixedDeltaTime * 1000) {
-			lastPhysicsUpdate = now; //several updates might be skipped
+			lastPhysicsUpdate += std::chrono::microseconds{int64_t(fixedDeltaTime*1000000.0)};
 
 			if(!numpad[0]) {
 				playerForce += vec3d{0,-1,0} * fixedDeltaTime; 
@@ -2432,7 +2439,7 @@ static void update(chunk::Chunks &chunks) {
 					) * fixedDeltaTime + playerMovement;
 				}
 				else {
-					auto const movement{ playerMovement * 0.5 * fixedDeltaTime };
+					auto const movement{ playerMovement * 0.5 };
 					playerForce = playerForce.applied([&](double const coord, auto const index) -> double { 
 						return misc::clamp(coord + movement[index], fmin(coord, movement[index]), fmax(coord, movement[index]));
 					});
@@ -2517,7 +2524,6 @@ int main(void) {
     }
 
     glfwMakeContextCurrent(window);
-	glfwSwapInterval( 0 );
 	if(mouseCentered) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	
     GLenum err = glewInit();
@@ -2609,6 +2615,9 @@ int main(void) {
 	bool firstFrame = true;
     while (!glfwWindowShouldClose(window)) {
 		auto startFrame = std::chrono::steady_clock::now();
+		
+		if(lockFramerate) glfwSwapInterval(1);
+		else glfwSwapInterval(0);
 		
         auto const rightDir{ viewportCurrent.rightDir() };
         auto const topDir{ viewportCurrent.topDir() };

@@ -21,8 +21,9 @@ enum class CF {
 	mouseSensitivityX,
 	mouseSensitivityY,
 	chunkUpdatesPerFrame,
+	lockFramerate
 };
-static constexpr int fieldCount = 7;
+static constexpr int fieldCount = 8;
 
 //Config field names
 static constexpr char const *CFN[] = {
@@ -33,6 +34,7 @@ static constexpr char const *CFN[] = {
 	"mouseSensitivity_x",
 	"mouseSensitivity_y",
 	"chunkUpdatesPerFrame",
+	"lockFramerate"
 };
 
 //Config field types
@@ -44,6 +46,7 @@ static constexpr FT CFT[] = {
 	FT::REAL,
 	FT::REAL,
 	FT::INT ,
+	FT::BOOL
 };
 
 
@@ -125,6 +128,7 @@ void parseConfigFromFile(Config &dst) {
 				break; case CF::mouseSensitivityX    : dst.mouseSensitivity.x   = result(CF::mouseSensitivityX);
 				break; case CF::mouseSensitivityY    : dst.mouseSensitivity.y   = result(CF::mouseSensitivityY);
 				break; case CF::chunkUpdatesPerFrame : dst.chunkUpdatesPerFrame = result(CF::chunkUpdatesPerFrame);
+				break; case CF::lockFramerate        : dst.lockFramerate        = result(CF::lockFramerate);
 			}
 			#undef result
 		}
