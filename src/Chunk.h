@@ -226,6 +226,9 @@ namespace chunk {
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cube(uint8_t const index) const { return blockCube(cubes(), index); }
 		
+		constexpr bool cubeAtCoord(vec3i const coord) const { return blockCube(cubes(), coord); }
+		constexpr bool cubeAtIndex(uint8_t const index) const { return blockCube(cubes(), index); }
+		
 		explicit operator bool() const { return id() != 0; }
 		constexpr bool isEmpty() const { return id() == 0; }
 		constexpr bool empty() const { return isEmpty(); }
@@ -445,7 +448,9 @@ namespace chunk {
 		uint8_t padding;
 		
 		LiquidCube() = default;
-		LiquidCube(uint16_t const id_, uint8_t level_) : id{id_}, level{level_} {}
+		LiquidCube(uint16_t const id_, uint8_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }
+		
+		bool isEmpty() const { return id == 0; }
 	};
 	static_assert(sizeof(LiquidCube) == 4);
 	
