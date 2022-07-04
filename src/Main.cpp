@@ -315,7 +315,8 @@ static GLuint const		&atlas_t = textures[atlas_it],
 						&noise_t = textures[noise_it];
 
 enum SSBOs : GLuint {
-	chunksBlocks_b = 0,
+	chunksCubes_b = 0,
+	chunksBlocks_b,
 	chunksIndices_b,
 	chunksBounds_b,
 	chunksAO_b,
@@ -328,14 +329,16 @@ enum SSBOs : GLuint {
 };
 
 static GLuint ssbos[ssbosCount];
-static GLuint const		&chunksBlocks_ssbo        = ssbos[chunksBlocks_b], 
-						&chunksIndices_ssbo       = ssbos[chunksIndices_b],
-						&chunksBounds_ssbo        = ssbos[chunksBounds_b], 
-						&chunksAO_ssbo            = ssbos[chunksAO_b],
-						&chunksSkyLighting_ssbo   = ssbos[chunksSkyLighting_b],
-						&chunksBlockLighting_ssbo = ssbos[chunksBlockLighting_b],
-						&chunksEmittersGPU_ssbo   = ssbos[chunksEmittersGPU_b],
-						&atlasDescription_ssbo    = ssbos[atlasDescription_b];
+static GLuint const	
+	&chunksCubes_ssbo         = ssbos[chunksCubes_b],
+	&chunksBlocks_ssbo        = ssbos[chunksBlocks_b], 
+	&chunksIndices_ssbo       = ssbos[chunksIndices_b],
+	&chunksBounds_ssbo        = ssbos[chunksBounds_b], 
+	&chunksAO_ssbo            = ssbos[chunksAO_b],
+	&chunksSkyLighting_ssbo   = ssbos[chunksSkyLighting_b],
+	&chunksBlockLighting_ssbo = ssbos[chunksBlockLighting_b],
+	&chunksEmittersGPU_ssbo   = ssbos[chunksEmittersGPU_b],
+	&atlasDescription_ssbo    = ssbos[atlasDescription_b];
 
 static GLuint mainProgram = 0;
   static GLuint rightDir_u;
@@ -359,9 +362,6 @@ static GLuint blockHitbox_p;
   static GLuint blockHitboxProjection_u, blockHitboxModelMatrix_u;
 
 chunk::Chunks chunks{};
-
-static constexpr int chunkBlocksAndCubesCount = (pos::blocksInChunkCount + pos::blocksInChunkCount);
-using chunkBlocksAndCubes_t = uint16_t;
 
 static bool checkChunkInView(vec3i const coord) {
 	return coord.clamp(-viewDistance, +viewDistance) == coord;
@@ -411,8 +411,13 @@ void gpuBuffersReseted() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * chunkBlocksAndCubesCount * sizeof(chunkBlocksAndCubes_t), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * pos::blocksInChunkCount * sizeof(uint16_t), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, chunksBlocks_b, chunksBlocks_ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);		
+	
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksCubes_ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * pos::cubesInChunkCount * sizeof(uint32_t), NULL, GL_DYNAMIC_DRAW);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, chunksCubes_b, chunksCubes_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo);
@@ -446,7 +451,8 @@ void gpuBuffersReseted() {
 	
 	//note: glClearBufferSubData(...);
 	
-	static char data[chunkBlocksAndCubesCount * sizeof(chunkBlocksAndCubes_t)] = {};
+	static char blocksData[pos::blocksInChunkCount * sizeof(uint16_t)] = {};
+	static char cubesData [pos::cubesInChunkCount  * sizeof(uint32_t)] = {};
 	static chunk::AABB aabb{ vec3i{units::blocksInChunkDim-1}, vec3i{0} };
 	static chunk::ChunkAO ao{};
 	static chunk::ChunkLighting lighting{ chunk::ChunkLighting::maxValue };
@@ -459,7 +465,11 @@ void gpuBuffersReseted() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo); 
-	glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(data) * gpuIndex, sizeof(chunk::ChunkData), &data);
+	glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(blocksData) * gpuIndex, sizeof(blocksData), &blocksData);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+	
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksCubes_ssbo); 
+	glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(cubesData ) * gpuIndex, sizeof(cubesData ), &cubesData );
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 		
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
@@ -650,7 +660,8 @@ static void reloadShaders() {
 		glUniform1i(glGetUniformLocation(mainProgram, "noise"), noise_it);
 		glUniform1i(glGetUniformLocation(mainProgram, "viewDistance"), viewDistance);
 		
-		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksBlocksAndCubes"), chunksBlocks_b);
+		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksCubes"), chunksCubes_b);
+		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksBlocks"), chunksBlocks_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "AtlasDescription"), atlasDescription_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksBounds"), chunksBounds_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksIndices"), chunksIndices_b);
@@ -1264,22 +1275,25 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			if constexpr(updateChunkDebug) std::cout << "b ";
 			
 			uint32_t const aabbData{ chunk.aabb().getData() };
-			chunk::ChunkData &chunkData{ chunk.data() };
+			auto &chunkData{ chunk.data() };
+			auto &chunkLiquid{ chunk.liquid() };
 	
-	
-			chunkBlocksAndCubes_t data[chunkBlocksAndCubesCount];
-			
+			uint16_t blocksData[pos::blocksInChunkCount];
 			for(int i{}; i < pos::blocksInChunkCount; i++) {
-				data[i] = chunkData[i].id();
+				blocksData[i] = uint16_t(chunkData[i].cubes()) | (uint16_t(chunkData[i].hasNoNeighbours()) << 8);
 			}
 			
-			for(int i{}; i < pos::blocksInChunkCount; i++) {
-				data[pos::blocksInChunkCount + i] = chunkBlocksAndCubes_t(chunkData[i].cubes()) | (chunkBlocksAndCubes_t(chunkData[i].hasNoNeighbours()) << 8);
+			uint32_t cubesData[pos::cubesInChunkCount];
+			for(int i{}; i < pos::cubesInChunkCount; i++) {
+				cubesData[i] = uint32_t(chunkData[pCube{chunk::cubeCoordInChunk(i)}.valAs<pBlock>()].id()) | (uint32_t(chunkLiquid[i].id) << 16);
 			}
 			
-			//static_assert(sizeof chunkData == 16384);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo); 
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(data) * gpuIndex, sizeof(chunkData), &data);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(blocksData) * gpuIndex, sizeof(blocksData), &blocksData);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);			
+			
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksCubes_ssbo); 
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(cubesData) * gpuIndex, sizeof(cubesData), &cubesData);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 				
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 

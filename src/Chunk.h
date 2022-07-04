@@ -140,6 +140,7 @@ namespace chunk {
 			gs(status, chunksStatus)
 			gs(modified, modified)
 			gs(data, chunksData)
+			gs(liquid, chunksLiquid)
 			gs(neighbours, chunksNeighbours)
 			gs(ao, chunksAO)
 			gs(skyLighting, chunksSkyLighting)
@@ -365,26 +366,19 @@ namespace chunk {
 		
 	};
 	
-	struct ChunkAO {
+	
+	template<typename T>
+	struct CubesArray {
 		static constexpr int size = pos::cubesInChunkCount;
-		
-		using value_type = uint8_t;
-		
-		static constexpr int dirsCount = 8; //8 cubes share 1 vertex
-		static vec3i dirsForIndex(const int index) { //used in main.shader
-			assert(index >= 0 && index < dirsCount); 
-			const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
-			const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
-			const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
-			return vec3i{ x, y, z } * 2 - 1;
-		}
+		using value_type = T;
 	private:
-		std::array<value_type, size> vertsBlocks;
-	public:
-		//ChunkAO() = default;
-		
-		value_type       &operator[](int const index)       { return vertsBlocks[index]; }
-		value_type const &operator[](int const index) const { return vertsBlocks[index]; }
+		std::array<value_type, size> data;
+	public:		
+		CubesArray() = default;
+		explicit CubesArray(T const value) { fill(value); }
+	
+		value_type       &operator[](int const index)       { return data[index]; }
+		value_type const &operator[](int const index) const { return data[index]; }
 		
 		value_type       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
 		value_type const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }	
@@ -392,14 +386,29 @@ namespace chunk {
 		value_type       &operator[](pCube const cubeCoord)       { return (*this)[cubeCoord.val()]; }
 		value_type const &operator[](pCube const cubeCoord) const { return (*this)[cubeCoord.val()]; }
 		
-		void reset() { vertsBlocks.fill(0); }
+		void fill(T const value) { data.fill(value); }
+		void reset() { data.fill(T()); }
+	};
+	
+	
+	struct ChunkAO : CubesArray<uint8_t> {
+		using CubesArray::CubesArray;
+		
+		static constexpr int dirsCount = 8; //8 cubes share 1 vertex
+		
+		static vec3i dirsForIndex(const int index) { //used in main.shader
+			assert(index >= 0 && index < dirsCount); 
+			const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
+			const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
+			const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
+			return vec3i{ x, y, z } * 2 - 1;
+		}
 	};
 
 	
-	struct ChunkLighting {
-		static constexpr int size = pos::cubesInChunkCount;
+	struct ChunkLighting : CubesArray<uint8_t> {
+		using CubesArray::CubesArray;
 		
-		using value_type = uint8_t;
 		static constexpr value_type maxValue = std::numeric_limits<value_type>::max();
 		static constexpr value_type minValue = std::numeric_limits<value_type>::lowest();
 		
@@ -427,24 +436,20 @@ namespace chunk {
 			}
 			return result; 
 		}
-
-	private:
-		std::array<value_type, size> lighting;
-	public:
-		ChunkLighting() = default;
-		ChunkLighting(value_type const val) {
-			fill(val);
-		}
-		
-		value_type       &operator[](int const cubeIndex)       { assert(cubeIndex >= 0 && cubeIndex < size); return lighting[cubeIndex]; }
-		value_type const &operator[](int const cubeIndex) const { assert(cubeIndex >= 0 && cubeIndex < size); return lighting[cubeIndex]; }		
-		
-		value_type       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
-		value_type const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }
-		
-		void fill(value_type const val) { lighting.fill(val); }
-		void reset() { fill(0); }
 	};
+	
+	
+	struct LiquidCube {
+		uint16_t id;
+		uint8_t level;
+		uint8_t padding;
+		
+		LiquidCube() = default;
+		LiquidCube(uint16_t const id_, uint8_t level_) : id{id_}, level{level_} {}
+	};
+	static_assert(sizeof(LiquidCube) == 4);
+	
+	struct ChunkLiquid : CubesArray<LiquidCube> { using CubesArray::CubesArray; };
 	
 	
 	struct ChunkBlocksList {
@@ -596,6 +601,7 @@ namespace chunk {
 		std::vector<ChunkStatus> chunksStatus{};
 		std::vector<bool> modified{};
 		std::vector<ChunkData> chunksData{};
+		std::vector<ChunkLiquid> chunksLiquid{};
 		std::vector<ChunkAO> chunksAO{};
 		std::vector<ChunkLighting> chunksSkyLighting{};
 		std::vector<ChunkLighting> chunksBlockLighting{};
@@ -628,6 +634,7 @@ namespace chunk {
 				chunksStatus.resize(index+1);
 				modified.resize(index+1);
 				chunksData.resize(index+1);
+				chunksLiquid.resize(index+1);
 				chunksAO.resize(index+1);
 				chunksSkyLighting.resize(index+1);
 				chunksBlockLighting.resize(index+1);
