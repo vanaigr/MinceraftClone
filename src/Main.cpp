@@ -348,7 +348,8 @@ static GLuint mainProgram = 0;
   static GLuint startChunkIndex_u;
   static GLuint time_u;
   static GLuint projection_u, toLocal_matrix_u;
-  static GLuint playerChunk_u, playerInChunk_u;
+  static GLuint startCoord_u;
+  //static GLuint playerChunk_u, playerInChunk_u;
 
 static GLuint fontProgram;
 
@@ -640,9 +641,10 @@ static void reloadShaders() {
 		projection_u = glGetUniformLocation(mainProgram, "projection");
 		toLocal_matrix_u = glGetUniformLocation(mainProgram, "toLocal");
 	
-		playerChunk_u = glGetUniformLocation(mainProgram, "playerChunk");
-		playerInChunk_u = glGetUniformLocation(mainProgram, "playerInChunk");
-		startChunkIndex_u = glGetUniformLocation(mainProgram, "startChunkIndex");
+		//playerChunk_u = glGetUniformLocation(mainProgram, "playerChunk");
+		//playerInChunk_u = glGetUniformLocation(mainProgram, "playerInChunk");
+		//startChunkIndex_u = glGetUniformLocation(mainProgram, "startChunkIndex");
+		startCoord_u = glGetUniformLocation(mainProgram, "startCoord");
 		
 		playerRelativePosition_u = glGetUniformLocation(mainProgram, "playerRelativePosition");
 		drawPlayer_u = glGetUniformLocation(mainProgram, "drawPlayer");
@@ -2788,12 +2790,21 @@ int main(void) {
 			std::cout << "----------------------------\n";
 		}
 		
-		glUniform3i(playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
-		glUniform3f(playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
+		static pChunk lastCameraChunkCoord{};
+		
+		if(!numpad[1]) {
+			lastCameraChunkCoord = pChunk{cameraChunk};
+		}
+		auto const startCoord{ pos::fracToPos(cameraCoord - lastCameraChunkCoord + pChunk{viewDistance}) };
+		
+		
+		//glUniform3i(playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
+		//glUniform3f(playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
+		glUniform3f(startCoord_u, startCoord.x, startCoord.y, startCoord.z);
 		
 		{			
-			auto const playerChunkCand{ chunk::Move_to_neighbour_Chunk(chunks, cameraChunk).optChunk().get() };
-			vec3f const playerRelativePos( pos::fracToPos(playerCoord - pos::Chunk{cameraChunk} + pChunk{viewDistance}) );
+			auto const playerChunkCand{ chunk::Move_to_neighbour_Chunk(chunks, lastCameraChunkCoord.val()).optChunk().get() };
+			vec3f const playerRelativePos( pos::fracToPos(playerCoord - lastCameraChunkCoord + pChunk{viewDistance}) );
 			glUniform3f(playerRelativePosition_u, playerRelativePos.x, playerRelativePos.y, playerRelativePos.z);
 			
 			glUniform1i(drawPlayer_u, isSpectator);
@@ -2802,7 +2813,7 @@ int main(void) {
 			for(auto const chunkIndex : chunks.usedChunks()) { 
 				auto chunk{ chunks[chunkIndex] };
 				auto const chunkCoord{ chunk.position() };
-				auto const localChunkCoord{ chunkCoord - cameraChunk };
+				auto const localChunkCoord{ chunkCoord - lastCameraChunkCoord.val() };
 				auto const chunkInView{ checkChunkInView(localChunkCoord) };
 				
 				auto &gpuIndex{ chunk.gpuIndex() };
@@ -2825,13 +2836,13 @@ int main(void) {
 			
 			iterateAllChunks(
 				chunks[playerChunkCand], 
-				pChunk{cameraChunk} - pChunk{viewDistance}, pChunk{cameraChunk} + pChunk{viewDistance}, 
+				lastCameraChunkCoord - pChunk{viewDistance}, lastCameraChunkCoord + pChunk{viewDistance}, 
 				[&](chunk::Chunks::index_t const chunkIndex, pChunk const coord) {
 					if(chunkIndex == -1) { indices[i++] = 0; return; }
 					
 					auto chunk{ chunks[chunkIndex] };
 					
-					const bool updated{ updateChunk(chunk, cameraChunk, updatedCount >= chunkUpdatesPerFrame) };
+					const bool updated{ updateChunk(chunk, lastCameraChunkCoord.val(), updatedCount >= chunkUpdatesPerFrame) };
 					if(updated) updatedCount++; 
 				
 					indices[i++] = chunk.gpuIndex();	

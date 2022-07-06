@@ -36,8 +36,7 @@ const int cubesInChunkDimAsPow2 = cubesInBlockDimAsPow2 + blocksInChunkDimAsPow2
 const int cubesInChunkDim = 1 << cubesInChunkDimAsPow2;
 const int cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
 
-uniform ivec3 playerChunk;
-uniform  vec3 playerInChunk;
+uniform vec3 startCoord;
 
 ivec3 shr3i(const ivec3 v, const int i) {
 	return ivec3(v.x >> i, v.y >> i, v.z >> i);
@@ -1276,7 +1275,7 @@ void main() {
     const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;
     const vec3 rayDir = normalize(rayDir_);
 	
-	const Ray ray = Ray(playerInChunk + viewDistance * blocksInChunkDim, rayDir);
+	const Ray ray = Ray(startCoord, rayDir);
 
 	const vec3 col = trace(ray);
 	
