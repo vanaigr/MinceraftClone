@@ -607,7 +607,18 @@ vec3 calcDirSign(const vec3 dir) {
 }
 
 const int minBias = -2;
-const int maxBias = +2;
+const int maxBias = +2; /*
+	bias allowes to specify which surface is intersected
+	
+	ray direction ->
+				 from cube                           to cube
+	 (cube 1 liquid) | (cube 1 solid) | (cube 2 solid) | (cube 2 liquid)
+	^                 ^                ^                ^                ^
+   -2                -1                0                1                2
+   
+   it is useful when translucent or parcially transparent cube is ajacent to some other cube
+   because we can specify with whith of those the ray has intersectted first
+*/
 
 IntersectionInfo isInters(const Ray ray, const int startBias) { 
 	const vec3 dir = ray.dir;
@@ -626,7 +637,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 	{ //calculate first intersection
 		const ivec3 startBlockCoord = ivec3(floor(curCoord) - positive_ * vec3(equal(curCoord, floor(curCoord))));
 		const int startBlockNeighbourChunk = chunkAt(blockChunk(startBlockCoord));
-		fromBlock = startBlockNeighbourChunk == 0 ? cubesEmpty() : cubesAtBlock( //not loaded chunks are unaccounted
+		fromBlock = startBlockNeighbourChunk == 0 ? cubesEmpty() : cubesAtBlock(
 			startBlockNeighbourChunk,
 			blockLocalToChunk(startBlockCoord)
 		);
@@ -656,8 +667,8 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 		const vec3 farBordersDiff = mix(relativeCoord, blocksInChunkDim - relativeCoord, positive_);
 		const vec3 farBordersLen = farBordersDiff*stepLength;
 		
-		const float farBorderLen = min(min(farBordersLen.x, farBordersLen.y), farBordersLen.z); //minimum length for any ray axis to get outside of chunk bounds
-		const bvec3 firstOut = equal(farBordersLen, vec3(farBorderLen));
+		const float farBordersMinLen = min(min(farBordersLen.x, farBordersLen.y), farBordersLen.z); //minimum length for any ray axis to get outside of chunk bounds
+		const bvec3 firstOut = equal(farBordersLen, vec3(farBordersMinLen));
 		const ivec3 outNeighbourDir = ivec3(firstOut) * ivec3(dirSign);
 		
 		const int nextChunkIndex = chunkAt(relativeToChunk + outNeighbourDir);
@@ -672,158 +683,156 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 		const vec3 nearBoundaries = mix(startBorder, endBorder, negative_);
 		const vec3 farBoundaries  = mix(startBorder, endBorder, positive_);
 		
-		const vec3 nearBoundsCandCoords = nearBoundaries + relativeToBlock;
-		const vec3 farBoundsCandCoords  = farBoundaries  + relativeToBlock;
+		const vec3 nearBoundsCoords = nearBoundaries + relativeToBlock;
+		const vec3 farBoundsCoords  = farBoundaries  + relativeToBlock;
 		
-		const bool pastNearBounds = all(greaterThanEqual((curCoord - nearBoundsCandCoords)*dirSign, vec3(0)));
-		const vec3  nearBoundsCandLenghts = (nearBoundsCandCoords - ray.orig) * dirSign * stepLength;
-		const float nearBoundsCandMinLen = max(max(nearBoundsCandLenghts.x, nearBoundsCandLenghts.y), nearBoundsCandLenghts.z);  //minimum length for all ray axis to get inside of chunk bounds
-		const bvec3 nearBoundCandMinB = equal(nearBoundsCandLenghts, vec3(nearBoundsCandMinLen));
+		const bool pastNearBounds = all(greaterThanEqual((curCoord - nearBoundsCoords)*dirSign, vec3(0)));
+		const vec3  nearBoundsLen = (nearBoundsCoords - ray.orig) * dirSign * stepLength;
+		const float nearBoundsMinLen = max(max(nearBoundsLen.x, nearBoundsLen.y), nearBoundsLen.z);  //minimum length for all ray axis to get inside of chunk bounds
+		const bvec3 nearBoundCandMinB = equal(nearBoundsLen, vec3(nearBoundsMinLen));
 		
-		const vec3 candCoord = pastNearBounds ? curCoord : mix(at(ray, nearBoundsCandMinLen), nearBoundsCandCoords, nearBoundCandMinB);
-		const bvec3 inChunkBounds = lessThanEqual((candCoord - farBoundsCandCoords) * dirSign, vec3(0,0,0));
+		const vec3 candCoord = pastNearBounds ? curCoord : mix(at(ray, nearBoundsMinLen), nearBoundsCoords, nearBoundCandMinB);
+		const bvec3 inChunkBounds = lessThanEqual((candCoord - farBoundsCoords) * dirSign, vec3(0,0,0));
 		
 		if(!all(inChunkBounds) || empty) {
 			curChunkIndex = nextChunkIndex;
 			relativeToChunk = nextRelativeToChunk;
+			continue;
 		}
-		else {
-			const vec3 candFromBlockCoord = floor(candCoord) - positive_ * vec3(equal(candCoord, floor(candCoord)));
-			const vec3 curFromBlockCoord  = floor(curCoord ) - positive_ * vec3(equal(curCoord , floor(curCoord) ));
-			
-			if(candFromBlockCoord != curFromBlockCoord) fromBlock = cubesEmpty();
-			curCoord = candCoord;
-			if(!pastNearBounds) bias = minBias;
-			
-			//step through blocks/cubes of the current chunk
-			while(true) {
-				const ivec3 intersectionSide = ivec3(equal(curCoord*cubesInBlockDim, floor(curCoord*cubesInBlockDim)));
-						
-				const ivec3 fromCubeCoord = ivec3(floor(curCoord * cubesInBlockDim - positive_ * vec3(intersectionSide)));
-				const ivec3 toCubeCoord   = ivec3(floor(curCoord * cubesInBlockDim - negative_ * vec3(intersectionSide)));
-				
-				const ivec3 toBlockCoord = cubeBlock(toCubeCoord);
-				const bool toBlockInCurChunk = cubeChunk(toCubeCoord) == relativeToChunk;
-				const ivec3 localToBlockCoord = blockLocalToChunk(toBlockCoord);
-				
-				Cubes toBlock;
-				
-				//const bvec3 blockBounds = equal(curCoord, floor(curCoord));
-				//const bool atBlockBounds = any(blockBounds);
-				//if(!atBlockBounds) toBlock = fromBlock;
-				//else 
-				if(toBlockInCurChunk) toBlock = cubesAtBlock(
-					curChunkIndex,
-					localToBlockCoord
-				);
-				else toBlock = cubesAtBlock(
-					nextChunkIndex,
-					localToBlockCoord
-				);
-				
-				const Cubes biasedFromBlock = bias < 0       ? fromBlock : cubesEmpty();
-				const Cubes biasedToBlock   = bias < maxBias ? toBlock   : cubesEmpty();
-				
-				
-				if(!isEmpty(biasedFromBlock) || !isEmpty(biasedToBlock)) {
-					const bvec4 cubes = bvec4(
-						blockCubeAt (biasedFromBlock, cubeLocalToBlock(fromCubeCoord)),
-						liquidCubeAt(biasedFromBlock, cubeLocalToBlock(fromCubeCoord)),
-						blockCubeAt (biasedToBlock  , cubeLocalToBlock(toCubeCoord  )),
-						liquidCubeAt(biasedToBlock  , cubeLocalToBlock(toCubeCoord  ))
-					);
-					
-					if(any(cubes)) {
-						uint fBlockId = 0;
-						uint fLiquidId = 0;
-						
-						uint tBlockId = 0;
-						uint tLiquidId = 0;
-						
-						if(cubes.x) {
-							const ivec3 fromBlockChunk = cubeChunk(fromCubeCoord);
-							const ivec3 fromBlockInChunk = blockLocalToChunk(cubeBlock(fromCubeCoord));
-							fBlockId = blockIdAt(chunkAt(fromBlockChunk), fromBlockInChunk);
-						}
-						if(cubes.y) {
-							const ivec3 fromCubeChunk = cubeChunk(fromCubeCoord);
-							const ivec3 fromCubeInChunk = cubeLocalToChunk(fromCubeCoord);
-							fLiquidId = id(liquidAtCube(chunkAt(fromCubeChunk), fromCubeInChunk));
-						}
-						
-						if(cubes.z) {
-							tBlockId = blockIdAt(
-								toBlockInCurChunk ? curChunkIndex : nextChunkIndex, 
-								localToBlockCoord
-							);		
-						}
-						if(cubes.w) {
-							tLiquidId = id(liquidAtCube(
-								toBlockInCurChunk ? curChunkIndex : nextChunkIndex, 
-								cubeLocalToChunk(toCubeCoord)
-							));
-						}
-
-						const uint/*uint16_t[4]*/ blocks[] = { fLiquidId | (fBlockId << 16), tBlockId | (tLiquidId << 16)  }; 
-						const ivec3 blocksCoord[] = { cubeBlock(fromCubeCoord), cubeBlock(toCubeCoord) };
-						
-						uint lowestIntersectionId = 0;
-						int lowestBias;
-						
-						for(int surface = maxBias-1; surface >= bias; surface--) {
-							const uint blockIndex = surface - minBias;
-							const uint blockId = (blocks[blockIndex/2] >> (16 * (blockIndex%2))) & 0xffffu;
-							const vec3 blockCoord = blocksCoord[int(surface >= 0)];
-							
-							if(blockId == 0) continue; 
-							if(!alphaTest(curCoord, vec3(intersectionSide), dirSign, blockCoord, blockId)) continue;
-							if(blockId == lowestIntersectionId && (blockId == 7)) { lowestIntersectionId = 0; continue; }
-							
-							lowestIntersectionId = blockId;
-							lowestBias = surface;		
-						}
-						
-						if(lowestIntersectionId != 0) {
-							const vec3 blockCoord = blocksCoord[int(lowestBias >= 0)];
-							const vec3 localBlockCoord = curCoord - blockCoord;
-							
-							return IntersectionInfo(
-								curCoord,
-								localBlockCoord,
-								lowestBias,
-								lowestIntersectionId
-							);
-						}
-					}		
-				}
-				
-				fromBlock = toBlock;
-				const bool hnn = hasNoNeighbours(fromBlock);
-				const float skipDistance = hnn ? 1 : (isEmpty(fromBlock) ? 1.0 : cubesInBlockDim);
-				const vec3 candCoords = floor(curCoord * skipDistance * dirSign + (hnn ? 2 : 1)) / skipDistance * dirSign;
-	
-				const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
-				
-				const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
-				const bvec3 nextMinAxisB = equal(nextLenghts, vec3(nextMinLen));
-				
-				curCoord = mix(
-					max(curCoord*dirSign, at(ray, nextMinLen.x)*dirSign)*dirSign, 
-					candCoords, 
-					nextMinAxisB
-				);
-				bias = minBias;
-				
-				const bool inChunkBounds = all(lessThanEqual((curCoord - farBoundsCandCoords) * dirSign, vec3(0,0,0)) );
 		
-				if(!inChunkBounds) {
-					curChunkIndex = nextChunkIndex;
-					relativeToChunk = nextRelativeToChunk;
-					break;
-				}
+		const vec3 candFromBlockCoord = floor(candCoord) - positive_ * vec3(equal(candCoord, floor(candCoord)));
+		const vec3 curFromBlockCoord  = floor(curCoord ) - positive_ * vec3(equal(curCoord , floor(curCoord) ));
+		
+		if(candFromBlockCoord != curFromBlockCoord) fromBlock = cubesEmpty();
+		if(candCoord != curCoord) bias = minBias;
+		
+		curCoord = candCoord;
+		
+		//step through blocks/cubes of the current chunk
+		while(true) {
+			const ivec3 intersectionSide = ivec3(equal(curCoord*cubesInBlockDim, floor(curCoord*cubesInBlockDim)));
+					
+			const ivec3 fromCubeCoord = ivec3(floor(curCoord * cubesInBlockDim - positive_ * vec3(intersectionSide)));
+			const ivec3 toCubeCoord   = ivec3(floor(curCoord * cubesInBlockDim - negative_ * vec3(intersectionSide)));
+			
+			const ivec3 toBlockCoord = cubeBlock(toCubeCoord);
+			const bool toBlockInCurChunk = cubeChunk(toCubeCoord) == relativeToChunk;
+			const ivec3 localToBlockCoord = blockLocalToChunk(toBlockCoord);
+			
+			Cubes toBlock;
+			
+			//const bvec3 blockBounds = equal(curCoord, floor(curCoord));
+			//const bool atBlockBounds = any(blockBounds);
+			//if(!atBlockBounds) toBlock = fromBlock;
+			//else 
+			toBlock = cubesAtBlock(
+				toBlockInCurChunk ? curChunkIndex : nextChunkIndex,
+				localToBlockCoord
+			);
+			
+			const Cubes biasedFromBlock = bias < 0       ? fromBlock : cubesEmpty();
+			const Cubes biasedToBlock   = bias < maxBias ? toBlock   : cubesEmpty();
+			
+			if(!isEmpty(biasedFromBlock) || !isEmpty(biasedToBlock)) {
+				const bvec4 cubes = bvec4(
+					blockCubeAt (biasedFromBlock, cubeLocalToBlock(fromCubeCoord)),
+					liquidCubeAt(biasedFromBlock, cubeLocalToBlock(fromCubeCoord)),
+					blockCubeAt (biasedToBlock  , cubeLocalToBlock(toCubeCoord  )),
+					liquidCubeAt(biasedToBlock  , cubeLocalToBlock(toCubeCoord  ))
+				);
+				
+				if(any(cubes)) {
+					uint fBlockId = 0;
+					uint fLiquidId = 0;
+					
+					uint tBlockId = 0;
+					uint tLiquidId = 0;
+					
+					if(cubes.x) {
+						const ivec3 fromBlockChunk = cubeChunk(fromCubeCoord);
+						const ivec3 fromBlockInChunk = blockLocalToChunk(cubeBlock(fromCubeCoord));
+						fBlockId = blockIdAt(chunkAt(fromBlockChunk), fromBlockInChunk);
+					}
+					if(cubes.y) {
+						const ivec3 fromCubeChunk = cubeChunk(fromCubeCoord);
+						const ivec3 fromCubeInChunk = cubeLocalToChunk(fromCubeCoord);
+						fLiquidId = id(liquidAtCube(chunkAt(fromCubeChunk), fromCubeInChunk));
+					}
+					
+					if(cubes.z) {
+						tBlockId = blockIdAt(
+							toBlockInCurChunk ? curChunkIndex : nextChunkIndex, 
+							localToBlockCoord
+						);		
+					}
+					if(cubes.w) {
+						tLiquidId = id(liquidAtCube(
+							toBlockInCurChunk ? curChunkIndex : nextChunkIndex, 
+							cubeLocalToChunk(toCubeCoord)
+						));
+					}
+
+					const uint/*uint16_t[4]*/ blocks[] = { fLiquidId | (fBlockId << 16), tBlockId | (tLiquidId << 16)  }; 
+					const ivec3 blocksCoord[] = { cubeBlock(fromCubeCoord), cubeBlock(toCubeCoord) };
+					
+					uint lowestIntersectionId = 0;
+					int lowestBias;
+					
+					for(int surface = maxBias-1; surface >= bias; surface--) {
+						const uint blockIndex = surface - minBias;
+						const uint blockId = (blocks[blockIndex/2] >> (16 * (blockIndex%2))) & 0xffffu;
+						const vec3 blockCoord = blocksCoord[int(surface >= 0)];
+						
+						if(blockId == 0) continue; 
+						if(!alphaTest(curCoord, vec3(intersectionSide), dirSign, blockCoord, blockId)) continue;
+						if(blockId == lowestIntersectionId && (blockId == 7)) { lowestIntersectionId = 0; continue; }
+						
+						lowestIntersectionId = blockId;
+						lowestBias = surface;		
+					}
+					
+					if(lowestIntersectionId != 0) {
+						const vec3 blockCoord = blocksCoord[int(lowestBias >= 0)];
+						const vec3 localBlockCoord = curCoord - blockCoord;
+						
+						return IntersectionInfo(
+							curCoord,
+							localBlockCoord,
+							lowestBias,
+							lowestIntersectionId
+						);
+					}
+				}		
+			}
+			
+			//calculate next intersection
+			fromBlock = toBlock;
+			const bool hnn = hasNoNeighbours(fromBlock);
+			const float skipDistance = (hnn || isEmpty(fromBlock)) ? 1.0 : cubesInBlockDim;
+			const vec3 candCoords = floor(curCoord * skipDistance * dirSign + (hnn ? 2 : 1)) / skipDistance * dirSign;
+	
+			const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
+			
+			const float nextMinLen = min(min(nextLenghts.x, nextLenghts.y), nextLenghts.z);
+			const bvec3 nextMinAxisB = equal(nextLenghts, vec3(nextMinLen));
+			
+			curCoord = mix(
+				max(curCoord*dirSign, at(ray, nextMinLen.x)*dirSign)*dirSign, 
+				candCoords, 
+				nextMinAxisB
+			);
+			bias = minBias;
+			
+			const bool inChunkBounds = all(lessThanEqual((curCoord - farBoundsCoords) * dirSign, vec3(0,0,0)) );
+		
+			if(!inChunkBounds) {
+				curChunkIndex = nextChunkIndex;
+				relativeToChunk = nextRelativeToChunk;
+				break;
 			}
 		}
 	}
+	
 	return noIntersectionInfo();
 }
 
