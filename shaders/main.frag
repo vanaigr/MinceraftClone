@@ -404,7 +404,7 @@ void swap(inout float v1, inout float v2) {
     v2 = t;
 }
 
-struct Surface {
+/*struct Surface {
 	uint data;
 };
 
@@ -434,7 +434,7 @@ Surface surfaceBlock(const uint type) {
 
 Surface surfaceEntity(const uint type) {
 	return Surface(type | (1u << 31));
-}
+}*/
 
 #if 0
 //https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
@@ -838,23 +838,35 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 vec3 background(const vec3 dir) {
 	const float t = 0.5 * (dir.y + 1.0);
 	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.02) + t * vec3(0.5, 0.7, 1.0);
-	return pow(res*1.2, vec3(2.2));
+	return pow(res*2, vec3(2.2));
 }
 
+const int rayTypeStandard = 0;
+const int rayTypeShadowBlock = 1;
+const int rayTypeShadowSky = 2;
+const int rayTypeLightingBlock = 3;
+const int rayTypeLightingEmitter = 4;
 
 struct Params {
 	Ray ray;
 	int bias;
-	uint type;
+	
+	uint rayIndex;
+	uint rayType;
 	int parent;
+	bool last;
 }; 
 
 struct Result {
 	vec3 color;
 	float depth;
-	Surface surface;
-	uint type;
+	uint data;
+	uint surfaceId;
+	
+	uint rayIndex;
+	uint rayType;
 	int parent;
+	bool last;
 };
 
 int putResultPos = 0;
@@ -867,6 +879,7 @@ uint stack[size];
 //   putResultPos ^   ^ putParamsPos
 
 int curResultPos() { return putResultPos - 1; }
+void setCurResultPos(const int pos) { putResultPos = pos + 1; }
 
 int paramsPosOffset(const int pos) { return size - (pos+1) * 7; }
 int resultPosOffset(const int pos) { return pos * 4; }
@@ -882,7 +895,7 @@ void writeParams(const Params it, const int position) {
 	stack[offset+4] = floatBitsToUint(it.ray.dir.y);
 	stack[offset+5] = floatBitsToUint(it.ray.dir.z);
 	
-	stack[offset+6] = (uint(it.parent) & 0xffffu) | (uint(it.bias - minBias) << 16) | (it.type << 19);
+	stack[offset+6] = (uint(it.bias - minBias) & 0xfu) | ((it.rayIndex & 7u) << 16) | ((it.rayType & 7u) << 19) | ((uint(it.parent) & 0xffu) << 22) | (uint(it.last) << 30);
 }
 Params readParams(const int position) {
 	const int offset = paramsPosOffset(position);
@@ -900,9 +913,11 @@ Params readParams(const int position) {
 				uintBitsToFloat(stack[offset+5])
 			)
 		),
-		int((stack[offset+6] >> 16) & 7u)+minBias,
-		uint(stack[offset+6] >> 19),
-		int(stack[offset+6] << 16) >> 16 //sign extended shift
+		int((stack[offset+6] >> 0) & 0xfu) + minBias,
+		(stack[offset+6] >> 16) & 7u,
+		(stack[offset+6] >> 19) & 3u,
+		(int(stack[offset+6] << 2) >> (22+2)), //sign extended shift
+		bool((stack[offset+6] >> 30) & 1u)
 	);
 }
 
@@ -912,8 +927,8 @@ void writeResult(const Result it, const int position) {
 	stack[offset+0] = packHalf2x16(it.color.xy);
 	stack[offset+1] = packHalf2x16(vec2(it.color.z, it.depth));
 	
-	stack[offset+2] = it.surface.data;
-	stack[offset+3] = (uint(it.parent) & 0xffffu) | (it.type << 16);
+	stack[offset+2] = it.data;
+	stack[offset+3] = (it.surfaceId & 0xffffu) | ((it.rayIndex & 7u) << 16) | ((it.rayType & 7u) << 19) | ((uint(it.parent) & 0xffu) << 22) | (uint(it.last) << 30);
 }
 Result readResult(const int position) {
 	const int offset = resultPosOffset(position);
@@ -927,9 +942,12 @@ Result readResult(const int position) {
 			v2.x
 		),
 		v2.y,
-		Surface(stack[offset+2]),
-		stack[offset+3] >> 16,
-		int(stack[offset+3] << 16) >> 16 //sign extended shift
+		stack[offset+2],
+		(stack[offset+3] >> 0) & 0xffffu,
+		(stack[offset+3] >> 16) & 7u,
+		(stack[offset+3] >> 19) & 7u,
+		(int(stack[offset+3] << 2) >> (22+2)), //sign extended shift
+		bool((stack[offset+3] >> 30) & 1u)
 	);
 }
 
@@ -941,6 +959,10 @@ bool canPopParams() { return putParamsPos > 0; }
 bool canPushParams() { 
 	return paramsPosOffset(putParamsPos) >= 0
 	&& resultPosOffset(putResultPos) <= paramsPosOffset(putParamsPos); //resultOnePastEnd <= paramsNextEnd
+}
+bool canPushParamsCount(const int count) { 
+	return paramsPosOffset(putParamsPos + count-1) >= 0
+	&& resultPosOffset(putResultPos) <= paramsPosOffset(putParamsPos + count-1); //resultOnePastEnd <= paramsNextEnd
 }
 bool canPushResult() { 
 	return resultPosOffset(putResultPos+1)-1 < size
@@ -965,294 +987,412 @@ int mapInteger(int value) {//based on https://stackoverflow.com/a/24771093/18704
     return value;
 }
 
-Result combineSteps(const Result current, const Result inner) {
-	const vec3 curColor = current.color;
+void combineSteps(const int currentIndex, const int lastIndex) {
+	const int childrenCount = lastIndex - currentIndex;
+	if(childrenCount <= 0) return;
 	
-	const bool curShadow = current.type == 1 || current.type == 2;
-	const bool innerShadow = inner.type == 1 || inner.type == 2;
+	const Result current = readResult(currentIndex);
+	Result result = current;//Result(vec3(0), current.depth, current.surface, current.type, current.parent, current.last);
+	result.color = vec3(0);
 	
-	const Surface resultingSurface = innerShadow ? inner.surface : current.surface;
+	const bool isShadow = current.rayType == rayTypeShadowBlock;
+	const bool isLighting = current.rayType == rayTypeLightingBlock;
+	const uint surfaceId = current.surfaceId;
 	
-	if(innerShadow && !curShadow) {
-		const bool lighting = inner.type == 2;
-		const uint innerSurface = surfaceType(inner.surface);
-		const bool emitter = innerSurface == 13 || innerSurface == 14;
-		const vec3 shadowTint = lighting ? vec3(1) : (surfaceType(resultingSurface) == 0 ? inner.color : vec3(0.4));
-		return Result(
-			curColor * shadowTint + (lighting && emitter ? (inner.color / (0.4 + inner.depth*inner.depth)) : vec3(0)),
-			current.depth + inner.depth, 
-			current.surface, 
-			current.type,
-			current.parent
-		);
+	if(surfaceId == 7) {
+		const float fresnel = uintBitsToFloat(current.data);
+		const bool both = childrenCount == 2;
+		
+		//if(childrenCount > 2) discard;
+		
+		for(int i = 0; i < childrenCount; i++) {
+			const Result inner = readResult(currentIndex + i+1);
+			
+			if(isShadow) {
+				if(inner.rayType == rayTypeShadowSky) result.rayType = rayTypeShadowSky;
+				else continue;
+			}			
+			if(isLighting) {
+				if(inner.rayType == rayTypeLightingEmitter) result.rayType = rayTypeLightingEmitter;
+				else continue;
+			}
+			
+			if(inner.rayIndex == 3) {
+				result.color += current.color * inner.color * (both ? fresnel   : 1.0) * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0);
+			}
+			else if(inner.rayIndex == 4) {
+				result.color += current.color * inner.color * (both ? 1-fresnel : 1.0) * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0);
+			}
+		}
+	}
+	else if(surfaceId == 8) {
+		for(int i = 0; i < childrenCount; i++) {
+			const Result inner = readResult(currentIndex + i+1);
+			if(isShadow) {
+				if(inner.rayType == rayTypeShadowSky) result.rayType = rayTypeShadowSky;
+				else continue;
+			}
+			if(isLighting) {
+				if(inner.rayType == rayTypeLightingEmitter) result.rayType = rayTypeLightingEmitter;
+				else continue;
+			}
+			result.color = current.color * inner.color * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0);
+		}
+	}
+	else {
+		int i = 0;
+				
+		if(current.rayType == rayTypeStandard) {
+			if(i < childrenCount) { //emitter
+				const Result inner = readResult(currentIndex + i+1);
+				
+				if(inner.rayType == rayTypeLightingBlock || inner.rayType == rayTypeLightingEmitter) {
+					result.color += inner.rayType == rayTypeLightingEmitter ? (inner.color / (1 + inner.depth*inner.depth)) : vec3(0);
+					i++;
+				}
+			}
+			
+			if(i < childrenCount) { //shadow
+				const Result inner = readResult(currentIndex + i+1);
+				
+				if(inner.rayType == rayTypeShadowBlock || inner.rayType == rayTypeShadowSky) {
+					const vec3 shadowTint = inner.rayType == rayTypeShadowSky ? inner.color : vec3(0.0);
+					result.color += current.color * shadowTint;
+					i++;
+				}
+			}
+		}
+		
+		if(surfaceId == 5 && i < childrenCount) {		
+			const Result inner = readResult(currentIndex + i+1);
+			
+			if(inner.rayIndex == 1) {
+				if(inner.rayType == rayTypeShadowSky) {
+					result.rayType = rayTypeShadowSky;
+					result.color += mix(current.color, inner.color, 0.2);
+				}
+				else if(inner.rayType == rayTypeLightingEmitter) {
+					result.rayType = rayTypeLightingEmitter;
+					result.color += mix(current.color, inner.color * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0), 0.2);
+				}
+				else if(inner.rayType == rayTypeLightingBlock || inner.rayType == rayTypeShadowBlock) /*do nothing*/;
+				else result.color += mix(current.color, inner.color, 0.03);
+				
+				i++;
+			}
+			else result.color += current.color;
+		}
+		else result.color += current.color;
 	}
 	
-	const uint type = surfaceType(current.surface);
+	writeResult(result, currentIndex);
+}
+
+struct RayResult {
+	bool pushedRays;
+};
+
+RayResult traceStep(const int iteration) {
+	bool pushed = false;
 	
-	if(type == 7) return Result(curColor * inner.color, current.depth + inner.depth, resultingSurface, current.type, current.parent);
-	else if(type == 8) return Result(curColor * inner.color, current.depth + inner.depth, resultingSurface, current.type, current.parent);
-	else return Result(curColor, current.depth, resultingSurface, current.type, current.parent);
+	const int curFrame = putResultPos;
+	
+	const Params p = popParams();
+	//if(!canPushResult()) ???; //this check is not needed because sizeof(Result) < sizeof(Params), so we would have space for at least 1 Result
+	const Ray ray = p.ray;
+	const vec3 dirSign = calcDirSign(ray.dir);
+	
+	const uint rayIndex = p.rayIndex;
+	const uint type = p.rayType;
+	const int startBias = p.bias;
+	const int parent = p.parent;
+	const bool last = p.last;
+	
+	const bool shadow = type == rayTypeShadowBlock || type == rayTypeShadowSky || type == rayTypeLightingBlock || type == rayTypeLightingEmitter;
+	
+	const vec3 startP = playerRelativePosition - vec2(playerWidth/2.0, 0           ).xyx;
+	const vec3 endP   = playerRelativePosition + vec2(playerWidth/2.0, playerHeight).xyx;
+	
+	const IntersectionInfo i = isInters(ray, startBias);
+	
+	const Intersection playerIntersection = intersectCube(ray, startP, endP, vec3(1,0,0), vec3(0,1,0));
+	const bool isPlayer = (drawPlayer || iteration != 0) && playerIntersection.is;
+	const float playerTsq = dot(playerIntersection.at - ray.orig, playerIntersection.at - ray.orig);
+	const bool playerFrist = isPlayer && dot(i.coord - ray.orig, i.coord - ray.orig) > playerTsq;
+	
+	if(i.blockId != 0 && !playerFrist) { //block
+		const vec3 coord = i.coord;        
+		const vec3 localSpaceCoord = i.localSpaceCoord;
+		const ivec3 chunkPosition = ivec3(floor(coord / blocksInChunkDim));
+		const int intersectionChunkIndex = chunkAt(chunkPosition);
+		const int bias = i.bias;
+		const uint blockId = i.blockId;
+		
+		const bvec3 intersectionSideB = equal(localSpaceCoord * cubesInBlockDim, floor(localSpaceCoord * cubesInBlockDim));
+		const ivec3 intersectionSide = ivec3(intersectionSideB);
+		
+		const ivec3 side = intersectionSide * (bias >= 0 ? -1 : 1) * ivec3(sign(ray.dir));
+		const bool backside = dot(vec3(side), ray.dir) > 0;
+		const ivec3 normal = side * ( backside ? -1 : 1 );
+		
+		const vec2 uv = blockUv(localSpaceCoord, intersectionSide, dirSign);
+		
+		const vec2 atlasOffset = atlasAt(blockId, side);
+		
+		const float t = length(coord - ray.orig);
+		
+		float light = 1;
+		float ambient = 1;
+		
+		if(!shadow) {				
+			const ivec3 otherAxis1 = intersectionSideB.x ? ivec3(0,1,0) : ivec3(1,0,0);
+			const ivec3 otherAxis2 = intersectionSideB.z ? ivec3(0,1,0) : ivec3(0,0,1);
+			const ivec3 vertexCoord = ivec3(floor(coord * cubesInBlockDim)) - chunkPosition * cubesInChunkDim;
+			
+			ambient = 0;
+			if(!backside) {
+				#if 0
+				ambient = lightForChunkVertexDir(intersectionChunkIndex, chunkPosition, vertexCoord, normal);
+				#else
+				for(int i = 0 ; i < 4; i++) {
+					const ivec2 offset_ = ivec2(i%2, i/2);
+					const ivec3 offset = offset_.x * otherAxis1 + offset_.y * otherAxis2;
+					const ivec3 curVertexCoord = vertexCoord + offset;
+										
+					const float vertexLight = lightForChunkVertexDir(intersectionChunkIndex, chunkPosition, curVertexCoord, normal);
+					
+					const float diffX = abs(offset_.x - mod(dot(localSpaceCoord, otherAxis1)*2, 1));
+					const float diffY = abs(offset_.y - mod(dot(localSpaceCoord, otherAxis2)*2, 1));
+					ambient += mix(mix(vertexLight, 0, diffY), 0, diffX);
+				}
+				#endif
+			}
+			else ambient = 0.5;
+			
+			#if 0
+			ambient -= 0.7;
+			ambient *= 3;
+			#endif
+			
+			const ivec3 dirSignI = ivec3(sign(ray.dir));
+			const ivec3 positive_ = max(dirSignI, ivec3(0));
+			const ivec3 negative_ = max(-dirSignI, ivec3(0));
+			
+			light = max(
+				float(bias >= 0) * lightingAtCube(intersectionChunkIndex, chunkPosition, vertexCoord - negative_ * intersectionSide),
+				float(bias <= 0) * lightingAtCube(intersectionChunkIndex, chunkPosition, vertexCoord - positive_ * intersectionSide)
+			);
+		}
+		
+		if(blockId == 7) {	
+			const vec3 offset = vec3( 
+				sin(localSpaceCoord.x*9)/2, 
+				sin(localSpaceCoord.z*9)/8, 
+				sin(localSpaceCoord.y*6 + localSpaceCoord.x*4)/8
+			) / 100;
+			
+			const vec3 newBlockCoord = localSpaceCoord - offset;
+			
+			const vec2 newUV = blockUv(newBlockCoord, intersectionSide, dirSign);
+			const vec3 color_ = sampleAtlas(atlasOffset, clamp(newUV, 0.0001, 0.9999)) * mix(0.5, 1.0, ambient);
+			const vec3 color = fade(color_, t);
+
+			const vec3 incoming = normalize(ray.dir - offset * vec3(1-intersectionSide));
+			const vec3 normalDir = normalize(vec3(normal));
+			
+			const float n1 = backside ? 1.03 : 1;
+			const float n2 = backside ? 1 : 1.03;
+			const float r0 = pow((n1 - n2) / (n1 + n2), 2);
+			const vec3 refracted = refract(incoming, normalDir, n1 / n2);
+			const bool isRefracted = refracted != vec3(0);
+			
+			const bool isReflected = isRefracted ? !backside && iteration < 3 : true;
+			const float fresnel = r0 + (1 - r0) * pow(1 - abs(dot(incoming, normalDir)), 5);
+			
+			pushResult(Result( color, t, floatBitsToUint(fresnel), blockId, rayIndex, type, parent, last ));
+
+			if(isReflected && canPushParams()) {
+				const vec3 newDir = reflect(incoming, normalDir);
+				const int newBias = -bias;
+				
+				pushParams(Params( Ray(coord, newDir), newBias, 3u, type, curFrame, !pushed));
+				pushed = true;
+			}
+			
+			if(isRefracted && canPushParams()) {
+				const vec3 newDir = refracted;
+				const int newBias = bias + 1;
+				
+				pushParams(Params( Ray(coord, newDir), newBias, 4u, type, curFrame, !pushed));
+				pushed = true;
+			}	
+		}
+		else if(blockId == 8) {
+			const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
+			
+			const vec3 newBlockCoord = localSpaceCoord - offset;
+			const vec2 newUv = blockUv(newBlockCoord, intersectionSide, dirSign);
+			
+			const vec3 color_ = sampleAtlas(atlasOffset, newUv) * light * mix(0.3, 1.0, ambient);
+			const vec3 color = fade(color_, t);
+			
+			
+			pushResult(Result( color, t, 0u, blockId, rayIndex, type, parent, last));
+			if(canPushParams()) {
+				const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
+				const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
+			
+				pushParams(Params( Ray(coord, reflected), -bias, 0u, type, curFrame, !pushed));
+				pushed = true;
+			}
+		}
+		else {
+			const bool emitter = blockId == 13 || blockId == 14;
+			const ivec3 relativeToChunk = chunkPosition;
+			const vec3 color_ = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.3, 1.0, ambient));
+			const vec3 color = fade(color_, t);
+
+			pushResult(Result( color * (emitter ? 5 : 1), t, 0u, blockId, rayIndex, (emitter && type == rayTypeLightingBlock) ? rayTypeLightingEmitter : type, parent, last));
+			
+			if(blockId == 5 && iteration < 3) {
+				if(canPushParams()) {
+					pushParams(Params( Ray(coord, ray.dir), bias+1, 1u, type, curFrame, !pushed));
+					pushed = true;
+				}
+			}
+			if(!shadow && !emitter) {
+				const int shadowOffsetsCount = 4;
+				const float shadowOffsets[] = { -1, 0, 1, 0 };
+				
+				const int shadowSubdiv = 32;
+				const float shadowSmoothness = 32;
+				const int shadowsInChunkDim = blocksInChunkDim * shadowSubdiv;		
+				
+				const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*vec3(0.499, 0.5, 0.501) )/shadowSubdiv;
+				
+				const ivec3 shadowInChunkCoord = ivec3(floor(mod(coord * shadowSubdiv, vec3(shadowsInChunkDim))));
+				const int shadowInChunkIndex = 
+					  shadowInChunkCoord.x
+					+ shadowInChunkCoord.y * shadowsInChunkDim
+					+ shadowInChunkCoord.z * shadowsInChunkDim * shadowsInChunkDim; //should fit in 31 bit
+				const int rShadowInChunkIndex = mapInteger(shadowInChunkIndex) / 37;
+				const int dirIndex = int(uint(rShadowInChunkIndex) % 42);
+				
+				if(canPushParams()) { //shadow
+					const vec3 offset_ = vec3(
+						shadowOffsets[ int(mod(floor(coord.x * shadowSubdiv), shadowOffsetsCount)) ],
+						shadowOffsets[ int(mod(floor(coord.y * shadowSubdiv), shadowOffsetsCount)) ],
+						shadowOffsets[ int(mod(floor(coord.z * shadowSubdiv), shadowOffsetsCount)) ]
+					);
+					const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
+					const vec4 q = vec4(normalize(vec3(-1-sin(time/4)/10,3,2)), cos(time/4)/5);
+					const vec3 v = normalize(vec3(-1, 4, 2) + offset);
+					const vec3 temp = cross(q.xyz, v) + q.w * v;
+					const vec3 rotated = v + 2.0*cross(q.xyz, temp);
+					
+					const vec3 newDir = normalize(rotated);
+					const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
+					
+					pushParams(Params( Ray(position, newDir), newBias, 0u, rayTypeShadowBlock, curFrame, !pushed));
+					pushed = true;
+				}
+				
+				if(canPushParams()) {
+					const NE ne = neFromChunk(intersectionChunkIndex, dirIndex);
+					const bool emitters = ne.capacity != 0u && (ne.capacity == 1u ? dirIndex < 30 : true);
+					
+					if(emitters) {
+						//calculate random vector that hits the sphere inside emitter block//
+						
+						const vec3 relativeCoord = position - relativeToChunk * blocksInChunkDim;
+						const vec3 diff = ne.coord+0.4999 - relativeCoord;
+						const vec3 dir1 = normalize(diff);
+						
+						const float angularDiam = 2.0 * asin(1.0 / (0.001 + 2.0 * length(diff))); //angular diameter of a sphere with diameter of 1 block
+						
+						//https://math.stackexchange.com/a/211195
+						vec3 dir2 = vec3(dir1.z, dir1.z, -dir1.x - dir1.y);
+						if(abs(dot(dir2, dir2)) < 0.01) dir2 = vec3(-dir1.y-dir1.z,dir1.x,dir1.x);
+						dir2 = normalize(dir2);
+						const vec3 dir3 = cross(dir1, dir2);
+						
+						const vec2 random = vec2(rShadowInChunkIndex & 0xfff, int(uint(rShadowInChunkIndex) >> 12) & 0xfff) / 0xfff;
+						
+						const float twoPi = 6.28318530718;
+						const vec2 rotation = (vec2(cos(random.x * twoPi), sin(random.x * twoPi)) * angularDiam/2.0 * random.y)*0.99;/*
+							random point inside circle
+						*/
+						
+						const mat3 newDirMatrix = {
+							dir3, dir2, -dir1
+						}; //forward vector is (0, 0, -1)
+						
+						const vec3 newDir = newDirMatrix * vec3(cos(rotation.y) * sin(rotation.x), sin(rotation.y), -cos(rotation.y) * cos(rotation.x));
+						
+						const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
+						
+						if((abs(dot(newDir, newDir) - 1) < 0.01)) {
+							pushParams(Params( Ray(position, newDir), newBias, 0u, rayTypeLightingBlock, curFrame, !pushed));
+							pushed = true;
+						}
+					}
+				}
+			}
+		}
+	}
+	else if(isPlayer) { //player
+		pushResult(Result(vec3(1), sqrt(playerTsq), 0u, 1, rayIndex, type, parent, last));
+		if(!shadow && canPushParams()) {
+			const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
+			const vec3 v = normalize(vec3(-1, 4, 2));
+			const vec3 temp = cross(q.xyz, v) + q.w * v;
+			const vec3 rotated = v + 2.0*cross(q.xyz, temp);
+			
+			const vec3 newDir = normalize(rotated);
+			const Ray newRay = Ray( playerIntersection.at + playerIntersection.normal * 0.001, newDir );
+
+			pushParams(Params(newRay, 0, 0u, rayTypeShadowBlock, curFrame, !pushed));
+			pushed = true;
+		}
+	}
+	else { //sky
+		pushResult(Result(shadow ? vec3(2) : background(ray.dir), far, 0, 0u, rayIndex, type == rayTypeShadowBlock ? rayTypeShadowSky : type, parent, last));
+	}
+	
+	return RayResult(pushed);
 }
 
 vec3 trace(const Ray startRay) {	
 	if(!canPushParams()) return vec3(1,0,1);
-	pushParams(Params(startRay, 0, 0u, curResultPos()));
+	pushParams(Params(startRay, 0, 0u, rayTypeStandard, curResultPos(), true));
 	
+	int iteration = 0;
 	while(true) {
-		if(!canPopParams()) break;
-		const int curFrame = putResultPos;
-		
-		const Params p = popParams();
-		//if(!canPushResult()) ???; //this check is not needed because sizeof(Result) < sizeof(Params), so we would have space for at least 1 Result
-		const Ray ray = p.ray;
-		const vec3 dirSign = calcDirSign(ray.dir);
-		const uint type = p.type;
-		const int startBias = p.bias;
-		const int parent = p.parent;
-		
-		const bool shadow = type == 1 || type == 2;
-		
-		const vec3 startP = playerRelativePosition - vec2(playerWidth/2.0, 0           ).xyx;
-		const vec3 endP   = playerRelativePosition + vec2(playerWidth/2.0, playerHeight).xyx;
-		
-		const IntersectionInfo i = isInters(ray, startBias);
-		
-		const Intersection playerIntersection = intersectCube(ray, startP, endP, vec3(1,0,0), vec3(0,1,0));
-		const bool isPlayer = (drawPlayer || curFrame != 0) && playerIntersection.is;
-		const float playerTsq = dot(playerIntersection.at - ray.orig, playerIntersection.at - ray.orig);
-		const bool playerFrist = isPlayer && dot(i.coord - ray.orig, i.coord - ray.orig) > playerTsq;
-		
-		if(i.blockId != 0 && !playerFrist) { //block
-			const vec3 coord = i.coord;        
-			const vec3 localSpaceCoord = i.localSpaceCoord;
-			const ivec3 chunkPosition = ivec3(floor(coord / blocksInChunkDim));
-			const int intersectionChunkIndex = chunkAt(chunkPosition);
-			const int bias = i.bias;
-			const uint blockId = i.blockId;
-			
-			const bvec3 intersectionSideB = equal(localSpaceCoord * cubesInBlockDim, floor(localSpaceCoord * cubesInBlockDim));
-			const ivec3 intersectionSide = ivec3(intersectionSideB);
-			
-			const ivec3 side = intersectionSide * (bias > 0 ? 1 : -1) * ivec3(sign(ray.dir));
-			const bool backside = dot(vec3(side), ray.dir) > 0;
-			const ivec3 normal = side * ( backside ? -1 : 1 );
-			
-			const vec2 uv = blockUv(localSpaceCoord, intersectionSide, dirSign);
-			
-			const vec2 atlasOffset = atlasAt(blockId, side);
-			
-			const float t = length(coord - ray.orig);
-			
-			float light = 1;
-			float ambient = 1;
-			
-			if(!shadow) {				
-				const ivec3 otherAxis1 = intersectionSideB.x ? ivec3(0,1,0) : ivec3(1,0,0);
-				const ivec3 otherAxis2 = intersectionSideB.z ? ivec3(0,1,0) : ivec3(0,0,1);
-				const ivec3 vertexCoord = ivec3(floor(coord * cubesInBlockDim)) - chunkPosition * cubesInChunkDim;
-				
-				ambient = 0;
-				if(!backside) {
-					#if 0
-					ambient = lightForChunkVertexDir(intersectionChunkIndex, chunkPosition, vertexCoord, normal);
-					#else
-					for(int i = 0 ; i < 4; i++) {
-						const ivec2 offset_ = ivec2(i%2, i/2);
-						const ivec3 offset = offset_.x * otherAxis1 + offset_.y * otherAxis2;
-						const ivec3 curVertexCoord = vertexCoord + offset;
-											
-						const float vertexLight = lightForChunkVertexDir(intersectionChunkIndex, chunkPosition, curVertexCoord, normal);
-						
-						const float diffX = abs(offset_.x - mod(dot(localSpaceCoord, otherAxis1)*2, 1));
-						const float diffY = abs(offset_.y - mod(dot(localSpaceCoord, otherAxis2)*2, 1));
-						ambient += mix(mix(vertexLight, 0, diffY), 0, diffX);
-					}
-					#endif
-				}
-				else ambient = 0.5;
-				
-				#if 0
-				ambient -= 0.7;
-				ambient *= 3;
-				#endif
-				
-				const ivec3 dirSignI = ivec3(sign(ray.dir));
-				const ivec3 positive_ = max(dirSignI, ivec3(0));
-				const ivec3 negative_ = max(-dirSignI, ivec3(0));
-				
-				light = max(
-					float(bias >= 0) * lightingAtCube(intersectionChunkIndex, chunkPosition, vertexCoord - negative_ * intersectionSide),
-					float(bias <= 0) * lightingAtCube(intersectionChunkIndex, chunkPosition, vertexCoord - positive_ * intersectionSide)
-				);
-			}
-			
-			if(blockId == 7) {	
-				const vec3 offset = vec3( 
-					sin(localSpaceCoord.x*9)/2, 
-					sin(localSpaceCoord.z*9)/8, 
-					sin(localSpaceCoord.y*6 + localSpaceCoord.x*4)/8
-				) / 100;
-				
-				const vec3 newBlockCoord = localSpaceCoord - offset;
-				
-				const vec2 newUV = blockUv(newBlockCoord, intersectionSide, dirSign);
-				const vec3 color_ = sampleAtlas(atlasOffset, clamp(newUV, 0.0001, 0.9999)) * mix(0.5, 1.0, ambient);
-				const vec3 color = fade(color_, t);
-
-				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
-				if(canPushParams()) {
-					const vec3 incoming = ray.dir - offset * vec3(1-intersectionSide);
-				
-					const vec3 refracted_ = refract(normalize(incoming), normalize(normal), 1 );
-					const bool isRefracted = refracted_ != vec3(0);
-					const vec3 newDir = isRefracted ? refracted_ : reflect(incoming, normalize(vec3(side)));
-					const int newBias = isRefracted ? bias + 1 : -bias;
-				
-					pushParams(Params( Ray(coord, newDir), newBias, type, curFrame));
-				}
-				continue;
-			}
-			else if(blockId == 8) {
-				const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
-				
-				const vec3 newBlockCoord = localSpaceCoord - offset;
-				const vec2 newUv = blockUv(newBlockCoord, intersectionSide, dirSign);
-				
-				const vec3 color_ = sampleAtlas(atlasOffset, newUv) * light * mix(0.3, 1.0, ambient);
-				const vec3 color = fade(color_, t);
-				
-				
-				pushResult(Result( color, t, surfaceBlock(blockId), type, parent));
-				if(canPushParams()) {
-					const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
-					const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
-				
-					pushParams(Params( Ray(coord, reflected), -bias, type, curFrame));
-				}
-				continue;
-			}
-			else {
-				const bool emitter = blockId == 13 || blockId == 14;
-				const ivec3 relativeToChunk = chunkPosition;
-				const vec3 color_ = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.3, 1.0, ambient));
-				const vec3 color = fade(color_, t);
-
-				pushResult(Result( color * (emitter ? 2 : 1), t, surfaceBlock(blockId), type, parent));
-				
-				if(!shadow && !emitter) {
-					const int shadowOffsetsCount = 4;
-					const float shadowOffsets[] = { -1, 0, 1, 0 };
-					
-					const int shadowSubdiv = 32;
-					const float shadowSmoothness = 32;
-					const int shadowsInChunkDim = blocksInChunkDim * shadowSubdiv;		
-					
-					const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*vec3(0.499, 0.5, 0.501) )/shadowSubdiv;
-					
-					const ivec3 shadowInChunkCoord = ivec3(floor(mod(coord * shadowSubdiv, vec3(shadowsInChunkDim))));
-					const int shadowInChunkIndex = 
-						  shadowInChunkCoord.x
-						+ shadowInChunkCoord.y * shadowsInChunkDim
-						+ shadowInChunkCoord.z * shadowsInChunkDim * shadowsInChunkDim; //should fit in 31 bit
-					const int rShadowInChunkIndex = mapInteger(shadowInChunkIndex) / 37;
-					const int dirIndex = int(uint(rShadowInChunkIndex) % 42);
-					
-					if(canPushParams()) { //shadow
-						const vec3 offset_ = vec3(
-							shadowOffsets[ int(mod(floor(coord.x * shadowSubdiv), shadowOffsetsCount)) ],
-							shadowOffsets[ int(mod(floor(coord.y * shadowSubdiv), shadowOffsetsCount)) ],
-							shadowOffsets[ int(mod(floor(coord.z * shadowSubdiv), shadowOffsetsCount)) ]
-						);
-						const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
-						const vec4 q = vec4(normalize(vec3(-1-sin(time/4)/10,3,2)), cos(time/4)/5);
-						const vec3 v = normalize(vec3(-1, 4, 2) + offset);
-						const vec3 temp = cross(q.xyz, v) + q.w * v;
-						const vec3 rotated = v + 2.0*cross(q.xyz, temp);
-						
-						const vec3 newDir = normalize(rotated);
-						const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
-						
-						pushParams(Params( Ray(position, newDir), newBias, 1u, curFrame));
-					}
-					
-					if(canPushParams()) {
-						const NE ne = neFromChunk(intersectionChunkIndex, dirIndex);
-						const bool emitters = ne.capacity != 0u && (ne.capacity == 1u ? dirIndex < 30 : true);
-						
-						if(emitters) {
-							//calculate random vector that hits the sphere inside emitter block//
-							
-							const vec3 relativeCoord = position - relativeToChunk * blocksInChunkDim;
-							const vec3 diff = ne.coord+0.4999 - relativeCoord;
-							const vec3 dir1 = normalize(diff);
-							
-							const float angularDiam = 2.0 * asin(1.0 / (0.001 + 2.0 * length(diff))); //angular diameter of a sphere with diameter of 1 block
-							
-							//https://math.stackexchange.com/a/211195
-							vec3 dir2 = vec3(dir1.z, dir1.z, -dir1.x - dir1.y);
-							if(abs(dot(dir2, dir2)) < 0.01) dir2 = vec3(-dir1.y-dir1.z,dir1.x,dir1.x);
-							dir2 = normalize(dir2);
-							const vec3 dir3 = cross(dir1, dir2);
-							
-							const vec2 random = vec2(rShadowInChunkIndex & 0xfff, int(uint(rShadowInChunkIndex) >> 12) & 0xfff) / 0xfff;
-							
-							const float twoPi = 6.28318530718;
-							const vec2 rotation = (vec2(cos(random.x * twoPi), sin(random.x * twoPi)) * angularDiam/2.0 * random.y)*0.99;/*
-								random point inside circle
-							*/
-							
-							const mat3 newDirMatrix = {
-								dir3, dir2, -dir1
-							}; //forward vector is (0, 0, -1)
-							
-							const vec3 newDir = newDirMatrix * vec3(cos(rotation.y) * sin(rotation.x), sin(rotation.y), -cos(rotation.y) * cos(rotation.x));
-							
-							const int newBias = bias * int(sign(dot(ray.dir*newDir, intersectionSide)));
-							
-							if((abs(dot(newDir, newDir) - 1) < 0.01)) {
-								pushParams(Params( Ray(position, newDir), newBias, 2u, curFrame));
-							}
-						}
-					}
-				}
-				
-				continue;
-			}
+		const bool lastRay = !canPopParams();
+		if(!lastRay) {
+			const RayResult result = traceStep(iteration);
+			iteration++;
+			if(result.pushedRays) continue;
 		}
-		else if(isPlayer) { //player
-			pushResult(Result( vec3(1), sqrt(playerTsq), surfaceEntity(1), type, parent));
-			if(!shadow && canPushParams()) {
-				const vec4 q = vec4(normalize(vec3(1+sin(time/4)/10,3,2)), cos(time/4)/5);
-				const vec3 v = normalize(vec3(-1, 4, 2));
-				const vec3 temp = cross(q.xyz, v) + q.w * v;
-				const vec3 rotated = v + 2.0*cross(q.xyz, temp);
-				
-				const vec3 newDir = normalize(rotated);
-				const Ray newRay = Ray( playerIntersection.at + playerIntersection.normal * 0.001, newDir );
 
-				pushParams(Params( newRay, 0, 1, curFrame));
-			}
-			continue;
+		bool stop = false;
+		int curFrame = curResultPos();
+		for(;curFrame >= 0;) {
+			const Result currentResult = readResult(curFrame);
+			const bool last = currentResult.last;
+			const int currentParent = currentResult.parent;
+			if(currentParent < 0) { stop = true; break; }
+			if(!last && !lastRay) break;
+
+			combineSteps(currentParent, curFrame);
+			curFrame = currentParent;
 		}
-		else { //sky
-			pushResult(Result( shadow ? vec3(1) : background(ray.dir), far, noSurface(), type, parent));
-			continue;
-		}
+		setCurResultPos(curFrame);
+		if(stop) break;
 	}
 		
 	if(curResultPos() < 0) return vec3(1, 0, 1);
 	
-	for(int curFrame = curResultPos(); curFrame >= 0; curFrame--) {
-		const Result currentResult = readResult(curFrame);
-		const int currentParent = currentResult.parent;
-		if(currentParent < 0) break;
-		
-		const Result outerResult = readResult(currentParent);
-
-		const Result res = combineSteps(outerResult, currentResult);
-		writeResult(res, currentParent);
-	}	
-
 	return readResult(0).color;
 }
 
@@ -1262,8 +1402,8 @@ vec3 colorMapping(const vec3 col) {
 	const vec3 c = rgb2hsv(col);
 	return hsv2rgb(vec3(
 		c.x,
-		(c.y+0.03) / pow(c.z+1.0, 1.0 / 10),
-		pow(log(c.z + 1.0) / log(bw + 2.35), 1.2)
+		(c.y+0.03) / pow(c.z+1.0, 1.0 / 25),
+		pow(log(c.z + 1.0) / log(bw + 7.8), 1.25)
 	));
 }
 
