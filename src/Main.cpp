@@ -2720,7 +2720,8 @@ int main(void) {
     auto const completionTime = std::chrono::steady_clock::now();
 	std::cout << "Time to start (ms): " << ( double(std::chrono::duration_cast<std::chrono::microseconds>(completionTime - startupTime).count()) / 1000.0 ) << '\n';
 	
-	Counter<150> mc{};	
+	Counter<150> mc{};
+	Counter<150> timeToTrace{};
 	bool firstFrame = true;
     while (!glfwWindowShouldClose(window)) {
 		auto startFrame = std::chrono::steady_clock::now();
@@ -2852,7 +2853,14 @@ int main(void) {
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, gpuChunksCount * sizeof(chunk::Chunks::index_t), &indices[0]);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 
+			if(numpad[3]) glFinish();
+			auto const startTraceTime{ std::chrono::steady_clock::now() };
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+			if(numpad[3]) glFinish();
+			auto const endTraceTime{ std::chrono::steady_clock::now() };
+			
+			auto const diffMs{ std::chrono::duration_cast<std::chrono::microseconds>(endTraceTime - startTraceTime).count() / 1000.0 };
+			timeToTrace.add(diffMs);
 		}
 
 		{
@@ -2878,24 +2886,10 @@ int main(void) {
 		{
 			glUseProgram(currentBlockProgram);
 			glUniform1ui(cb_blockIndex_u, blockPlaceId);
-			  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		}
 		
 		glDisable(GL_FRAMEBUFFER_SRGB); 
-		
-		/*{
-			glUseProgram(testProgram);
-			glUniformMatrix4fv(tt_toLocal_u, 1, GL_TRUE, &toLoc4[0][0]);
-			
-			glBindBuffer(GL_ARRAY_BUFFER, testVB);
-			glBufferData(GL_ARRAY_BUFFER, size * 2*sizeof(vec3f), &[0], GL_DYNAMIC_DRAW);
-			glBindBuffer(GL_ARRAY_BUFFER, 0);
-			
-			glPointSize(10);
-			glBindVertexArray(testVA);
-			glDrawArrays(GL_POINTS, 0, relativePositions.size());
-			glBindVertexArray(0);
-		}*/
 
 		{ //font
 			glEnable(GL_BLEND);
@@ -2935,6 +2929,14 @@ int main(void) {
 				ss.precision(4);
 				ss << "camera in: chunk=" << currentCoord().valAs<pos::Chunk>() << " inside chunk=" << pos::fracToPos(currentCoord().valIn<pos::Chunk>()) << '\n';
 				ss << "camera forward=" << forwardDir << '\n';
+				ss << "frame time=" << (mc.mean() / 1000.0) << "ms\n";
+				if(numpad[3]) {
+					ss << "trace time=" << timeToTrace.mean() << "ms\n";
+				}
+				else {
+					ss << "press numpad 3 to see time to render the world\n";
+					ss << "(this may affect the performance)\n";
+				}
 			}
 			ss.precision(1);
 			ss << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";

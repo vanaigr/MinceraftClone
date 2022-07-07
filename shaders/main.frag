@@ -404,57 +404,6 @@ void swap(inout float v1, inout float v2) {
     v2 = t;
 }
 
-/*struct Surface {
-	uint data;
-};
-
-uint surfaceType(const Surface s) {
-	return s.data & ~(1u << 31);
-}
-
-bool isSurfaceBlock(const Surface s) {
-	return (s.data >> 31) == 0;
-}
-
-bool isSurfaceEntity(const Surface s) {
-	return (s.data >> 31) != 0;
-}
-
-bool isNoSurface(const Surface s) {
-	return surfaceType(s) == 0;
-}
-
-Surface noSurface() {
-	return Surface(0);
-}
-
-Surface surfaceBlock(const uint type) {
-	return Surface(type);
-}
-
-Surface surfaceEntity(const uint type) {
-	return Surface(type | (1u << 31));
-}*/
-
-#if 0
-//https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
-vec3 reflect(const vec3 incoming, const vec3 normal)  { 
-    return incoming - 2 * dot(incoming, normal) * normal; 
-} 
-
-//https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
-vec3 refract2(const vec3 incoming, const vec3 normal, const float ior)  { 
-    float cosi = clamp(-1, 1, dot(incoming, normal));
-    float etai = 1, etat = ior; 
-    vec3 n = normal; 
-    if (cosi < 0) { cosi = -cosi; } else { float tmp = etai; etai = etat; etat = tmp; n= -normal; } 
-    const float eta = etai / etat; 
-    const float k = 1 - eta * eta * (1 - cosi * cosi); 
-    return k < 0 ? reflect(incoming, normal) : eta * incoming + (eta * cosi - sqrt(k)) * n; 
-}
-
-#endif
-
 vec3 screenMultipty(const vec3 v1, const vec3 v2) {
 	return 1 - (1-v1) * (1-v2);
 }
@@ -628,7 +577,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 	const vec3 stepLength = 1 / abs(dir);
 	
 	Cubes fromBlock;
-	int curChunkIndex = chunkAt(blockChunk(ivec3(ray.orig)));
+	int curChunkIndex = chunkAt(blockChunk(ivec3(floor(ray.orig))));
 	int bias = startBias;
 	vec3 curCoord = ray.orig;
 	ivec3 relativeToChunk = ivec3(floor(curCoord / blocksInChunkDim));//relativeToChunk_;
@@ -974,7 +923,6 @@ vec3 fade(const vec3 color, const float depth) {
 	return mix(vec3(bw), color, inversesqrt(depth / 500 + 1));
 }
 
-
 int mapInteger(int value) {//based on https://stackoverflow.com/a/24771093/18704284
     value *= 1664525;
     value += 101390223;
@@ -992,7 +940,7 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 	if(childrenCount <= 0) return;
 	
 	const Result current = readResult(currentIndex);
-	Result result = current;//Result(vec3(0), current.depth, current.surface, current.type, current.parent, current.last);
+	Result result = current;
 	result.color = vec3(0);
 	
 	const bool isShadow = current.rayType == rayTypeShadowBlock;
@@ -1002,8 +950,6 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 	if(surfaceId == 7) {
 		const float fresnel = uintBitsToFloat(current.data);
 		const bool both = childrenCount == 2;
-		
-		//if(childrenCount > 2) discard;
 		
 		for(int i = 0; i < childrenCount; i++) {
 			const Result inner = readResult(currentIndex + i+1);
@@ -1264,7 +1210,7 @@ RayResult traceStep(const int iteration) {
 				const int shadowOffsetsCount = 4;
 				const float shadowOffsets[] = { -1, 0, 1, 0 };
 				
-				const int shadowSubdiv = 32;
+				const int shadowSubdiv = 16;
 				const float shadowSmoothness = 32;
 				const int shadowsInChunkDim = blocksInChunkDim * shadowSubdiv;		
 				
@@ -1280,9 +1226,9 @@ RayResult traceStep(const int iteration) {
 				
 				if(canPushParams()) { //shadow
 					const vec3 offset_ = vec3(
-						shadowOffsets[ int(mod(floor(coord.x * shadowSubdiv), shadowOffsetsCount)) ],
-						shadowOffsets[ int(mod(floor(coord.y * shadowSubdiv), shadowOffsetsCount)) ],
-						shadowOffsets[ int(mod(floor(coord.z * shadowSubdiv), shadowOffsetsCount)) ]
+						shadowOffsets[ uint(rShadowInChunkIndex) % shadowOffsetsCount ],
+						shadowOffsets[ uint(rShadowInChunkIndex/8) % shadowOffsetsCount ],
+						shadowOffsets[ uint(rShadowInChunkIndex/32) % shadowOffsetsCount ]
 					);
 					const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
 					const vec4 q = vec4(normalize(vec3(-1-sin(time/4)/10,3,2)), cos(time/4)/5);
@@ -1392,7 +1338,7 @@ vec3 trace(const Ray startRay) {
 	}
 		
 	if(curResultPos() < 0) return vec3(1, 0, 1);
-	
+
 	return readResult(0).color;
 }
 
