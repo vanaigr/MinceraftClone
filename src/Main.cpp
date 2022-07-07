@@ -25,6 +25,7 @@
 #include"Misc.h"
 #include"PerlinNoise.h"
 #include"Counter.h"
+#include"SaveBMP.h"
 
 #include <string.h>
 #include <math.h>
@@ -170,6 +171,107 @@ static BlockAction blockAction{ BlockAction::NONE };
 static double const blockActionCD{ 300.0 / 1000.0 };
 static bool breakFullBlock{ false };
 
+static const Font font{ "./assets/font.txt" };
+
+enum Textures : GLuint {
+	atlas_it = 0,
+	font_it,
+	noise_it,
+	screenshotColor_it,
+	
+	texturesCount
+};
+static GLuint textures[texturesCount];
+static GLuint const		&atlas_t           = textures[atlas_it], 
+						&font_t            = textures[font_it], 
+						&noise_t           = textures[noise_it],
+						&screenshotColor_t = textures[screenshotColor_it];
+
+
+enum SSBOs : GLuint {
+	chunksIndices_b = 0,
+	chunksBlocks_b,
+	chunksLiquid_b,
+	chunksMesh_b,
+	chunksBounds_b,
+	chunksAO_b,
+	chunksLighting_b,
+	chunksEmittersGPU_b,
+	atlasDescription_b,
+	
+	ssbosCount
+};
+
+static GLuint ssbos[ssbosCount];
+static GLuint const	
+	&chunksIndices_ssbo       = ssbos[chunksIndices_b],
+	&chunksBlocks_ssbo        = ssbos[chunksBlocks_b], 
+	&chunksLiquid_ssbo        = ssbos[chunksLiquid_b],	
+	&chunksMesh_ssbo          = ssbos[chunksMesh_b],
+	&chunksBounds_ssbo        = ssbos[chunksBounds_b], 
+	&chunksAO_ssbo            = ssbos[chunksAO_b],
+	&chunksLighting_ssbo      = ssbos[chunksLighting_b],
+	&chunksEmittersGPU_ssbo   = ssbos[chunksEmittersGPU_b],
+	&atlasDescription_ssbo    = ssbos[atlasDescription_b];
+
+static GLuint mainProgram = 0;
+  static GLuint windowSize_u;
+  static GLuint rightDir_u;
+  static GLuint topDir_u;
+  static GLuint near_u, far_u;
+  static GLuint playerRelativePosition_u, drawPlayer_u;
+  static GLuint startChunkIndex_u;
+  static GLuint time_u;
+  static GLuint projection_u, toLocal_matrix_u;
+  static GLuint startCoord_u;
+  //static GLuint playerChunk_u, playerInChunk_u;
+
+static GLuint fontProgram;
+
+static GLuint testProgram;
+	static GLuint tt_projection_u, tt_toLocal_u;
+	
+static GLuint currentBlockProgram;
+  static GLuint cb_blockIndex_u;
+
+static GLuint blockHitbox_p;
+  static GLuint blockHitboxProjection_u, blockHitboxModelMatrix_u;
+
+static GLuint screenshot_fb;
+static vec2i screenshotSize{ windowSize };
+bool takeScreenshot;
+
+chunk::Chunks chunks{};
+
+static bool checkChunkInView(vec3i const coord) {
+	return coord.clamp(-viewDistance, +viewDistance) == coord;
+}
+
+struct GPUChunksIndex {
+	chunk::Chunks::index_t lastIndex;
+	std::vector<chunk::Chunks::index_t> vacant;
+	
+	chunk::Chunks::index_t reserve() {
+		if(vacant.empty()) return ++lastIndex; //never 0
+		else {
+			auto const index{ vacant.back() };
+			vacant.pop_back();
+			return index;
+		}
+	}
+	
+	void recycle(chunk::Chunks::index_t const index) {
+		if(index == 0) return;
+		assert(std::find(vacant.begin(), vacant.end(), index) == vacant.end());
+		assert(index > 0);
+		vacant.push_back(index);
+	}
+	
+	void reset() { // = GPUChunksIndex{}, but vector keeps its capacity
+		lastIndex = 0;
+		vacant.clear();
+	}
+} static gpuChunksIndex{}; 
 
 enum class Key : uint8_t { RELEASE = GLFW_RELEASE, PRESS = GLFW_PRESS, REPEAT = GLFW_REPEAT, NOT_PRESSED };
 static_assert(GLFW_RELEASE >= 0 && GLFW_RELEASE < 256 && GLFW_PRESS >= 0 && GLFW_PRESS < 256 && GLFW_REPEAT >= 0 && GLFW_REPEAT < 256);
@@ -229,7 +331,7 @@ void handleKey(int const key) {
 	if(key == GLFW_KEY_F5 && action == GLFW_PRESS)
 		reloadShaders();
 	else if(key == GLFW_KEY_F4 && action == GLFW_PRESS)
-		debug = !debug;
+		takeScreenshot = true;
 	else if(key == GLFW_KEY_F3 && action == GLFW_RELEASE) { 
 		if(!isSpectator) {
 			spectatorCoord = currentCameraPos();
@@ -297,102 +399,6 @@ static int blockPlaceId = 1;
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
 	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 14);
 }
-
-
-static const Font font{ "./assets/font.txt" };
-
-
-enum Textures : GLuint {
-	atlas_it = 0,
-	font_it,
-	noise_it,
-	
-	texturesCount
-};
-static GLuint textures[texturesCount];
-static GLuint const		&atlas_t = textures[atlas_it], 
-						&font_t  = textures[font_it], 
-						&noise_t = textures[noise_it];
-
-enum SSBOs : GLuint {
-	chunksIndices_b = 0,
-	chunksBlocks_b,
-	chunksLiquid_b,
-	chunksMesh_b,
-	chunksBounds_b,
-	chunksAO_b,
-	chunksLighting_b,
-	chunksEmittersGPU_b,
-	atlasDescription_b,
-	
-	ssbosCount
-};
-
-static GLuint ssbos[ssbosCount];
-static GLuint const	
-	&chunksIndices_ssbo       = ssbos[chunksIndices_b],
-	&chunksBlocks_ssbo        = ssbos[chunksBlocks_b], 
-	&chunksLiquid_ssbo        = ssbos[chunksLiquid_b],	
-	&chunksMesh_ssbo          = ssbos[chunksMesh_b],
-	&chunksBounds_ssbo        = ssbos[chunksBounds_b], 
-	&chunksAO_ssbo            = ssbos[chunksAO_b],
-	&chunksLighting_ssbo      = ssbos[chunksLighting_b],
-	&chunksEmittersGPU_ssbo   = ssbos[chunksEmittersGPU_b],
-	&atlasDescription_ssbo    = ssbos[atlasDescription_b];
-
-static GLuint mainProgram = 0;
-  static GLuint rightDir_u;
-  static GLuint topDir_u;
-  static GLuint near_u, far_u;
-  static GLuint playerRelativePosition_u, drawPlayer_u;
-  static GLuint startChunkIndex_u;
-  static GLuint time_u;
-  static GLuint projection_u, toLocal_matrix_u;
-  static GLuint startCoord_u;
-  //static GLuint playerChunk_u, playerInChunk_u;
-
-static GLuint fontProgram;
-
-static GLuint testProgram;
-	static GLuint tt_projection_u, tt_toLocal_u;
-	
-static GLuint currentBlockProgram;
-  static GLuint cb_blockIndex_u;
-
-static GLuint blockHitbox_p;
-  static GLuint blockHitboxProjection_u, blockHitboxModelMatrix_u;
-
-chunk::Chunks chunks{};
-
-static bool checkChunkInView(vec3i const coord) {
-	return coord.clamp(-viewDistance, +viewDistance) == coord;
-}
-
-struct GPUChunksIndex {
-	chunk::Chunks::index_t lastIndex;
-	std::vector<chunk::Chunks::index_t> vacant;
-	
-	chunk::Chunks::index_t reserve() {
-		if(vacant.empty()) return ++lastIndex; //never 0
-		else {
-			auto const index{ vacant.back() };
-			vacant.pop_back();
-			return index;
-		}
-	}
-	
-	void recycle(chunk::Chunks::index_t const index) {
-		if(index == 0) return;
-		assert(std::find(vacant.begin(), vacant.end(), index) == vacant.end());
-		assert(index > 0);
-		vacant.push_back(index);
-	}
-	
-	void reset() { // = GPUChunksIndex{}, but vector keeps its capacity
-		lastIndex = 0;
-		vacant.clear();
-	}
-} static gpuChunksIndex{}; 
 
 void gpuBuffersReseted() {
 	auto const renderDiameter{ viewDistance*2+1 };
@@ -515,6 +521,7 @@ static void reloadShaders() {
 			cfg.mouseSensitivity = mouseSensitivity;
 			cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
 			cfg.lockFramerate = lockFramerate;
+			cfg.screenshotSize = screenshotSize;
 			
 		parseConfigFromFile(cfg);
 		
@@ -526,7 +533,11 @@ static void reloadShaders() {
 		playerCamera = desiredPlayerCamera;
 		chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
 		lockFramerate = cfg.lockFramerate;
+		screenshotSize = cfg.screenshotSize;
 	}
+	
+	glDeleteTextures(texturesCount, &textures[0]);
+	glGenTextures   (texturesCount, &textures[0]);
 	
 	/*{
 		//color
@@ -561,8 +572,27 @@ static void reloadShaders() {
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}*/
 	
-	glDeleteTextures(texturesCount, &textures[0]);
-	glGenTextures   (texturesCount, &textures[0]);
+	{ //screenshot framebuffer
+		glActiveTexture(GL_TEXTURE0 + screenshotColor_it);
+		glBindTexture(GL_TEXTURE_2D, screenshotColor_t);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, screenshotSize.x, screenshotSize.y, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+		  
+		glDeleteFramebuffers(1, &screenshot_fb);
+		glGenFramebuffers(1, &screenshot_fb);
+		glBindFramebuffer(GL_FRAMEBUFFER, screenshot_fb);
+		  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, screenshotColor_t, 0);
+		  
+		  GLenum status;
+		  if ((status = glCheckFramebufferStatus(GL_FRAMEBUFFER)) != GL_FRAMEBUFFER_COMPLETE) {
+		  	fprintf(stderr, "screenshot framebuffer: error %u", status);
+		  }
+		
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
 	
 	{
 		glDeleteBuffers(ssbosCount, &ssbos[0]);
@@ -627,7 +657,8 @@ static void reloadShaders() {
 	
 		glUseProgram(mainProgram);
 		
-		glUniform2ui(glGetUniformLocation(mainProgram, "windowSize"), windowSize.x, windowSize.y);
+		windowSize_u = glGetUniformLocation(mainProgram, "windowSize");
+		glUniform2ui(windowSize_u, windowSize.x, windowSize.y);
 		
 		glUniform1f(glGetUniformLocation(mainProgram, "playerWidth" ), playerWidth );
 		glUniform1f(glGetUniformLocation(mainProgram, "playerHeight"), playerHeight);
@@ -2798,9 +2829,6 @@ int main(void) {
 		}
 		auto const startCoord{ pos::fracToPos(cameraCoord - lastCameraChunkCoord + pChunk{viewDistance}) };
 		
-		
-		//glUniform3i(playerChunk_u, cameraChunk.x, cameraChunk.y, cameraChunk.z);
-		//glUniform3f(playerInChunk_u, cameraPosInChunk.x, cameraPosInChunk.y, cameraPosInChunk.z);
 		glUniform3f(startCoord_u, startCoord.x, startCoord.y, startCoord.z);
 		
 		{			
@@ -2858,6 +2886,28 @@ int main(void) {
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 			if(numpad[3]) glFinish();
 			auto const endTraceTime{ std::chrono::steady_clock::now() };
+			
+			if(takeScreenshot) {
+				takeScreenshot = false;
+				
+				glBindFramebuffer(GL_FRAMEBUFFER, screenshot_fb);
+				glUniform2ui(windowSize_u, screenshotSize.x, screenshotSize.y);
+				glViewport(0, 0, screenshotSize.x, screenshotSize.y);
+				
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+				glFinish();
+				
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+				glUniform2ui(windowSize_u, windowSize.x, windowSize.y);
+				glViewport(0, 0, windowSize.x, windowSize.y);
+				
+				std::unique_ptr<uint8_t[]> data{ new uint8_t[3 * screenshotSize.x * screenshotSize.y] };
+				
+				glActiveTexture(GL_TEXTURE0 + screenshotColor_it);
+				glGetTexImage(GL_TEXTURE_2D, 0, GL_BGR, GL_UNSIGNED_BYTE, data.get());
+				
+				generateBitmapImage(data.get(), screenshotSize.y, screenshotSize.x, "screenshot.bmp");
+			}
 			
 			auto const diffMs{ std::chrono::duration_cast<std::chrono::microseconds>(endTraceTime - startTraceTime).count() / 1000.0 };
 			timeToTrace.add(diffMs);

@@ -21,9 +21,11 @@ enum class CF {
 	mouseSensitivityX,
 	mouseSensitivityY,
 	chunkUpdatesPerFrame,
-	lockFramerate
+	lockFramerate,
+	screenshotWidth,
+	screenshotHeight,
 };
-static constexpr int fieldCount = 8;
+static constexpr int fieldCount = 10;
 
 //Config field names
 static constexpr char const *CFN[] = {
@@ -34,7 +36,9 @@ static constexpr char const *CFN[] = {
 	"mouseSensitivity_x",
 	"mouseSensitivity_y",
 	"chunkUpdatesPerFrame",
-	"lockFramerate"
+	"lockFramerate",
+	"screenshotWidth",
+	"screenshotHeight"
 };
 
 //Config field types
@@ -46,7 +50,9 @@ static constexpr FT CFT[] = {
 	FT::REAL,
 	FT::REAL,
 	FT::INT ,
-	FT::BOOL
+	FT::BOOL,
+	FT::REAL,
+	FT::REAL
 };
 
 
@@ -129,6 +135,8 @@ void parseConfigFromFile(Config &dst) {
 				break; case CF::mouseSensitivityY    : dst.mouseSensitivity.y   = result(CF::mouseSensitivityY);
 				break; case CF::chunkUpdatesPerFrame : dst.chunkUpdatesPerFrame = result(CF::chunkUpdatesPerFrame);
 				break; case CF::lockFramerate        : dst.lockFramerate        = result(CF::lockFramerate);
+				break; case CF::screenshotWidth      : dst.screenshotSize.x     = result(CF::screenshotWidth);
+				break; case CF::screenshotHeight     : dst.screenshotSize.y     = result(CF::screenshotHeight);
 			}
 			#undef result
 		}
