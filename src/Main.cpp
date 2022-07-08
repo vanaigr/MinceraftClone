@@ -17,6 +17,7 @@
 #include"AO.h"
 #include"Area.h"
 #include"BlockProperties.h"
+#include"Liquid.h"
 
 #include"Config.h"
 #include"Font.h"
@@ -168,7 +169,7 @@ enum class BlockAction {
 	BREAK
 };
 static BlockAction blockAction{ BlockAction::NONE };
-static double const blockActionCD{ 300.0 / 1000.0 };
+static double const blockActionCD{ 40.0 / 1000.0 };
 static bool breakFullBlock{ false };
 
 static const Font font{ "./assets/font.txt" };
@@ -241,7 +242,9 @@ static GLuint screenshot_fb;
 static vec2i screenshotSize{ windowSize };
 bool takeScreenshot;
 
-chunk::Chunks chunks{};
+static chunk::Chunks chunks{};
+
+static ChunksLiquidCubes chunksLiquid{ chunks };
 
 static bool checkChunkInView(vec3i const coord) {
 	return coord.clamp(-viewDistance, +viewDistance) == coord;
@@ -397,7 +400,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 
 static int blockPlaceId = 1;
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 14);
+	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 15);
 }
 
 void gpuBuffersReseted() {
@@ -618,6 +621,7 @@ static void reloadShaders() {
 				c(15, 0), c(15, 0), c(15, 0), c(0, 1), //stone brick
 				c(16, 0), c(16, 0), c(16, 0), c(0, 1), //lamp 1
 				c(17, 0), c(17, 0), c(17, 0), c(0, 1), //lamp 2
+				c(18, 0), c(18, 0), c(18, 0), c(0, 1), //water
 			};
 			
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, atlasDescription_ssbo);
@@ -2356,6 +2360,14 @@ bool performBlockAction() {
 		pCube const first{ breakFullBlock ? blockInChunkPos.as<pCube>()             : cubeInChunkPos };
 		pCube const last { breakFullBlock ? blockInChunkPos + pBlock{1} - pCube{1}  : cubeInChunkPos };
 		
+		iterateArea(first.val()-1, last.val()+1, [&](pCube const neighbourCubeCoord) { //not a very effective method
+			auto const neighbourChunkIndex{ chunk::MovingChunk{chunk}.offseted(neighbourCubeCoord.valAs<pChunk>()).getIndex() };
+			if(!neighbourChunkIndex.is()) return;
+			auto neighbourInChunkCoord{ neighbourCubeCoord.in<pChunk>() };
+			
+			chunksLiquid.add({neighbourChunkIndex.get(), chunk::cubeCoordToIndex(neighbourInChunkCoord)});
+		});
+		
 		if(breakFullBlock) {
 			block = chunk::Block::emptyBlock();
 			
@@ -2442,6 +2454,7 @@ bool performBlockAction() {
 		auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{startChunk}.moveToNeighbour(cubePosInStartChunk.valAs<pChunk>()) };
 		if(!chunkIndex.is()) return false;
 		auto chunk{ chunks[chunkIndex.get()] };
+		auto &liquid{ chunk.liquid() };
 		
 		pChunk const chunkPos{ chunk.position() };
 		
@@ -2452,58 +2465,73 @@ bool performBlockAction() {
 		pCube const first{ blockInChunkPos                        };
 		pCube const last { blockInChunkPos + pBlock{1} - pCube{1} };
 		
-		auto &block{ chunk.data()[blockInChunkCoord] };
-			
-		if(checkCanPlaceBlock(chunkPos + blockInChunkPos) && block.id() == 0) {
-			block = chunk::Block::fullBlock(blockPlaceId);
-			
-			auto const blockId{ block.id() };
-			auto const emitter{ isBlockEmitter(blockId) };
-			
-			chunk.modified() = true;
-			
-			auto &aabb{ chunk.aabb() };
-			vec3i start{ aabb.start() };
-			vec3i end  { aabb.end  () };
-			
-			start = start.min(blockInChunkCoord);
-			end   = end  .max(blockInChunkCoord);
-		
-			aabb = chunk::AABB(start, end);
-			
-			SubtractLighting::inChunkCubes<SkyLightingConfig>(chunk, blockInChunkCoord*units::cubesInBlockDim, blockInChunkCoord*units::cubesInBlockDim + 1);
-			SubtractLighting::inChunkCubes<BlocksLightingConfig>(chunk, blockInChunkCoord*units::cubesInBlockDim, blockInChunkCoord*units::cubesInBlockDim + 1);						
-			if(emitter) {
-				for(int i{}; i < pos::cubesInBlockCount; i++) {
-					auto const curCubeCoord{ blockInChunkCoord * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
-					BlocksLightingConfig::getLight(chunk, curCubeCoord) = chunk::ChunkLighting::maxValue;		
-				}
-					
-				for(int i{}; i < pos::cubesInBlockCount; i++) {
-					auto const curCubeCoord{ blockInChunkCoord * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
-					AddLighting::fromCube<BlocksLightingConfig>(chunk, curCubeCoord);
-				}
+		if(blockPlaceId == 15) { //water
+			auto &block{ chunk.data()[blockInChunkCoord] };
+				
+			if(block.id() == 0) {
+				
+				liquid[cubeInChunkPos] = chunk::LiquidCube{ uint16_t(blockPlaceId), 255 };
+				chunksLiquid.add({chunk.chunkIndex(), chunk::cubeCoordToIndex(cubeInChunkPos)});
+				chunk.status().setBlocksUpdated(true);
 			}
-			
-			if(emitter) {
-				chunk.emitters().add(blockInChunkCoord);
-				setChunksUpdateNeighbouringEmitters(chunk);
-			}
-			updateAOandBlocksWithoutNeighbours(chunk, first, last);
-			
-			iterate3by3Volume([&](vec3i const dir, int const index) {
-				auto const chunkOffset{ (blockInChunkPos + pBlock{dir}).valAs<pChunk>() };
-				auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(chunkOffset) };
-				if(!chunkIndex.is()) return;
-				auto &chunkStatus{ chunks[chunkIndex.get()].status() };
-			
-				chunkStatus.setAOUpdated(true);
-				chunkStatus.setBlocksUpdated(true);
-			});
+			else return false;
 		}
 		else {
-			std::cout << "!\n";
-			return false;
+			auto &block{ chunk.data()[blockInChunkCoord] };
+				
+			if(checkCanPlaceBlock(chunkPos + blockInChunkPos) && block.id() == 0) {
+				block = chunk::Block::fullBlock(blockPlaceId);
+				
+				for(int i{}; i < pos::cubesInBlockCount; i++) {
+					auto const curCubeCoord{ blockInChunkPos + pCube{chunk::Block::cubeIndexPos(i)} };	
+					liquid[curCubeCoord] = chunk::LiquidCube{};
+				}
+				
+				auto const blockId{ block.id() };
+				auto const emitter{ isBlockEmitter(blockId) };
+				
+				chunk.modified() = true;
+				
+				auto &aabb{ chunk.aabb() };
+				vec3i start{ aabb.start() };
+				vec3i end  { aabb.end  () };
+				
+				start = start.min(blockInChunkCoord);
+				end   = end  .max(blockInChunkCoord);
+			
+				aabb = chunk::AABB(start, end);
+				
+				SubtractLighting::inChunkCubes<SkyLightingConfig>(chunk, blockInChunkCoord*units::cubesInBlockDim, blockInChunkCoord*units::cubesInBlockDim + 1);
+				SubtractLighting::inChunkCubes<BlocksLightingConfig>(chunk, blockInChunkCoord*units::cubesInBlockDim, blockInChunkCoord*units::cubesInBlockDim + 1);						
+				if(emitter) {
+					for(int i{}; i < pos::cubesInBlockCount; i++) {
+						auto const curCubeCoord{ blockInChunkCoord * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
+						BlocksLightingConfig::getLight(chunk, curCubeCoord) = chunk::ChunkLighting::maxValue;		
+					}
+						
+					for(int i{}; i < pos::cubesInBlockCount; i++) {
+						auto const curCubeCoord{ blockInChunkCoord * units::cubesInBlockDim + chunk::Block::cubeIndexPos(i) };
+						AddLighting::fromCube<BlocksLightingConfig>(chunk, curCubeCoord);
+					}
+				}
+				
+				if(emitter) {
+					chunk.emitters().add(blockInChunkCoord);
+					setChunksUpdateNeighbouringEmitters(chunk);
+				}
+				updateAOandBlocksWithoutNeighbours(chunk, first, last);
+				
+				iterate3by3Volume([&](vec3i const dir, int const index) {
+					auto const chunkOffset{ (blockInChunkPos + pBlock{dir}).valAs<pChunk>() };
+					auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(chunkOffset) };
+					if(!chunkIndex.is()) return;
+					auto &chunkStatus{ chunks[chunkIndex.get()].status() };
+				
+					chunkStatus.setAOUpdated(true);
+					chunkStatus.setBlocksUpdated(true);
+				});
+			}
+			else return false;
 		}
 	}
 	
@@ -2609,9 +2637,11 @@ static void update(chunk::Chunks &chunks) {
 	playerCamera.fov = misc::lerp( playerCamera.fov, desiredPlayerCamera.fov / curZoom, 0.1 );
 	
 	updateChunks(chunks);
+	chunksLiquid.update();
 	
 	auto const diff{ pos::fracToPos(playerCoord+playerCameraOffset - playerCamPos) };
 	playerCamPos = playerCamPos + pos::posToFrac(vec3lerp(vec3d{}, vec3d(diff), vec3d(0.4)));
+	
 }
 
 void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id, GLenum severity, 

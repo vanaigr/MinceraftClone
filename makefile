@@ -2,7 +2,7 @@ INCLUDES=-I .\dependencies\include
 SOURCE_DIR=src
 OBJECT_DIR=obj
 CPP_EXCLUDES=
-WS= -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-label
+WS= -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-label -Wno-unused-private-field
 CFLAGS= -O3 -std=c++17 -pedantic -c $(WS)
 PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU -D _CRT_SECURE_NO_WARNINGS
 

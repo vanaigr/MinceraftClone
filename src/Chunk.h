@@ -18,33 +18,9 @@ static constexpr int chunkColumnChunkYMin = -16;
 
 static constexpr int chunksCoumnChunksCount{ chunkColumnChunkYMax - chunkColumnChunkYMin + 1 };
 
-namespace chunk {
-	namespace {
-		template<typename V, typename Tag> struct Wrapper {
-			using value_type = V; 
-			using tag = Tag;
-		private:
-			value_type value_;
-		public:
-			constexpr Wrapper() = default;
-			
-			template<typename To> constexpr Wrapper(To);
-			template<typename To> constexpr operator To() const;
-			
-			constexpr Wrapper(value_type v) : value_{ v } {}
-			constexpr operator value_type() const { return value_; }
-			
-			constexpr value_type operator *() const { return value_; }
-			constexpr value_type value() const { return value_; }
-			constexpr value_type get() const { return value_; }
-		};
-		
-		struct BlockInChunk;
-		struct CubeInChunk;
-	}
-	
-	using BlockInChunkIndex = Wrapper<uint16_t, BlockInChunk>; static_assert( pos::cubed((uChunk{1}.as<uBlock>() - 1).val()) < (1 << 15) );
-	using CubeInChunkIndex  = Wrapper<uint16_t, CubeInChunk>; static_assert( pos::cubed((uChunk{1}.as<uCube >() - 1).val()) < (1 << 15) );
+namespace chunk {	
+	using BlockInChunkIndex = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uBlock>() - 1).val()) < (1 << 15) );
+	using CubeInChunkIndex  = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uCube >() - 1).val()) < (1 << 15) );
 	
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
@@ -62,53 +38,39 @@ namespace chunk {
 		return index >= 0 && index < pos::cubesInChunkCount;
 	}
   #pragma clang diagnostic pop
-	
-	template</*-_-*/> template<> constexpr BlockInChunkIndex::operator vec3i() const {
-		auto const index{ get() };
-		assert(checkBlockIndexInChunkValid(index));
-		return vec3i{ 
-			index % units::blocksInChunkDim, 
-			(index / units::blocksInChunkDim) % units::blocksInChunkDim, 
-			(index / units::blocksInChunkDim / units::blocksInChunkDim) 
-		};
-	}
-	template<> template<> constexpr BlockInChunkIndex::Wrapper(vec3i coord) : value_( [&]() -> auto {
-		assert(checkBlockCoordInChunkValid(coord));
-		return coord.x + coord.y*units::blocksInChunkDim + coord.z*units::blocksInChunkDim*units::blocksInChunkDim;
-	}() ) {}
-	
-	template<> template<> constexpr CubeInChunkIndex::operator vec3i() const {
-		auto const index{ get() };
-		assert(checkCubeIndexInChunkValid(index));
-		return vec3i{
-			index % units::cubesInChunkDim, 
-			(index / units::cubesInChunkDim) % units::cubesInChunkDim, 
-			(index / units::cubesInChunkDim / units::cubesInChunkDim) 
-		};
-	}
-	template<> template<> constexpr CubeInChunkIndex::Wrapper(vec3i coord) : value_( [&]() -> auto {
-		assert(checkCubeCoordInChunkValid(coord));
-		return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim; 
-	}() ) {}
 	  
 	//used in main.shader
 	  inline static constexpr int16_t blockIndex(vec3i const coord) {
-		  return static_cast<BlockInChunkIndex>(coord).get();
+		  assert(checkBlockCoordInChunkValid(coord));
+		  return coord.x + coord.y*units::blocksInChunkDim + coord.z*units::blocksInChunkDim*units::blocksInChunkDim;
 	  }
 	  inline static constexpr vec3i indexBlock(uint16_t index) {
-		  return //static_cast<vec3i>( //Visual Studio error c2440
-			  BlockInChunkIndex{ index }.operator vec3i();
-		  //);
+		  assert(checkBlockIndexInChunkValid(index));
+		  return vec3i{ 
+		 	 index % units::blocksInChunkDim, 
+		 	 (index / units::blocksInChunkDim) % units::blocksInChunkDim, 
+		 	 (index / units::blocksInChunkDim / units::blocksInChunkDim) 
+		  };
 	  }
 	  
 	  static vec3i cubeCoordInChunk(uint16_t const index) {
-		  return //static_cast<vec3i>(
-			  CubeInChunkIndex{ index }.operator vec3i();
-		  //);
+		  assert(checkCubeIndexInChunkValid(index));
+		  return vec3i{
+		  	  index % units::cubesInChunkDim, 
+		  	  (index / units::cubesInChunkDim) % units::cubesInChunkDim, 
+		  	  (index / units::cubesInChunkDim / units::cubesInChunkDim) 
+		  };
 	  }
 	  static uint32_t cubeIndexInChunk(vec3i const coord) {
-		  return static_cast<CubeInChunkIndex>(coord).get();
+		  assert(checkCubeCoordInChunkValid(coord));
+		  return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim;
 	  }
+	  
+	  inline constexpr BlockInChunkIndex blockIndexToCoord(pBlock const coord) { return blockIndex(coord.val()); }
+	  inline constexpr pBlock blockCoordToIndex(BlockInChunkIndex const index) { return pBlock{indexBlock(index)}; }
+	  
+	  inline constexpr CubeInChunkIndex cubeCoordToIndex(pCube const coord) { return cubeIndexInChunk(coord.val()); }
+	  inline constexpr pCube cubeIndexToCoord(CubeInChunkIndex const index) { return pCube{cubeCoordInChunk(index)}; }
 	
 	template<typename Chunks>
 	struct Chunk_{
@@ -274,6 +236,14 @@ namespace chunk {
 		
 		int32_t get() const { //return -1 if invalid
 			return int32_t(int64_t(n + 1) * -1); //-n - 1 is UB if n is integer min?
+		}
+		
+		bool operator==(OptionalChunkIndex const it) const {
+			return it.n == n;
+		}		
+		
+		bool operator!=(OptionalChunkIndex const it) const {
+			return it.n != n;
 		}
 	};
 	
@@ -443,12 +413,21 @@ namespace chunk {
 	
 	
 	struct LiquidCube {
+		using level_t = uint8_t;
+		static constexpr level_t maxLevel = std::numeric_limits<level_t>::max();
+		static constexpr level_t minLevel = std::numeric_limits<level_t>::lowest();
+		
 		uint16_t id;
-		uint8_t level;
+		level_t level;
 		uint8_t padding;
 		
 		LiquidCube() = default;
-		LiquidCube(uint16_t const id_, uint8_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }
+		LiquidCube(uint16_t const id_, level_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }	
+		LiquidCube(uint16_t const id_, int level_) //integer promotion
+		: id{id_}, level(level_) {  
+			assert(level_ >= minLevel && level <= maxLevel); 
+			if(level == 0) id = 0; 
+		} 
 		
 		bool isEmpty() const { return id == 0; }
 	};
@@ -456,9 +435,8 @@ namespace chunk {
 	
 	struct ChunkLiquid : CubesArray<LiquidCube> { using CubesArray::CubesArray; };
 	
-	
 	struct ChunkBlocksList {
-		using value_type = int16_t; static_assert(pos::blocksInChunkCount < (1 << 15));
+		using value_type = int16_t; static_assert(pos::blocksInChunkCount < std::numeric_limits<value_type>::max());
 	private:
 		std::vector<value_type> list;
 	public:
@@ -830,5 +808,20 @@ namespace chunk {
 			if(dir.z != 0) outChunk = outChunk.offsetedToImmediate(vec3i(0,0,dir.z));
 			return outChunk;
 		}		
+	};
+	
+	struct ChunkAndCube {
+		chunk::Chunks::index_t chunkIndex;
+		chunk::CubeInChunkIndex cubeIndex;
+		
+		constexpr bool operator==(ChunkAndCube const it) const  noexcept {
+			return chunkIndex == it.chunkIndex && cubeIndex == it.cubeIndex;
+		}	
+		
+		constexpr bool operator<(ChunkAndCube const it) const noexcept {
+			if(chunkIndex < it.chunkIndex) return true;
+			else if(chunkIndex > it.chunkIndex) return false;
+			else return cubeIndex < it.cubeIndex;
+		}
 	};
 }

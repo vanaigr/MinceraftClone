@@ -132,6 +132,20 @@ template<typename T> inline void iterate3by3Volume(T &&action) {
 	}
 }
 
+inline chunk::ChunkAndCube getNeighbourCube(
+	chunk::Chunk cubeChunk, pCube const cubeCoord,
+	vec3i const neighbourDir
+) {	
+	pCube const neighbourCubePos{ cubeCoord + pCube{neighbourDir} };
+	auto const neighbourCubeChunkCoord{ neighbourCubePos.valAs<pos::Chunk>() };
+	auto const neighbourCubeInChunkCoord{ neighbourCubePos.valIn<pos::Chunk>() };
+	
+	auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{cubeChunk}.offset(neighbourCubeChunkCoord).get() };
+	if(neighbourCubeChunkIndex == -1) return { -1, 0 };
+
+	return { neighbourCubeChunkIndex, chunk::cubeCoordToIndex(neighbourCubeInChunkCoord) };
+}
+
 template<typename Action>
 inline void iterateCubeNeighbours(
 	chunk::Chunk cubeChunk, vec3i const cubeCoord, 
@@ -142,15 +156,10 @@ inline void iterateCubeNeighbours(
 	
 	for(auto i{decltype(chunk::ChunkLighting::dirsCount){}}; i < chunk::ChunkLighting::dirsCount; i++) {
 		auto const neighbourDir{ chunk::ChunkLighting::indexAsDir(i) };
-		
-		auto const neighbourCubePos{ pos::Chunk{chunkCoord} + pos::Cube{cubeCoord + neighbourDir} };
-		auto const neighbourCubeChunkCoord{ neighbourCubePos.valAs<pos::Chunk>() };
-		auto const neighbourCubeInChunkCoord{ neighbourCubePos.as<pos::Cube>().valIn<pos::Chunk>() };
-		
-		auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{cubeChunk}.move(neighbourCubeChunkCoord).get() };
+		auto const [neighbourCubeChunkIndex, neighbourCubeInChunkIndex] = getNeighbourCube(cubeChunk, pCube{cubeCoord}, neighbourDir);
 		if(neighbourCubeChunkIndex == -1) continue;
 
-		action(neighbourDir, chunks[neighbourCubeChunkIndex], neighbourCubeInChunkCoord);
+		action(neighbourDir, chunks[neighbourCubeChunkIndex], chunk::cubeIndexToCoord(neighbourCubeInChunkIndex).val());
 	}
 }
 
