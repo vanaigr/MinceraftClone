@@ -670,16 +670,13 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 				toBlockInCurChunk ? curChunkIndex : nextChunkIndex,
 				localToBlockCoord
 			);
-			
-			const Cubes biasedFromBlock = bias < 0       ? fromBlock : cubesEmpty();
-			const Cubes biasedToBlock   = bias < maxBias ? toBlock   : cubesEmpty();
-			
-			if(!isEmpty(biasedFromBlock) || !isEmpty(biasedToBlock)) {
+
+			if(!isEmpty(fromBlock) || !isEmpty(toBlock)) {
 				const bvec4 cubes = bvec4(
-					blockCubeAt (biasedFromBlock, cubeLocalToBlock(fromCubeCoord)),
-					liquidCubeAt(biasedFromBlock, cubeLocalToBlock(fromCubeCoord)),
-					blockCubeAt (biasedToBlock  , cubeLocalToBlock(toCubeCoord  )),
-					liquidCubeAt(biasedToBlock  , cubeLocalToBlock(toCubeCoord  ))
+					blockCubeAt (fromBlock, cubeLocalToBlock(fromCubeCoord)),
+					liquidCubeAt(fromBlock, cubeLocalToBlock(fromCubeCoord)),
+					blockCubeAt (toBlock  , cubeLocalToBlock(toCubeCoord  )),
+					liquidCubeAt(toBlock  , cubeLocalToBlock(toCubeCoord  ))
 				);
 				
 				if(any(cubes)) {
@@ -703,7 +700,9 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 						
 						const uint liquidLevel = level(fLiquid);
 						
-						const float levelY = (fromCubeCoord.y + max((liquidLevel+1) / 16, 1) / 16.0) / cubesInBlockDim;
+						const float levelY = (fromCubeCoord.y + max((liquidLevel+1) / 16, 1) / 16.0) / cubesInBlockDim; /*
+							16 levels in a cube, 32 in a block
+						*/
 						const float yLevelDiff = levelY - curCoord.y;
 						
 						if(liquidLevel == 255u || (intersectionSide.xz != 0 && yLevelDiff >= 0) || (intersectionSide.y != 0 && yLevelDiff >= 0))
@@ -722,27 +721,25 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 							cubeLocalToChunk(toCubeCoord)
 						);
 						
+						const ivec3 cubeCoord = toCubeCoord;
+						const Ray coordRay = Ray(curCoord, ray.dir);
+						
 						const uint liquidLevel = level(tLiquid);
+						const uint liquidId = id(tLiquid);
 						
-						const float levelY = (toCubeCoord.y + max((liquidLevel+1) / 16, 1) / 16.0) / cubesInBlockDim;
-						const float yLevelDiff = levelY - curCoord.y;
+						const float levelY = (cubeCoord.y + max((liquidLevel+1) / 16, 1) / 16.0) / cubesInBlockDim;
+						const float yLevelDiff = levelY - coordRay.orig.y;
 						
-						if(liquidLevel == 255u) tLiquidId = id(tLiquid);
+						if(liquidLevel == 255u) tLiquidId = liquidId;
 						else if((intersectionSide.xz != 0 && yLevelDiff >= 0) || (intersectionSide.y != 0 && yLevelDiff >= 0))
-							tLiquidId = id(tLiquid);
+							tLiquidId = liquidId;
 						
 						{
-							const ivec3 cubeCoord = toCubeCoord;
-							const uint liquidLevel = level(tLiquid);
-							const uint liquidId = id(tLiquid);
-							
-							const float levelY = (cubeCoord.y + max((liquidLevel+1) / 16, 1) / 16.0) / cubesInBlockDim;
-							const float yLevelDiff = levelY - ray.orig.y;
 							const float yLevelDist = yLevelDiff * dirSign.y;
 							
 							if(intersectionSide == 0 && bias <= 0 && yLevelDiff > 0) return IntersectionInfo(
-								ray.orig,
-								ray.orig - cubeBlock(cubeCoord),
+								coordRay.orig,
+								coordRay.orig - cubeBlock(cubeCoord),
 								ivec3(0, 0, 0),
 								0,
 								liquidId
@@ -750,12 +747,12 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 							else if(liquidLevel == 255u);
 							else if(yLevelDist >= 0) {
 								vec3 intersectionCoord;
-								intersectionCoord.xz = at(ray, yLevelDist * stepLength.y).xz;
+								intersectionCoord.xz = at(coordRay, yLevelDist * stepLength.y).xz;
 								intersectionCoord.y = levelY;
 								
 								const int liquidBias = dirSign.y > 0 ? -1 : 0;
 								
-								const bool isBias = (ray.orig.y != levelY || bias <= liquidBias);
+								const bool isBias = (coordRay.orig.y != levelY || bias <= liquidBias);
 								
 								const vec3 cubeCoordF = cubeCoord;
 								if(isBias && intersectionCoord == clamp(intersectionCoord, cubeCoordF / cubesInBlockDim, (cubeCoordF+1) / cubesInBlockDim)) 
@@ -1027,8 +1024,6 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 			const vec3 waterInnerCol = ( backside ^^ reflect ? innerCol : mix(current.color, innerCol, exp(-inner.depth)) );
 			
 			result.color += glass ? (current.color * innerCol) : ( reflect ? mix(current.color, waterInnerCol, 0.97) : waterInnerCol );
-			
-			//if(currentIndex == 0) result.color = vec3(fresnel);
 		}
 	}
 	else if(surfaceId == 8) {
@@ -1138,7 +1133,7 @@ RayResult traceStep(const int iteration) {
 		const bvec3 intersectionSideB = bvec3(intersectionSide);
 		
 		const ivec3 side = intersectionSide * (bias >= 0 ? -1 : 1) * ivec3(sign(ray.dir));
-		const bool backside = (bias >= 0 ? false : true);
+		const bool backside = bias < 0;
 		const ivec3 normal = side * ( backside ? -1 : 1 );
 		
 		const vec2 uvAbs = blockUv(coord, intersectionSide, dirSign);
@@ -1191,7 +1186,7 @@ RayResult traceStep(const int iteration) {
 			);
 		}
 
-		if(blockId == 7 || blockId == 15) {				
+		if(blockId == 7 || blockId == 15) {
 			const bool glass = blockId == 7;
 			
 			const float offsetMag = clamp(t * 50 - 0.001, 0, 1);
@@ -1219,7 +1214,7 @@ RayResult traceStep(const int iteration) {
 			if(any(isnan(incoming_))) incoming_ = ray.dir;
 			const vec3 incoming = incoming_;
 			const vec3 normalDir = any(intersectionSideB) ? normalize(vec3(normal) + offset * vec3(1-intersectionSide)) : -incoming;
-			const float ior = glass ? 1.03 : 1.33;
+			const float ior = glass ? 1.0 : 1.00;
 			
 			const float n1 = backside ? ior : 1;
 			const float n2 = backside ? 1 : ior;
@@ -1231,18 +1226,9 @@ RayResult traceStep(const int iteration) {
 			const bool isRefracted = refracted != vec3(0);
 			const bool isReflected = any(intersectionSideB) ? (isRefracted ? !backside && iteration < 3 : true) : false;
 			
-
 			const uint data = (packHalf2x16(vec2(fresnel, 0.0)) & 0xffffu) | (uint(backside) << 16);
 			
 			pushResult(Result( color, t, data, blockId, rayIndex, type, parent, last ));
-
-			if(isReflected && canPushParams()) {
-				const vec3 newDir = reflect(incoming, normalDir);
-				const int newBias = -bias;
-				
-				pushParams(Params( Ray(offsetedCoord, newDir), newBias, 3u, type, curFrame, !pushed));
-				pushed = true;
-			}
 			
 			if(isRefracted && canPushParams()) {
 				const vec3 newDir = refracted;
@@ -1251,6 +1237,14 @@ RayResult traceStep(const int iteration) {
 				pushParams(Params( Ray(offsetedCoord, newDir), newBias, 4u, type, curFrame, !pushed));
 				pushed = true;
 			}	
+			
+			if(isReflected && canPushParams()) {
+				const vec3 newDir = reflect(incoming, normalDir);
+				const int newBias = -bias;
+				
+				pushParams(Params( Ray(offsetedCoord, newDir), newBias, 3u, type, curFrame, !pushed));
+				pushed = true;
+			}
 		}
 		else if(blockId == 8) {
 			const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
@@ -1293,7 +1287,7 @@ RayResult traceStep(const int iteration) {
 				const float shadowSmoothness = 32;
 				const int shadowsInChunkDim = blocksInChunkDim * shadowSubdiv;		
 				
-				const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*vec3(0.499, 0.5, 0.501) )/shadowSubdiv;
+				const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*vec3(0.501, 0.501, 0.501) )/shadowSubdiv;
 				
 				const ivec3 shadowInChunkCoord = ivec3(floor(mod(coord * shadowSubdiv, vec3(shadowsInChunkDim))));
 				const int shadowInChunkIndex = 
