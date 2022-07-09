@@ -1,9 +1,8 @@
 #version 450
 
-#extension GL_ARB_shader_group_vote : enable
-
 in vec4 gl_FragCoord;
 layout(location = 0) out vec4 color;
+
 
 uniform uvec2 windowSize;
 uniform vec3 rightDir, topDir;
@@ -25,9 +24,16 @@ uniform bool drawPlayer;
 uniform float playerWidth;
 uniform float playerHeight;
 
+uniform vec3 startCoord;
+
+uniform int viewDistance;
+const int renderDiameter = viewDistance*2 + 1;
+
+
 //these variables are used for debugging purpposes. Like `discard` but allows outputing different colors
 //bool exit_ = false; 
 //vec3 exitVec3 = vec3(5,5,5);
+
 
 //copied from Units.h
 const int blocksInChunkDimAsPow2 = 4;
@@ -42,11 +48,11 @@ const int cubesInChunkDimAsPow2 = cubesInBlockDimAsPow2 + blocksInChunkDimAsPow2
 const int cubesInChunkDim = 1 << cubesInChunkDimAsPow2;
 const int cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
 
-uniform vec3 startCoord;
 
 ivec3 shr3i(const ivec3 v, const int i) {
 	return ivec3(v.x >> i, v.y >> i, v.z >> i);
 }
+
 ivec3 and3i(const ivec3 v, const int i) {
 	return ivec3(v.x & i, v.y & i, v.z & i);
 }
@@ -75,11 +81,61 @@ ivec3 cubeLocalToChunk(const ivec3 cubeCoord) {
 	return and3i(cubeCoord, cubesInChunkDim-1);
 }
 
+
+vec3 rgb2hsv(const vec3 c) {
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(const vec3 c) {
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+float map(const float value, const float min1, const float max1, const float min2, const float max2) {
+    return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
+}
+
+float rand(vec2 co){
+    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+int mapInteger(int value) {//based on https://stackoverflow.com/a/24771093/18704284
+    value *= 1664525;
+    value += 101390223;
+    value ^= value >> 11;
+    value ^= value << 16;
+    value ^= value >> 23;
+    value *= 110351245;
+    value += 12345;
+
+    return value;
+}
+
+ivec3 mix3i(const ivec3 a, const ivec3 b, const ivec3 f) {
+	return (1-f) * a + b * f;
+}
+
+int dot3i(const ivec3 a, const ivec3 b) {
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+bvec3 and3b/*seems that glsl has no && for bvec_*/(const bvec3 a, const bvec3 b) { return bvec3(a.x && b.x, a.y && b.y, a.z && b.z); }
+
+
 struct Ray {
     vec3 orig;
     vec3 dir;
 };
-
+vec3 at(const Ray r, const float t) {
+    return r.orig + r.dir * t;
+}
 
 restrict readonly buffer ChunksBounds {
     uint bounds[];
@@ -109,10 +165,7 @@ bool emptyBounds(const int chunkIndex) {
 	return emptyBounds(start(bounds), onePastEnd(bounds));
 }
 
-uniform int viewDistance;
-const int renderDiameter = viewDistance*2 + 1;
 
-//const int neighboursCount = 27;
 restrict readonly buffer ChunksIndices {
     int data[];
 } chunksIndices;
@@ -138,6 +191,7 @@ int chunkAt(const ivec3 coord) {
 	if(clamp(coord, 0, renderDiameter-1) != coord) return 0;
 	return chunkAtIndex(chunkPositionIndex(coord));
 }
+
 
 restrict readonly buffer AtlasDescription {
     uint positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot; 16bit xAlpha, 16bit yAlpha
@@ -251,14 +305,15 @@ LiquidCube liquidAtCube(const int chunkIndex, const ivec3 cubeCoord) {
 	return LiquidCube(data);
 }
 
+
 restrict readonly buffer ChunksAO {
     uint data[];
 } ao;
 
 //copied from Chunks.h chunk::cubeIndexInChunk 
-  int cubeIndexInChunk(const ivec3 coord) {
-  	return coord.x + coord.y*cubesInChunkDim + coord.z*cubesInChunkDim*cubesInChunkDim;
-  }
+int cubeIndexInChunk(const ivec3 coord) {
+	return coord.x + coord.y*cubesInChunkDim + coord.z*cubesInChunkDim*cubesInChunkDim;
+}
   
 uint aoAt(const int chunkIndex, const ivec3 vertexCoord) {
 	const int startIndex = chunkIndex * cubesInChunkCount;
@@ -271,12 +326,12 @@ uint aoAt(const int chunkIndex, const ivec3 vertexCoord) {
 	return (ao.data[el] >> sh) & 255;
 }
   
-  ivec3 vertexNeighbourOffset(const int index) {
-  	const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
-  	const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
-  	const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
-  	return ivec3(x,y,z);
-  }
+ivec3 vertexNeighbourOffset(const int index) {
+	const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
+	const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
+	const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
+	return ivec3(x,y,z);
+}
 
 float lightForChunkVertexDir(const int chunkIndex, const ivec3 chunkCoord, const ivec3 vertex, const ivec3 dir) {
 	const bvec3 dirMask = notEqual(dir, ivec3(0));
@@ -344,28 +399,31 @@ float lightingAtCube(int chunkIndex, const ivec3 chunkCoord, ivec3 cubeCoord) {
 	return 0.02 + pow(light, 2.2) * 0.98;
 }
 
+
 //chunk::Chunk3x3BlocksList
 restrict readonly buffer ChunksNeighbourngEmitters {
     uint data[];
 } emitters;
-  const int neSidelength = 3 * blocksInChunkDim;
-  const int neCapacity = 30;
-  
-  uint neCoordToIndex(const ivec3 coord) {
-  	return (coord.x + blocksInChunkDim)
-  		 + (coord.y + blocksInChunkDim) * neSidelength
-  		 + (coord.z + blocksInChunkDim) * neSidelength * neSidelength;
-  }
-  ivec3 neIndexToCoord(const uint index) {
-  	return ivec3(
-  		index % neSidelength,
-  		(index / neSidelength) % neSidelength,
-  		index / neSidelength / neSidelength
-  	) - blocksInChunkDim;
-  }
 
-  struct NE { ivec3 coord; uint capacity; };
-  NE neFromChunk(const int chunkIndex, const int someindex) { 
+const int neSidelength = 3 * blocksInChunkDim;
+const int neCapacity = 30;
+
+uint neCoordToIndex(const ivec3 coord) {
+	return (coord.x + blocksInChunkDim)
+		 + (coord.y + blocksInChunkDim) * neSidelength
+		 + (coord.z + blocksInChunkDim) * neSidelength * neSidelength;
+}
+ivec3 neIndexToCoord(const uint index) {
+	return ivec3(
+		index % neSidelength,
+		(index / neSidelength) % neSidelength,
+		index / neSidelength / neSidelength
+	) - blocksInChunkDim;
+}
+
+struct NE { ivec3 coord; uint capacity; };
+
+NE neFromChunk(const int chunkIndex, const int someindex) { 
 	const int neIndex = someindex % neCapacity;
 	const int chunkOffset = chunkIndex * 16;
 	const int neOffset = neIndex / 2;
@@ -378,60 +436,8 @@ restrict readonly buffer ChunksNeighbourngEmitters {
 	const ivec3 ne_coord = neIndexToCoord(int(ne_index));
 	
 	return NE(ne_coord, first & 3u);
-  }
-
-
-vec3 rgb2hsv(const vec3 c) {
-    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
-    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-
-    float d = q.x - min(q.w, q.y);
-    float e = 1.0e-10;
-    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
 }
 
-vec3 hsv2rgb(const vec3 c) {
-    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-}
-
-float map(const float value, const float min1, const float max1, const float min2, const float max2) {
-    return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
-}
-
-vec3 at(const Ray r, const float t) {
-    return r.orig + r.dir * t;
-}
-
-void swap(inout vec3 v1, inout vec3 v2) {
-    vec3 t = v1;
-    v1 = v2;
-    v2 = t;
-}
-
-void swap(inout float v1, inout float v2) {
-    float t = v1;
-    v1 = v2;
-    v2 = t;
-}
-
-vec3 screenMultipty(const vec3 v1, const vec3 v2) {
-	return 1 - (1-v1) * (1-v2);
-}
-
-float rand(vec2 co){
-    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
-}
-
-ivec3 mix3i(const ivec3 a, const ivec3 b, const ivec3 f) {
-	return (1-f) * a + b * f;
-}
-
-int dot3i(const ivec3 a, const ivec3 b) {
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
 
 float intersectPlane(const Ray r, const vec3 center, const vec3 n) {
     return dot(n, center - r.orig) / dot(n, r.dir);
@@ -467,7 +473,7 @@ Intersection noIntersection() {
 Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, const vec3 n1, const vec3 n2) {
 	const vec3 size = (end - start) / 2 * 0.999;
 	const vec3 center = (end + start) / 2; 
-	const float frontface = float(all(equal(ray.orig, clamp(ray.orig, start, end)))) * -2 + 1;
+	const float frontface = float(all(equal(ray.orig, clamp(ray.orig, center - size/2, center + size/2)))) * -2 + 1;
     const vec3 n3 = cross(n2, n1);
 	
 	const vec3 nn[3] = { 
@@ -508,21 +514,6 @@ Intersection intersectCube(const Ray ray, const vec3 start, const vec3 end, cons
 	);
 }
 
-struct IntersectionInfo {
-	vec3 coord;
-	vec3 localSpaceCoord;
-	ivec3 intersectionSide;
-	int bias;
-	uint blockId;
-};
-
-IntersectionInfo noIntersectionInfo() {
-	IntersectionInfo i;
-	i.blockId = 0;
-	return i;
-}
-
-bvec3 and3b/*seems that glsl has no && for bvec_*/(const bvec3 a, const bvec3 b) { return bvec3(a.x && b.x, a.y && b.y, a.z && b.z); }
 
 vec3 calcDirSign(const vec3 dir) {
 	return vec3(greaterThanEqual(dir, vec3(0))) * 2 - 1;/*
@@ -582,6 +573,21 @@ const int maxBias = +2; /*
    it is useful when translucent or parcially transparent cube is ajacent to some other cube
    because we can specify with whith of those the ray has intersectted first
 */
+
+
+struct IntersectionInfo {
+	vec3 coord;
+	vec3 localSpaceCoord;
+	ivec3 intersectionSide;
+	int bias;
+	uint blockId;
+};
+
+IntersectionInfo noIntersectionInfo() {
+	IntersectionInfo i;
+	i.blockId = 0;
+	return i;
+}
 
 IntersectionInfo isInters(const Ray ray, const int startBias) { 
 	const vec3 dir = ray.dir;
@@ -693,6 +699,8 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 					uint tBlockId = 0;
 					uint tLiquidId = 0;
 					
+					//uint/*uint16_t[4]*/ blocks[2] = {0, 0};
+					
 					IntersectionInfo i = noIntersectionInfo();
 					
 					if(cubes.x) {
@@ -719,7 +727,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 						tBlockId = blockIdAt(
 							toBlockInCurChunk ? curChunkIndex : nextChunkIndex, 
 							blockLocalToChunk(cubeBlock(toCubeCoord))
-						);		
+						);				
 					}
 					if(cubes.w) {
 						const LiquidCube tLiquid = liquidAtCube(
@@ -736,8 +744,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 						const float levelY = (cubeCoord.y + max((liquidLevel+1) / 16, 1) / 16.0) / cubesInBlockDim;
 						const float yLevelDiff = levelY - coordRay.orig.y;
 						
-						if(liquidLevel == 255u) tLiquidId = liquidId;
-						else if((intersectionSide.xz != 0 && yLevelDiff >= 0) || (intersectionSide.y != 0 && yLevelDiff >= 0))
+						if(liquidLevel == 255u || (intersectionSide.xz != 0 && yLevelDiff >= 0) || (intersectionSide.y != 0 && yLevelDiff >= 0))
 							tLiquidId = liquidId;
 						
 						{
@@ -773,7 +780,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 						}
 					}
 
-					uint/*uint16_t[4]*/ blocks[2] = { fLiquidId | (fBlockId << 16), tBlockId | (tLiquidId << 16)  };
+					const uint/*uint16_t[4]*/ blocks[2] = { fLiquidId | (fBlockId << 16), tBlockId | (tLiquidId << 16)  };
 					const ivec3 blocksCoord[2] = { cubeBlock(fromCubeCoord), cubeBlock(toCubeCoord) };
 					
 					uint lowestIntersectionId = 0;
@@ -812,7 +819,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 			
 			//calculate next intersection
 			const bool hnn = hasNoNeighbours(toBlock) || neighboursFullSameLiquid(toBlock);
-			const float skipDistance = (hnn || (isEmpty(toBlock) || fullSameLiquid(toBlock))) ? 1.0 : cubesInBlockDim;
+			const float skipDistance = hnn ? 1.0 : (isEmpty(toBlock) || fullSameLiquid(toBlock) ? 1.0 : cubesInBlockDim);
 			const vec3 candCoords = floor(curCoord * skipDistance * dirSign + (hnn ? 2 : 1)) / skipDistance * dirSign;
 	
 			const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
@@ -841,11 +848,6 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 	return noIntersectionInfo();
 }
 
-vec3 background(const vec3 dir) {
-	const float t = 0.5 * (dir.y + 1.0);
-	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.02) + t * vec3(0.5, 0.7, 1.0);
-	return pow(res*2, vec3(2.2));
-}
 
 const int rayTypeStandard = 0;
 const int rayTypeShadowBlock = 1;
@@ -975,22 +977,18 @@ bool canPushResult() {
 	&& resultPosOffset(putResultPos+1)-1 < paramsPosOffset(putParamsPos-1); //resultEnd < paramsEnd
 }
 
+
+vec3 background(const vec3 dir) {
+	const float t = 0.5 * (dir.y + 1.0);
+	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.02) + t * vec3(0.5, 0.7, 1.0);
+	return pow(res*2, vec3(2.2));
+}
+
 vec3 fade(const vec3 color, const float depth) {
 	const float bw = 0.5 + dot(color, vec3(0.299, 0.587, 0.114)) * 0.5;
 	return mix(vec3(bw), color, inversesqrt(depth / 500 + 1));
 }
 
-int mapInteger(int value) {//based on https://stackoverflow.com/a/24771093/18704284
-    value *= 1664525;
-    value += 101390223;
-    value ^= value >> 11;
-    value ^= value << 16;
-    value ^= value >> 23;
-    value *= 110351245;
-    value += 12345;
-
-    return value;
-}
 
 void combineSteps(const int currentIndex, const int lastIndex) {
 	const int childrenCount = lastIndex - currentIndex;
@@ -1117,10 +1115,11 @@ RayResult traceStep(const int iteration) {
 	
 	const bool shadow = type == rayTypeShadowBlock || type == rayTypeShadowSky || type == rayTypeLightingBlock || type == rayTypeLightingEmitter;
 	
+	const IntersectionInfo i = isInters(ray, startBias);
+	
+	
 	const vec3 startP = playerRelativePosition - vec2(playerWidth/2.0, 0           ).xyx;
 	const vec3 endP   = playerRelativePosition + vec2(playerWidth/2.0, playerHeight).xyx;
-	
-	const IntersectionInfo i = isInters(ray, startBias);
 	
 	const Intersection playerIntersection = intersectCube(ray, startP, endP, vec3(1,0,0), vec3(0,1,0));
 	const bool isPlayer = (drawPlayer || (iteration != 0 && playerIntersection.frontface)) && playerIntersection.is;
@@ -1421,6 +1420,7 @@ vec3 trace(const Ray startRay) {
 
 	return readResult(0).color;
 }
+
 
 vec3 colorMapping(const vec3 col) {
 	const float bw = 0.299 * col.r + 0.587 * col.g + 0.114 * col.b;
