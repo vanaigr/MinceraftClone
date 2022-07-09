@@ -169,7 +169,7 @@ enum class BlockAction {
 	BREAK
 };
 static BlockAction blockAction{ BlockAction::NONE };
-static double const blockActionCD{ 40.0 / 1000.0 };
+static double const blockActionCD{ 300.0 / 1000.0 };
 static bool breakFullBlock{ false };
 
 static const Font font{ "./assets/font.txt" };
@@ -1660,12 +1660,12 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 		}
 		else {
 			blocks[blockCoord] = chunk::Block::emptyBlock();
-			//if(pos.y * units::blocksInChunkDim + y < 11) {
-			//	for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
-			//		auto const cubeCoord{ pBlock{blockCoord} + pCube{ chunk::Block::cubeIndexPos(cubeIndex) } }; 
-			//		liquid[cubeCoord] = {8, 255u};
-			//	}
-			//}
+			if(pos.y * units::blocksInChunkDim + y < 11) {
+				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
+					auto const cubeCoord{ pBlock{blockCoord} + pCube{ chunk::Block::cubeIndexPos(cubeIndex) } }; 
+					liquid[cubeCoord] = chunk::LiquidCube{15, 255u};
+				}
+			}
 		}
 		
 		

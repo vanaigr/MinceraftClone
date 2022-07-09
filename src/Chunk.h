@@ -422,7 +422,7 @@ namespace chunk {
 		uint8_t padding;
 		
 		LiquidCube() = default;
-		LiquidCube(uint16_t const id_, level_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }	
+		//LiquidCube(uint16_t const id_, level_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }	
 		LiquidCube(uint16_t const id_, int level_) //integer promotion
 		: id{id_}, level(level_) {  
 			assert(level_ >= minLevel && level <= maxLevel); 
