@@ -1660,7 +1660,18 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 		}
 		else {
 			blocks[blockCoord] = chunk::Block::emptyBlock();
-			if(pos.y * units::blocksInChunkDim + y < 11) {
+			if(pos.y * units::blocksInChunkDim + y == 7) {
+				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
+					pCube const cubeLocalCoord{ chunk::Block::cubeIndexPos(cubeIndex) };
+					auto const cubeCoord{ pBlock{blockCoord} + cubeLocalCoord }; 
+					
+					if(cubeLocalCoord.val().y == units::cubesInBlockDim-1)
+						liquid[cubeCoord] = chunk::LiquidCube{15, 254u};
+					else 
+						liquid[cubeCoord] = chunk::LiquidCube{15, 255u};
+				}
+			}
+			if(pos.y * units::blocksInChunkDim + y < 7) {
 				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
 					auto const cubeCoord{ pBlock{blockCoord} + pCube{ chunk::Block::cubeIndexPos(cubeIndex) } }; 
 					liquid[cubeCoord] = chunk::LiquidCube{15, 255u};

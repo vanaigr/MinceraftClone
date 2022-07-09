@@ -1,5 +1,7 @@
 #version 450
 
+#extension GL_ARB_shader_group_vote : enable
+
 in vec4 gl_FragCoord;
 layout(location = 0) out vec4 color;
 
@@ -22,6 +24,10 @@ uniform vec3 playerRelativePosition;
 uniform bool drawPlayer;
 uniform float playerWidth;
 uniform float playerHeight;
+
+//these variables are used for debugging purpposes. Like `discard` but allows outputing different colors
+//bool exit_ = false; 
+//vec3 exitVec3 = vec3(5,5,5);
 
 //copied from Units.h
 const int blocksInChunkDimAsPow2 = 4;
@@ -530,10 +536,10 @@ vec2 blockUv(const vec3 localBlockCoord, const vec3 intersectionSide, const vec3
 		dot(intersectionSide, localBlockCoord.yzy)
 	);
 	
-	return clamp(vec2(
+	return vec2(
 		mix(uv.x, 1 - uv.x, (intersectionUSign+1) / 2),
 		uv.y
-	), vec2(0.00001), vec2(0.99999));
+	);
 }
 
 bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, const vec3 dirSign, const vec3 blockCoord, const uint blockId) {
@@ -592,7 +598,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 			blockLocalToChunk(startBlockCoord)
 		);
 	}
-
+	
 	while(true) {
 		if(any(greaterThan((relativeToChunk - mix(vec3(0), vec3(renderDiameter-1), positive_)) * dirSign, ivec3(0)))) break;
 		
@@ -1021,6 +1027,8 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 			const vec3 waterInnerCol = ( backside ^^ reflect ? innerCol : mix(current.color, innerCol, exp(-inner.depth)) );
 			
 			result.color += glass ? (current.color * innerCol) : ( reflect ? mix(current.color, waterInnerCol, 0.97) : waterInnerCol );
+			
+			//if(currentIndex == 0) result.color = vec3(fresnel);
 		}
 	}
 	else if(surfaceId == 8) {
@@ -1114,11 +1122,12 @@ RayResult traceStep(const int iteration) {
 	const IntersectionInfo i = isInters(ray, startBias);
 	
 	const Intersection playerIntersection = intersectCube(ray, startP, endP, vec3(1,0,0), vec3(0,1,0));
-	const bool isPlayer = (drawPlayer || iteration != 0) && playerIntersection.is;
+	const bool isPlayer = (drawPlayer || (iteration != 0 && playerIntersection.frontface)) && playerIntersection.is;
 	const float playerTsq = dot(playerIntersection.at - ray.orig, playerIntersection.at - ray.orig);
 	const bool playerFrist = isPlayer && dot(i.coord - ray.orig, i.coord - ray.orig) > playerTsq;
 	
 	if(i.blockId != 0 && !playerFrist) { //block
+		//if(exit_) return RayResult(false);
 		const vec3 coord = i.coord;        
 		const vec3 localSpaceCoord = i.localSpaceCoord;
 		const ivec3 chunkPosition = ivec3(floor(coord / blocksInChunkDim));
@@ -1127,14 +1136,13 @@ RayResult traceStep(const int iteration) {
 		const uint blockId = i.blockId;
 		const ivec3 intersectionSide = i.intersectionSide;
 		const bvec3 intersectionSideB = bvec3(intersectionSide);
-		//const bvec3 intersectionSideB = equal(localSpaceCoord * cubesInBlockDim, floor(localSpaceCoord * cubesInBlockDim));
-		//const ivec3 intersectionSide = ivec3(intersectionSideB);
 		
 		const ivec3 side = intersectionSide * (bias >= 0 ? -1 : 1) * ivec3(sign(ray.dir));
-		const bool backside = dot(vec3(side), ray.dir) > 0;
+		const bool backside = (bias >= 0 ? false : true);
 		const ivec3 normal = side * ( backside ? -1 : 1 );
 		
-		const vec2 uv = blockUv(localSpaceCoord, intersectionSide, dirSign);
+		const vec2 uvAbs = blockUv(coord, intersectionSide, dirSign);
+		const vec2 uv    = mod(uvAbs, 1);
 		
 		const vec2 atlasOffset = atlasAt(blockId, side);
 		
@@ -1183,33 +1191,47 @@ RayResult traceStep(const int iteration) {
 			);
 		}
 
-		if(blockId == 7 || blockId == 15) {	
-			//if(iteration == 2) discard;
-			const vec3 offset = vec3( 
+		if(blockId == 7 || blockId == 15) {				
+			const bool glass = blockId == 7;
+			
+			const float offsetMag = clamp(t * 50 - 0.001, 0, 1);
+			const vec3 glassOffset = vec3( 
 				sin(localSpaceCoord.x*9)/2, 
 				sin(localSpaceCoord.z*9)/8, 
 				sin(localSpaceCoord.y*6 + localSpaceCoord.x*4)/8
 			) / 100;
+			const vec3 waterOffset = (texture(noise, uvAbs / 5  + (texture(noise, uvAbs/30 + time/60).xy-0.5) * 0.8 ).xyz - 0.5) * 0.2;
+			const vec3 offset_ = (glass ? glassOffset : waterOffset);
+			const vec3 offset = offset_ * offsetMag;
 			
-			const vec3 newBlockCoord = localSpaceCoord - offset;
+			const vec3 newBlockCoord = localSpaceCoord + offset * vec3(1-intersectionSide);
+			const vec3 offsetedCoord = mix(
+				clamp(coord + offset, floor(coord*cubesInBlockDim)/cubesInBlockDim+0.001, ceil(coord*cubesInBlockDim)/cubesInBlockDim-0.001), 
+				coord, 
+				intersectionSideB
+			);
 			
-			const vec2 newUV = blockUv(newBlockCoord, intersectionSide, dirSign);
-			const vec3 color_ = sampleAtlas(atlasOffset, clamp(newUV, 0.0001, 0.9999)) * mix(0.5, 1.0, ambient);
+			const vec2 newUV = mod(blockUv(newBlockCoord, intersectionSide, dirSign), 1);
+			const vec3 color_ = sampleAtlas(atlasOffset, newUV) * mix(0.5, 1.0, ambient);
 			const vec3 color = fade(color_, t);
 
-			//if(!any(intersectionSideB)) discard;
-			const vec3 incoming = any(intersectionSideB) ? normalize(ray.dir - offset * vec3(1-intersectionSide)) : ray.dir;
-			const vec3 normalDir = any(intersectionSideB) ? normalize(vec3(normal)) : -ray.dir;
+			vec3 incoming_ = any(intersectionSideB) ? normalize(offsetedCoord - ray.orig) : ray.dir * (1 + offset_);
+			if(any(isnan(incoming_))) incoming_ = ray.dir;
+			const vec3 incoming = incoming_;
+			const vec3 normalDir = any(intersectionSideB) ? normalize(vec3(normal) + offset * vec3(1-intersectionSide)) : -incoming;
+			const float ior = glass ? 1.03 : 1.33;
 			
-			const float ior = 1.03;
 			const float n1 = backside ? ior : 1;
 			const float n2 = backside ? 1 : ior;
 			const float r0 = pow((n1 - n2) / (n1 + n2), 2);
-			const vec3 refracted = refract(incoming, normalDir, n1 / n2);
-			const bool isRefracted = refracted != vec3(0);
-			
-			const bool isReflected = any(intersectionSideB) ? (isRefracted ? !backside && iteration < 3 : true) : false;
 			const float fresnel = r0 + (1 - r0) * pow(1 - abs(dot(incoming, normalDir)), 5);
+
+			const vec3 refracted = refract(incoming, normalDir, n1 / n2);
+			
+			const bool isRefracted = refracted != vec3(0);
+			const bool isReflected = any(intersectionSideB) ? (isRefracted ? !backside && iteration < 3 : true) : false;
+			
+
 			const uint data = (packHalf2x16(vec2(fresnel, 0.0)) & 0xffffu) | (uint(backside) << 16);
 			
 			pushResult(Result( color, t, data, blockId, rayIndex, type, parent, last ));
@@ -1218,7 +1240,7 @@ RayResult traceStep(const int iteration) {
 				const vec3 newDir = reflect(incoming, normalDir);
 				const int newBias = -bias;
 				
-				pushParams(Params( Ray(coord, newDir), newBias, 3u, type, curFrame, !pushed));
+				pushParams(Params( Ray(offsetedCoord, newDir), newBias, 3u, type, curFrame, !pushed));
 				pushed = true;
 			}
 			
@@ -1226,7 +1248,7 @@ RayResult traceStep(const int iteration) {
 				const vec3 newDir = refracted;
 				const int newBias = bias + 1;
 				
-				pushParams(Params( Ray(coord, newDir), newBias, 4u, type, curFrame, !pushed));
+				pushParams(Params( Ray(offsetedCoord, newDir), newBias, 4u, type, curFrame, !pushed));
 				pushed = true;
 			}	
 		}
@@ -1374,6 +1396,7 @@ vec3 trace(const Ray startRay) {
 		const bool lastRay = !canPopParams();
 		if(!lastRay) {
 			const RayResult result = traceStep(iteration);
+			//if(exit_) return vec3(0);
 			iteration++;
 			if(result.pushedRays) continue;
 		}
@@ -1421,6 +1444,7 @@ void main() {
 	const Ray ray = Ray(startCoord, rayDir);
 
 	const vec3 col = trace(ray);
+	//if(exit_) { color = exitVec3; return; }
 	
 	const vec3 c2 = colorMapping(col);
 	
