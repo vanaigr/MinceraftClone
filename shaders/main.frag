@@ -179,6 +179,7 @@ restrict readonly buffer ChunksMesh {
 	uint data[];
 } chunksMesh;
 
+//copied from Chunk.h chunk::BlockData
 struct Cubes {
 	uint data;
 };
@@ -193,6 +194,12 @@ bool liquidCubeAt(const Cubes it, const ivec3 cubeCoord) {
 }
 bool hasNoNeighbours(const Cubes it) {
   return bool((it.data >> 16) & 1);
+}
+bool fullSameLiquid(const Cubes it) {
+  return bool((it.data >> 17) & 1);
+}
+bool neighboursFullSameLiquid(const Cubes it) {
+  return bool((it.data >> 18) & 1);
 }
 bool isEmpty(const Cubes it) {
 	return (it.data & 0xffffu) == 0;
@@ -690,8 +697,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 					
 					if(cubes.x) {
 						const ivec3 fromBlockChunk = cubeChunk(fromCubeCoord);
-						const ivec3 fromBlockInChunk = blockLocalToChunk(cubeBlock(fromCubeCoord));
-						fBlockId = blockIdAt(chunkAt(fromBlockChunk), fromBlockInChunk);
+						fBlockId = blockIdAt(chunkAt(fromBlockChunk), blockLocalToChunk(cubeBlock(fromCubeCoord)));
 					}
 					if(cubes.y) {
 						const ivec3 fromCubeChunk = cubeChunk(fromCubeCoord);
@@ -712,7 +718,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 					if(cubes.z) {
 						tBlockId = blockIdAt(
 							toBlockInCurChunk ? curChunkIndex : nextChunkIndex, 
-							localToBlockCoord
+							blockLocalToChunk(cubeBlock(toCubeCoord))
 						);		
 					}
 					if(cubes.w) {
@@ -805,9 +811,8 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 			}
 			
 			//calculate next intersection
-			fromBlock = toBlock;
-			const bool hnn = hasNoNeighbours(fromBlock);
-			const float skipDistance = (hnn || isEmpty(fromBlock)) ? 1.0 : cubesInBlockDim;
+			const bool hnn = hasNoNeighbours(toBlock) || neighboursFullSameLiquid(toBlock);
+			const float skipDistance = (hnn || (isEmpty(toBlock) || fullSameLiquid(toBlock))) ? 1.0 : cubesInBlockDim;
 			const vec3 candCoords = floor(curCoord * skipDistance * dirSign + (hnn ? 2 : 1)) / skipDistance * dirSign;
 	
 			const vec3 nextLenghts = (candCoords - ray.orig) * dirSign * stepLength;
@@ -821,6 +826,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 				nextMinAxisB
 			);
 			bias = minBias;
+			fromBlock = toBlock;
 
 			const bool inChunkBounds = all(lessThanEqual((curCoord - farBoundsCoords) * dirSign, vec3(0,0,0)) );
 		

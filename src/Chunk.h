@@ -27,6 +27,9 @@ namespace chunk {
 	static constexpr bool checkBlockCoordInChunkValid(vec3i const coord) {
 		return coord.inMMX(vec3i{0}, vec3i{units::blocksInChunkDim}).all();
 	}
+	static constexpr bool checkBlockCoordInChunkValid(pBlock const coord) {
+		return checkBlockCoordInChunkValid(coord.val());
+	}
 	static constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
 		return index >= 0 && index < pos::blocksInChunkCount;
 	}
@@ -34,8 +37,19 @@ namespace chunk {
 	static constexpr bool checkCubeCoordInChunkValid(vec3i const coord) {
 		return coord.inMMX(vec3i{0}, vec3i{units::cubesInChunkDim}).all();
 	}
+	static constexpr bool checkCubeCoordInChunkValid(pCube const coord) {
+		return checkCubeCoordInChunkValid(coord.val());
+	}
 	static constexpr bool checkCubeIndexInChunkValid(uint16_t const index) {
 		return index >= 0 && index < pos::cubesInChunkCount;
+	}
+	
+	static constexpr bool checkCubeCoordInBlockValid(pCube const coord) {
+		return coord.val().inMMX(vec3i{0}, vec3i{units::cubesInBlockDim}).all();
+	}
+	
+	static constexpr bool checkCubeIndexInBlockValid(uint8_t const index) {
+		return index < pos::cubesInBlockCount;
 	}
   #pragma clang diagnostic pop
 	  
@@ -66,11 +80,26 @@ namespace chunk {
 		  return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim;
 	  }
 	  
-	  inline constexpr BlockInChunkIndex blockIndexToCoord(pBlock const coord) { return blockIndex(coord.val()); }
-	  inline constexpr pBlock blockCoordToIndex(BlockInChunkIndex const index) { return pBlock{indexBlock(index)}; }
+	  inline constexpr BlockInChunkIndex blockCoordToIndex(pBlock const coord) { return blockIndex(coord.val()); }
+	  inline constexpr pBlock blockIndexToCoord(BlockInChunkIndex const index) { return pBlock{indexBlock(index)}; }
 	  
 	  inline constexpr CubeInChunkIndex cubeCoordToIndex(pCube const coord) { return cubeIndexInChunk(coord.val()); }
 	  inline constexpr pCube cubeIndexToCoord(CubeInChunkIndex const index) { return pCube{cubeCoordInChunk(index)}; }
+	  
+	  inline constexpr uint8_t cubeCoordInBlockToIndex(pCube const pos) {
+		assert(checkCubeCoordInBlockValid(pos));
+		auto const coord{ pos.val() };
+		return coord.x + (coord.y << units::cubesInBlockDimAsPow2) + (coord.z << (units::cubesInBlockDimAsPow2*2));
+	}
+	
+	inline constexpr pCube cubeIndexInBlockToCoord(uint8_t const index) {
+		assert(checkCubeIndexInBlockValid(index));
+		return vec3i(
+			 index                                      % units::cubesInBlockDim, 
+			(index >>  units::cubesInBlockDimAsPow2   ) % units::cubesInBlockDim, 
+			(index >> (units::cubesInBlockDimAsPow2*2)) % units::cubesInBlockDim
+		);
+	}
 	
 	template<typename Chunks>
 	struct Chunk_{
@@ -101,7 +130,9 @@ namespace chunk {
 			gs(aabb, chunksAABB)
 			gs(status, chunksStatus)
 			gs(modified, modified)
+			gs(blocksData, blocksData)
 			gs(data, chunksData)
+			gs(blocks, chunksData) //same as data()
 			gs(liquid, chunksLiquid)
 			gs(neighbours, chunksNeighbours)
 			gs(ao, chunksAO)
@@ -116,30 +147,25 @@ namespace chunk {
 	struct Chunks;
 	using Chunk = Chunk_<Chunks>;
 
-	
 	struct Block { //used in main.shader
 		static_assert(pos::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
 		
+		using id_t = uint16_t;
+		
 		static constexpr bool checkCubeCoordValid(vec3i const coord) {
-			return coord.inMMX(vec3i{0}, vec3i{units::cubesInBlockDim}).all();
+			return checkCubeCoordInBlockValid(pCube{coord});
 		}
 		
 		static constexpr bool checkCubeIndexValid(uint8_t const index) {
-			return index < pos::cubesInBlockCount;
+			return checkCubeIndexInBlockValid(index);
 		}
 		
 		static constexpr uint8_t cubePosIndex(vec3i const pos) {
-			assert(checkCubeCoordValid(pos));
-			return pos.x + (pos.y << units::cubesInBlockDimAsPow2) + (pos.z << (units::cubesInBlockDimAsPow2*2));
+			return cubeCoordInBlockToIndex(pCube{pos});
 		}
 		
 		static constexpr vec3i cubeIndexPos(uint8_t const index) {
-			assert(checkCubeIndexValid(index));
-			return vec3i(
-				 index                                      % units::cubesInBlockDim, 
-				(index >>  units::cubesInBlockDimAsPow2   ) % units::cubesInBlockDim, 
-				(index >> (units::cubesInBlockDimAsPow2*2)) % units::cubesInBlockDim
-			);
+			return cubeIndexInBlockToCoord(index).val();
 		}
 		
 		static constexpr uint8_t blockCubeMask(uint8_t const index) {
@@ -162,28 +188,22 @@ namespace chunk {
 			return (cubes >> index) & 1;
 		}
 		
-		static constexpr Block fullBlock(uint16_t const id) { return Block(id, 0b1111'1111); }
+		static constexpr Block fullBlock(id_t const id) { return Block(id, 0b1111'1111); }
 		static constexpr Block emptyBlock() { return Block(0, 0); }
-		static constexpr Block noNeighboursBlock(Block const it) { return Block(0, 0, true); }
-		static constexpr Block neighboursBlock(Block const it) { return Block(it.id(), it.cubes(), false); }
 		
-		static constexpr Block idChanged(Block const it, uint16_t const id) { return Block{id, it.cubes()}; }
+		static constexpr Block idChanged(Block const it, id_t const id) { return Block{id, it.cubes()}; }
 		static constexpr Block cubesChanged(Block const it, uint8_t const cubes) { return Block{it.id(), cubes}; }
 	private:
 		uint32_t data_;
 	public:
 		Block() = default;
 		explicit constexpr Block(uint32_t const data__) : data_{ data__ } {}
-		constexpr Block(uint16_t const id, uint8_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
+		constexpr Block(id_t const id, uint8_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
 			if(id == 0 || cubes == 0) data_ = 0;
-		}		
-		constexpr Block(uint16_t const id, uint8_t const cubes, bool const noNeighbours) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) | (uint32_t(noNeighbours) << 16) } {
-			if(id == 0 || cubes == 0) data_ = (uint32_t(noNeighbours) << 16);
 		}
 		uint32_t data() const { return data_; }
 		uint8_t cubes() const { return uint8_t(data_ >> 24); }
-		constexpr uint16_t id() const { return uint16_t(data_ & ((1 << 16) - 1)); }
-		constexpr bool hasNoNeighbours() const { return ((data_ >> 16)&1) == 1; }
+		constexpr id_t id() const { return id_t(data_ & ((1 << 16) - 1)); }
 		
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cube(uint8_t const index) const { return blockCube(cubes(), index); }
@@ -193,10 +213,8 @@ namespace chunk {
 		
 		explicit operator bool() const { return id() != 0; }
 		constexpr bool isEmpty() const { return id() == 0; }
-		constexpr bool empty() const { return isEmpty(); }
-		
+		constexpr bool empty() const { return isEmpty(); }	
 	};
-	
 	
 	struct AABB { //used in main.shader
 		static constexpr int64_t cd = units::blocksInChunkDim-1;
@@ -353,11 +371,34 @@ namespace chunk {
 		value_type       &operator[](int const index)       { return data[index]; }
 		value_type const &operator[](int const index) const { return data[index]; }
 		
-		value_type       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
-		value_type const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }	
+		//value_type       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
+		//value_type const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }	
 		
-		value_type       &operator[](pCube const cubeCoord)       { return (*this)[cubeCoord.val()]; }
-		value_type const &operator[](pCube const cubeCoord) const { return (*this)[cubeCoord.val()]; }
+		//value_type       &operator[](pCube const cubeCoord)       { return (*this)[cubeCoord.val()]; }
+		//value_type const &operator[](pCube const cubeCoord) const { return (*this)[cubeCoord.val()]; }
+		
+		value_type       &operator[](pCube const coord)       { return (*this)[cubeCoordToIndex(coord)]; }
+		value_type const &operator[](pCube const coord) const { return (*this)[cubeCoordToIndex(coord)]; }
+		
+		void fill(T const value) { data.fill(value); }
+		void reset() { data.fill(T()); }
+	};
+	
+	template<typename T>
+	struct BlocksArray {
+		static constexpr int size = pos::blocksInChunkCount;
+		using value_type = T;
+	private:
+		std::array<value_type, size> data;
+	public:		
+		BlocksArray() = default;
+		explicit BlocksArray(T const value) { fill(value); }
+	
+		value_type       &operator[](int const index)       { return data[index]; }
+		value_type const &operator[](int const index) const { return data[index]; }
+		
+		value_type       &operator[](pBlock const coord)       { return (*this)[blockCoordToIndex(coord)]; }
+		value_type const &operator[](pBlock const coord) const { return (*this)[blockCoordToIndex(coord)]; }
 		
 		void fill(T const value) { data.fill(value); }
 		void reset() { data.fill(T()); }
@@ -417,13 +458,13 @@ namespace chunk {
 		static constexpr level_t maxLevel = std::numeric_limits<level_t>::max();
 		static constexpr level_t minLevel = std::numeric_limits<level_t>::lowest();
 		
-		uint16_t id;
+		Block::id_t id;
 		level_t level;
 		uint8_t padding;
 		
 		LiquidCube() = default;
-		//LiquidCube(uint16_t const id_, level_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }	
-		LiquidCube(uint16_t const id_, int level_) //integer promotion
+		//LiquidCube(Block::id_t const id_, level_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }	
+		LiquidCube(Block::id_t const id_, int level_) //integer promotion
 		: id{id_}, level(level_) {  
 			assert(level_ >= minLevel && level <= maxLevel); 
 			if(level == 0) id = 0; 
@@ -434,6 +475,23 @@ namespace chunk {
 	static_assert(sizeof(LiquidCube) == 4);
 	
 	struct ChunkLiquid : CubesArray<LiquidCube> { using CubesArray::CubesArray; };
+	
+	struct BlockData { //used in main.frag
+		static_assert(pos::cubesInBlockCount == 8);
+		uint8_t solidCubes;
+		uint8_t liquidCubes;
+		
+		uint16_t noNeighbours : 1;
+		uint16_t fullSameLiquid : 1; //if no solid cubes and all liquid cubes have the same id and level == chunk::LiquidCube::maxLevel
+		uint16_t neighboursFullSameLiquid : 1;
+		
+		constexpr bool noCubes() const {
+			return solidCubes == 0 && liquidCubes == 0;
+		}
+	};
+	static_assert(sizeof(BlockData) == 4);
+	
+	struct BlocksData : BlocksArray<BlockData> { using BlocksArray::BlocksArray; };
 	
 	struct ChunkBlocksList {
 		using value_type = int16_t; static_assert(pos::blocksInChunkCount < std::numeric_limits<value_type>::max());
@@ -473,31 +531,14 @@ namespace chunk {
 		}
 	};
 	
-	struct ChunkData {
-		static constexpr int size = pos::blocksInChunkCount;
-	private:
-		 std::array<Block, size> blocks;
-	 public:
-		Block &operator[](int const index) { 
-			assert(checkBlockIndexInChunkValid(index));
-			return blocks[index];
-		}
-		Block const &operator[](int const index) const { 
-			assert(checkBlockIndexInChunkValid(index));
-			return blocks[index];
-		}
-		
-		Block &operator[](vec3i const coord) { 
-			assert(checkBlockCoordInChunkValid(coord));
-			return blocks[blockIndex(coord)];
-		}
-		
-		Block const &operator[](vec3i const coord) const { 
-			assert(checkBlockCoordInChunkValid(coord));
-			return blocks[blockIndex(coord)];
-		}
+	struct ChunkData : BlocksArray<Block> {
+		using BlocksArray::BlocksArray;
+		using BlocksArray::operator[];
 		
 		struct Cube{ Block block; bool isSolid; };
+		
+		value_type       &operator[](vec3i const coord)       { return (*this)[pBlock{coord}]; }
+		value_type const &operator[](vec3i const coord) const { return (*this)[pBlock{coord}]; }
 		
 		Cube cubeAt(vec3i const cubeCoord) const {
 			auto const blockInChunkCoord{ cubeCoord / units::cubesInBlockDim };
@@ -583,6 +624,7 @@ namespace chunk {
 		std::vector<AABB> chunksAABB{};
 		std::vector<ChunkStatus> chunksStatus{};
 		std::vector<bool> modified{};
+		std::vector<BlocksData> blocksData{};
 		std::vector<ChunkData> chunksData{};
 		std::vector<ChunkLiquid> chunksLiquid{};
 		std::vector<ChunkAO> chunksAO{};
@@ -616,6 +658,7 @@ namespace chunk {
 				chunksAABB.resize(index+1);
 				chunksStatus.resize(index+1);
 				modified.resize(index+1);
+				blocksData.resize(index+1);
 				chunksData.resize(index+1);
 				chunksLiquid.resize(index+1);
 				chunksAO.resize(index+1);

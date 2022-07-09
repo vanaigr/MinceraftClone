@@ -17,6 +17,7 @@
 #include"AO.h"
 #include"Area.h"
 #include"BlockProperties.h"
+#include"BlocksData.h"
 #include"Liquid.h"
 
 #include"Config.h"
@@ -421,7 +422,7 @@ void gpuBuffersReseted() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * pos::blocksInChunkCount * sizeof(uint16_t), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * pos::blocksInChunkCount * sizeof(chunk::Block::id_t), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, chunksBlocks_b, chunksBlocks_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);			
 	
@@ -431,7 +432,7 @@ void gpuBuffersReseted() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);		
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksMesh_ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * pos::blocksInChunkCount * sizeof(uint32_t), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, gpuChunksCount * sizeof(chunk::BlocksData), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, chunksMesh_b, chunksMesh_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
@@ -460,9 +461,9 @@ void gpuBuffersReseted() {
 	
 	//note: glClearBufferSubData(...);
 	
-	static char blocksData[pos::blocksInChunkCount * sizeof(uint16_t)] = {};
+	static chunk::Block::id_t blocksId[pos::blocksInChunkCount] = {};
 	static chunk::ChunkLiquid liquid{};
-	static char meshData [pos::blocksInChunkCount * sizeof(uint32_t)] = {};
+	static chunk::BlocksData blocksData{};
 	static chunk::AABB aabb{ vec3i{units::blocksInChunkDim-1}, vec3i{0} };
 	static chunk::ChunkAO ao{};
 	static chunk::ChunkLighting lighting[2] = { chunk::ChunkLighting{chunk::ChunkLighting::maxValue}, chunk::ChunkLighting{chunk::ChunkLighting::maxValue} };
@@ -475,7 +476,7 @@ void gpuBuffersReseted() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo); 
-	glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(blocksData) * gpuIndex, sizeof(blocksData), &blocksData);
+	glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(blocksId) * gpuIndex, sizeof(blocksId), &blocksId);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);		
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksLiquid_ssbo); 
@@ -483,7 +484,7 @@ void gpuBuffersReseted() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksMesh_ssbo); 
-	glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(meshData) * gpuIndex, sizeof(meshData), &meshData);
+	glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(blocksData) * gpuIndex, sizeof(blocksData), &blocksData);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 		
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
@@ -1206,48 +1207,6 @@ inline void updateNeighbouringEmitters(chunk::Chunk chunk) {
 	curChunkNeighbouringEmitters.fillRepeated(neighbouringEmitters, neighbouringEmittersCount);
 }
 
-inline void updateBlocksWithNoNeighboursInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlock const lastRel) {
-	pChunk const startChunkPos{ startChunk.position() };
-	
-	auto const first{ firstRel + startChunkPos };
-	auto const last { lastRel  + startChunkPos };
-	
-	iterateChunks(startChunk, first.as<pChunk>(), last.as<pChunk>(), [&](chunk::Chunk chunk, pChunk const chunkPos) {		
-		auto const area{ intersectAreas3i(
-			{ vec3i{0}, vec3i{units::blocksInChunkDim-1} }, 
-			{ (first - chunkPos).valAs<pBlock>(), (last - chunkPos).valAs<pBlock>()  }
-		) };
-		
-		if(area.isEmpty()) return;
-		
-		auto &blocks{ chunk.data() };
-		iterateArea(area.first, area.last, [&](pBlock const startBlockInChunkCoord) {	
-			auto &block{ blocks[startBlockInChunkCoord.val()] };
-			
-			bool noNeighbours{};
-			
-			if(block.isEmpty()) {
-				noNeighbours = true;
-				
-				iterate3by3Volume([&](vec3i const neighbourDir, int const index) -> bool {
-					pBlock const neighbourBlockInChunk{ startBlockInChunkCoord + neighbourDir };
-			
-					auto chunkIndex{ chunk::MovingChunk{chunk}.offseted(neighbourBlockInChunk.valAs<pChunk>()).getIndex() };
-					if(chunkIndex.is() && !chunks[chunkIndex.get()].data()[neighbourBlockInChunk.valIn<pChunk>()].isEmpty()) {
-						noNeighbours = false;
-						return true;//break
-					}
-					
-					return false;
-				});
-			}
-			
-			if(noNeighbours) block = chunk::Block::noNeighboursBlock(block);
-			else             block = chunk::Block::  neighboursBlock(block);
-		});	
-	});
-}
-
 static void updateEmitters(chunk::Chunk chunk) {
 	auto &blocks{ chunk.data() };
 	auto &aabb{ chunk.aabb() };
@@ -1317,50 +1276,20 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t) * gpuIndex, sizeof(uint32_t), &aabbData);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 	
-	
-			auto &chunkBlocks{ chunk.data() };
-			auto &chunkLiquid{ chunk.liquid() };
+			auto const &chunkBlocks{ chunk.blocks() };
+			auto const &chunkLiquid{ chunk.liquid() };
+			auto const &blocksData{ chunk.blocksData() };
 			
-			static uint16_t blocksData[pos::blocksInChunkCount] = {};
-			static uint32_t meshData  [pos::blocksInChunkCount] = {};
-			
-			for(int i{}; i < pos::blocksInChunkCount; i++) {
-				pBlock const blockCoord{ chunk::indexBlock(i) };
-				
-				blocksData[i] = chunkBlocks[blockCoord.val()].id();
-			}
+			static chunk::Block::id_t blocksId[pos::blocksInChunkCount];
 			
 			for(int i{}; i < pos::blocksInChunkCount; i++) {
 				pBlock const blockCoord{ chunk::indexBlock(i) };
 				
-				uint32_t result{};
-				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
-					auto const cubeCoord{ blockCoord + pCube{chunk::Block::cubeIndexPos(cubeIndex)} }; 
-					
-					result = result | (uint32_t(chunkBlocks.cubeAt(cubeCoord).isSolid) << cubeIndex) | (uint32_t(!chunkLiquid[cubeCoord].isEmpty()) << (8+cubeIndex));
-				}
-				
-				meshData[i] = result;
-			}
-			
-			for(int i{}; i < pos::blocksInChunkCount; i++) {
-				pBlock const blockCoord{ chunk::indexBlock(i) };
-				
-				auto noNeighbours{ true };
-				iterate3by3Volume([&](vec3i const neighbourDir, int const index) -> bool {
-					auto const neighbourBlockCoord{ blockCoord + pBlock{neighbourDir} };
-					if(neighbourBlockCoord.valAs<pChunk>() != 0)  { noNeighbours = false; return true; }
-					
-					if((meshData[chunk::blockIndex(neighbourBlockCoord.val())] & 0xffff) != 0) { noNeighbours = false; return true; }
-					
-					return false;
-				});
-				
-				meshData[i] = meshData[i] | (uint32_t(noNeighbours) << 16);
+				blocksId[i] = chunkBlocks[blockCoord].id();
 			}
 			
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo); 
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(blocksData) * gpuIndex, sizeof(blocksData), &blocksData);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(blocksId) * gpuIndex, sizeof(blocksId), &blocksId);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);			
 			
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksLiquid_ssbo); 
@@ -1368,57 +1297,8 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);			
 			
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksMesh_ssbo); 
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(meshData) * gpuIndex, sizeof(meshData), &meshData);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);			
-			
-			/*uint32_t cubesData[pos::cubesInChunkCount];
-			for(int i{}; i < pos::cubesInChunkCount; i++) {
-				pCube const cubeCoord{ chunk::cubeCoordInChunk(i) };
-				auto const block{ chunkData[cubeCoord.valAs<pBlock>()] };
-				cubesData[i] = uint32_t(block.id() * int(block.cubeAtCoord(cubeCoord.valIn<pBlock>()))) | (uint32_t(chunkLiquid[i].id) << 16);
-			}
-			
-			uint16_t blocksData[pos::blocksInChunkCount];
-			
-			for(int i{}; i < pos::blocksInChunkCount; i++) {
-				pBlock const blockCoord{ chunk::indexBlock(i) };
-				
-				uint16_t result{};
-				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
-					auto const cubeCoord{ blockCoord + pCube{ chunk::Block::cubeIndexPos(cubeIndex) } }; 
-					result = result | (uint16_t(cubesData[chunk::cubeIndexInChunk(cubeCoord.val())] != 0) << cubeIndex);
-				}
-				
-				blocksData[i] = result;
-			}
-			
-			for(int i{}; i < pos::blocksInChunkCount; i++) {
-				pBlock const blockCoord{ chunk::indexBlock(i) };
-				
-				auto noNeighbours{chunkData[blockCoord.val()].hasNoNeighbours()};
-				
-				//iterate3by3Volume([&](vec3i const neighbourDir, int const index) -> bool {
-				//	auto const neighbourBlockCoord{ blockCoord + pBlock{neighbourDir} };
-				//	if(neighbourBlockCoord.valAs<pChunk>() != 0)  { noNeighbours = false; return true; }
-				//	
-				//	if((blocksData[chunk::blockIndex(neighbourBlockCoord.val())] & 0xff) != 0) { noNeighbours = false; return true; }
-				//	
-				//	return false;
-				//});
-				
-				blocksData[i] = blocksData[i] | (uint16_t(noNeighbours) << 8);
-			}
-			
-			
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBlocks_ssbo); 
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(blocksData) * gpuIndex, sizeof(blocksData), &blocksData);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);			
-			
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksCubes_ssbo); 
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(cubesData) * gpuIndex, sizeof(cubesData), &cubesData);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);*/
-				
-
 			
 			status.setBlocksUpdated(false);
 		}					
@@ -1848,7 +1728,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		//AO is updated later in updateChunk()
 		
 		if(updateBlocksNoNeighbours) { //blocks with no neighbours
-			updateBlocksWithNoNeighboursInArea(chunk, first, last);
+			updateBlocksDataInArea(chunk, first, last);
 			//chunk.status().setBlocksUpdated(true); //already set
 		}
 		
@@ -1885,7 +1765,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 				) };
 				
 				if(!updatedAreaBlocks.isEmpty()) {
-					updateBlocksWithNoNeighboursInArea(neighbourChunk, pBlock{updatedAreaBlocks.first}, pBlock{updatedAreaBlocks.last});
+					updateBlocksDataInArea(neighbourChunk, pBlock{updatedAreaBlocks.first}, pBlock{updatedAreaBlocks.last});
 					neighbourChunk.status().setBlocksUpdated(true);
 				}
 			}
@@ -2340,7 +2220,7 @@ static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir cons
 
 void updateAOandBlocksWithoutNeighbours(chunk::Chunk chunk, pCube const first, pCube const last) {
 	updateAOInArea(chunk, first.val(), (last + pCube{1}).val() );
-	updateBlocksWithNoNeighboursInArea(chunk, first.as<pBlock>() - pBlock{1}, last.as<pBlock>() + pBlock{1});
+	updateBlocksDataInArea(chunk, first.as<pBlock>() - pBlock{1}, last.as<pBlock>() + pBlock{1});
 }
 
 bool performBlockAction() {
