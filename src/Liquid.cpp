@@ -16,7 +16,7 @@ struct ChunkAndCubeHash {
 	} 
 };
 
-//static constexpr chunk::LiquidCube::level_t maxMovePerFrame{8};
+static constexpr chunk::LiquidCube::level_t maxLiquidToNeighbour{8};
 
 void ChunksLiquidCubes::update() {
 	auto &chunks{ this->chunks() };
@@ -26,14 +26,16 @@ void ChunksLiquidCubes::update() {
 	genNext.clear();
 	
 	std::unordered_set<chunk::ChunkAndCube, ChunkAndCubeHash> s{};
-	for (auto const i : gen) s.insert(i);
+	for (auto const i : gen) s.insert(i); //a lot of memory allocations
 	
 	gen.assign(s.begin(), s.end());
 	std::sort(gen.begin(), gen.end());
 	
 	chunk::OptionalChunkIndex prevChunk{}; //no index if previous chunk is not updated
 	
-	for(auto const &[chunkIndex, cubeIndex] : gen) {
+	for(auto const cubePosData : gen) {
+		auto const &[chunkIndex, cubeIndex] = cubePosData;
+		
 		if(prevChunk.is() && chunk::OptionalChunkIndex{chunkIndex} != prevChunk) {
 			chunks[prevChunk.get()].status().setBlocksUpdated(true);
 			prevChunk = {};
@@ -43,118 +45,136 @@ void ChunksLiquidCubes::update() {
 		auto const cubeCoord{ chunk::cubeIndexToCoord(cubeIndex) };
 	
 		auto &liquidCube{ chunk.liquid()[cubeIndex] };
-		auto const id{ liquidCube.id }; //copy!
+		auto const id{ liquidCube.id }; //copy
 		auto level{ liquidCube.level }; //copy
 		
-		if(id == 0) continue;
+		auto modified{ false };
+		auto keepUpdating{ false };
 		
-		auto const propDown = [&]() {
-			auto const neighbourChunkAndCube = getNeighbourCube(chunk, cubeCoord, vec3i{0, -1, 0});
-			auto const [cubeDownChunkIndex, cubeDownCubeIndex] = neighbourChunkAndCube; 
-			if(cubeDownChunkIndex == -1) return false;
+		//move liquid downwards
+		if(level != 0) [&]() {
+			auto const neighbourCubePosData = getNeighbourCube(chunk, cubeCoord, vec3i{0, -1, 0});
+			auto const [neighbourCubeChunkIndex, neighbourCubeCubeIndex] = neighbourCubePosData; 
+			if(neighbourCubeChunkIndex == -1) return;
 			
-			auto cubeDownChunk{ chunks[cubeDownChunkIndex] };
-			auto const cubeDownCoord{ chunk::cubeIndexToCoord(cubeDownCubeIndex) };
-			if(cubeDownChunk.data().cubeAt(cubeDownCoord).isSolid) return false;
+			auto neighbourCubeChunk{ chunks[neighbourCubeChunkIndex] };
+			auto const neighbourCubeCoord{ chunk::cubeIndexToCoord(neighbourCubeCubeIndex) };
+			if(neighbourCubeChunk.data().cubeAt(neighbourCubeCoord).isSolid) return;
 			
-			auto &downLiquidCube{ cubeDownChunk.liquid()[cubeDownCubeIndex] };
-			chunk::LiquidCube::level_t const toMax( chunk::LiquidCube::maxLevel - downLiquidCube.level );
-			if(toMax != 0 && (downLiquidCube.id == 0 || downLiquidCube.id == id)) {
-				auto const diff{ std::min({level, toMax}) };
-				level -= diff;		
-				downLiquidCube = { id, downLiquidCube.level + diff };
+			auto &neighbourLiquidCube{ neighbourCubeChunk.liquid()[neighbourCubeCubeIndex] };
+			auto const toMax( chunk::LiquidCube::maxLevel - neighbourLiquidCube.level );
+			
+			if(toMax != 0 && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
+				auto diff{ std::min<int>(level, toMax) };
+				//if(diff > maxLiquidToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; } //limit on downwards flow
 				
-				genNext.push_back(neighbourChunkAndCube);
-				return true;
+				modified = true;
+				level -= diff;		
+				neighbourLiquidCube = { id, neighbourLiquidCube.level + diff };
+				
+				genNext.push_back(neighbourCubePosData);
+				return;
 			}
 			
-			return false;
+			return;
 		}();
 		
-		if(propDown) {
+		//move liquid sideways(?)
+		if(level != 0) [&]() {
+			struct LiquidCubeAndPos { 
+				chunk::LiquidCube liquidCube; //copy
+				chunk::LiquidCube *liquidCubeLoc; 
+				chunk::ChunkAndCube posData; 
+				bool modified; 
+				bool valid; 
+			};
+			
+			static constexpr int sideNeighboursCount = 4;
+			static constexpr vec3i dirs[sideNeighboursCount] = { {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1} };
+			
+			LiquidCubeAndPos cubes[sideNeighboursCount] = {};
+			
+			//fill the neighbours
+			for(int i{}; i < sideNeighboursCount; i++) {
+				auto const dir{ dirs[i] };
+				
+				auto const neighbourCubePosData = getNeighbourCube(chunk, cubeCoord, dir);
+				auto const [cubeNeighbourChunkIndex, cubeNeighbourCubeIndex] = neighbourCubePosData; 
+				if(cubeNeighbourChunkIndex == -1) continue;
+				
+				auto cubeNeighbourChunk{ chunks[cubeNeighbourChunkIndex] };
+				auto const cubeNeighbourCoord{ chunk::cubeIndexToCoord(cubeNeighbourCubeIndex) };
+				if(cubeNeighbourChunk.data().cubeAt(cubeNeighbourCoord).isSolid) continue;
+				
+				auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[cubeNeighbourCubeIndex] };
+				if((level > neighbourLiquidCube.level) && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
+					cubes[i] = { neighbourLiquidCube, &neighbourLiquidCube, neighbourCubePosData, false, true };
+				}
+			}
+			
+			//average out liquid levels between current cube and its neighbours
+			while(true) {
+				int validCubesCount{};
+				int liquidTotal{ level };
+				for(int i{}; i < sideNeighboursCount; i++) {
+					auto &cube{ cubes[i] };
+					if(!cube.valid) continue;
+					validCubesCount++;
+					liquidTotal += cube.liquidCube.level;
+				}
+				
+				if(validCubesCount == 0) break;
+				
+				auto const avgLevel{ liquidTotal / (validCubesCount+1) }; //this variant leaves MORE liquid in current cube
+				
+				int movedToNeighbours{ 0 };
+				
+				for(int i{}; i < sideNeighboursCount; i++) {
+					auto &cube{ cubes[i] };
+					if(!cube.valid) continue;
+					
+					auto diff{ avgLevel - cube.liquidCube.level };
+					auto const maxToNeighbour{ diff > maxLiquidToNeighbour };
+					if(maxToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; }
+					
+					if(diff > 0) {
+						movedToNeighbours += diff;
+						cube.liquidCube = { id, cube.liquidCube.level + diff };
+						cube.modified = true;
+					}
+					
+					if(diff <= 0 || maxToNeighbour) cube.valid = false;
+				}
+				
+				if(movedToNeighbours != 0) {
+					level -= movedToNeighbours;
+					modified = true;
+				}
+			}
+			
+			//write modified cubes
+			for(int i{}; i < sideNeighboursCount; i++) {
+				auto &cube{ cubes[i] };
+				if(cube.modified) {
+					*cube.liquidCubeLoc = cube.liquidCube;
+					genNext.push_back(cube.posData);
+				}
+			}
+		}();
+		
+		if(modified) {
 			liquidCube = { id, level };
 			prevChunk = chunkIndex;
 		}
-		else {
-			auto const propSides = [&]() {
-				struct LiquidCubeAndPos { chunk::LiquidCube liquidCube; chunk::LiquidCube *liquidCubeLoc; chunk::ChunkAndCube pos; bool modified; bool valid; };
-				LiquidCubeAndPos cubes[4] = {};
-				
-				static constexpr vec3i dirs[] = { {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1} };
-				for(int i{}; i < 4; i++) {
-					auto const dir{ dirs[i] };
-					
-					auto const neighbourChunkAndCube = getNeighbourCube(chunk, cubeCoord, dir);
-					auto const [cubeNeighbourChunkIndex, cubeNeighbourCubeIndex] = neighbourChunkAndCube; 
-					if(cubeNeighbourChunkIndex == -1) continue;
-					
-					auto cubeNeighbourChunk{ chunks[cubeNeighbourChunkIndex] };
-					auto const cubeNeighbourCoord{ chunk::cubeIndexToCoord(cubeNeighbourCubeIndex) };
-					if(cubeNeighbourChunk.data().cubeAt(cubeNeighbourCoord).isSolid) continue;
-					
-					auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[cubeNeighbourCubeIndex] };
-					if((level > neighbourLiquidCube.level) && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
-						cubes[i] = { neighbourLiquidCube, &neighbourLiquidCube, neighbourChunkAndCube, false, true };
-					}
-				}
-				
-				auto modified{ false };
-				
-				while(true) {
-					int validCubesCount{};
-					int liquidTotal{ level };
-					for(int i{}; i < 4; i++) {
-						auto &cube{ cubes[i] };
-						if(!cube.valid) continue;
-						validCubesCount++;
-						liquidTotal += cube.liquidCube.level;
-					}
-					
-					if(validCubesCount == 0) break;
-					
-					auto const avgLevel{ liquidTotal / (validCubesCount+1) }; //this variant leaves MORE liquid in current cube
-					
-					int movedToNeighbours{ 0 };
-					
-					for(int i{}; i < 4; i++) {
-						auto &cube{ cubes[i] };
-						if(!cube.valid) continue;
-						
-						auto const diff{ avgLevel - cube.liquidCube.level };
-						if(diff > 0) {
-							movedToNeighbours += diff;
-							cube.liquidCube = { id, cube.liquidCube.level + diff };
-							cube.modified = true;
-						}
-						else cube.valid = false;
-					}
-					
-					if(movedToNeighbours != 0) {
-						level -= movedToNeighbours;
-						modified = true;
-					}
-				}
-				
-				for(int i{}; i < 4; i++) {
-					auto &cube{ cubes[i] };
-					if(cube.modified) {
-						*cube.liquidCubeLoc = cube.liquidCube;
-						genNext.push_back(cube.pos);
-					}
-				}
-				
-				return modified;
-			}();
-			if(propSides) {
-				liquidCube = { id, level };
-				prevChunk = chunkIndex;
-			}
+		if(keepUpdating) {
+			genNext.push_back(cubePosData);
 		}
 		
+		//mark cubes that could move liquid to this cube as needing pudate
 		if(level < chunk::LiquidCube::maxLevel) {
-			auto const propFromUp = [&]() {
-				auto const neighbourChunkAndCube = getNeighbourCube(chunk, cubeCoord, vec3i{0, 1, 0});
-				auto const [cubeUpChunkIndex, cubeUpCubeIndex] = neighbourChunkAndCube; 
+			auto const fromAbove = [&]() {
+				auto const neighbourCubePosData = getNeighbourCube(chunk, cubeCoord, vec3i{0, 1, 0});
+				auto const [cubeUpChunkIndex, cubeUpCubeIndex] = neighbourCubePosData; 
 				if(cubeUpChunkIndex == -1) return false;
 				
 				auto cubeUpChunk{ chunks[cubeUpChunkIndex] };
@@ -163,19 +183,19 @@ void ChunksLiquidCubes::update() {
 				
 				auto &upLiquidCube{ cubeUpChunk.liquid()[cubeUpCubeIndex] };
 				if(upLiquidCube.id == id) {
-					genNext.push_back(neighbourChunkAndCube);
+					genNext.push_back(neighbourCubePosData);
 					return true;
 				}
 				return false;
 			}();
 			
-			if(!propFromUp) {
+			if(!fromAbove) {
 				static constexpr vec3i dirs[] = { {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1} };
 				for(int i{}; i < 4; i++) {
 					auto const dir{ dirs[i] };
 					
-					auto const neighbourChunkAndCube = getNeighbourCube(chunk, cubeCoord, dir);
-					auto const [cubeNeighbourChunkIndex, cubeNeighbourCubeIndex] = neighbourChunkAndCube; 
+					auto const neighbourCubePosData = getNeighbourCube(chunk, cubeCoord, dir);
+					auto const [cubeNeighbourChunkIndex, cubeNeighbourCubeIndex] = neighbourCubePosData; 
 					if(cubeNeighbourChunkIndex == -1) continue;
 					
 					auto cubeNeighbourChunk{ chunks[cubeNeighbourChunkIndex] };
@@ -184,14 +204,16 @@ void ChunksLiquidCubes::update() {
 					
 					auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[cubeNeighbourCubeIndex] };
 					if(neighbourLiquidCube.level > level && neighbourLiquidCube.id == id) {
-						genNext.push_back(neighbourChunkAndCube);
+						genNext.push_back(neighbourCubePosData);
 					}
 				}
 			}
 		}
 	}
+	
 	if(prevChunk.is()) {
 		chunks[prevChunk.get()].status().setBlocksUpdated(true);
+		prevChunk = {};
 	}
 	
 	genIndex = (genIndex+1) % gensCount;
