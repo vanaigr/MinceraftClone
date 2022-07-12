@@ -189,7 +189,6 @@ static GLuint const		&atlas_t           = textures[atlas_it],
 						&noise_t           = textures[noise_it],
 						&screenshotColor_t = textures[screenshotColor_it];
 
-
 enum SSBOs : GLuint {
 	chunksIndices_b = 0,
 	chunksBlocks_b,
@@ -244,38 +243,8 @@ static vec2i screenshotSize{ windowSize };
 bool takeScreenshot;
 
 static chunk::Chunks chunks{};
-
 static ChunksLiquidCubes chunksLiquid{ chunks };
 
-static bool checkChunkInView(vec3i const coord) {
-	return coord.clamp(-viewDistance, +viewDistance) == coord;
-}
-
-struct GPUChunksIndex {
-	chunk::Chunks::index_t lastIndex;
-	std::vector<chunk::Chunks::index_t> vacant;
-	
-	chunk::Chunks::index_t reserve() {
-		if(vacant.empty()) return ++lastIndex; //never 0
-		else {
-			auto const index{ vacant.back() };
-			vacant.pop_back();
-			return index;
-		}
-	}
-	
-	void recycle(chunk::Chunks::index_t const index) {
-		if(index == 0) return;
-		assert(std::find(vacant.begin(), vacant.end(), index) == vacant.end());
-		assert(index > 0);
-		vacant.push_back(index);
-	}
-	
-	void reset() { // = GPUChunksIndex{}, but vector keeps its capacity
-		lastIndex = 0;
-		vacant.clear();
-	}
-} static gpuChunksIndex{}; 
 
 enum class Key : uint8_t { RELEASE = GLFW_RELEASE, PRESS = GLFW_PRESS, REPEAT = GLFW_REPEAT, NOT_PRESSED };
 static_assert(GLFW_RELEASE >= 0 && GLFW_RELEASE < 256 && GLFW_PRESS >= 0 && GLFW_PRESS < 256 && GLFW_REPEAT >= 0 && GLFW_REPEAT < 256);
@@ -283,6 +252,7 @@ static_assert(GLFW_RELEASE >= 0 && GLFW_RELEASE < 256 && GLFW_PRESS >= 0 && GLFW
 static bool shift{ false }, ctrl{ false };
 static Key keys[GLFW_KEY_LAST+1];
 
+static void reloadConfig();
 static void reloadShaders();
 
 void handleKey(int const key) {
@@ -333,7 +303,9 @@ void handleKey(int const key) {
 		currentInput().movement.x = -1 * isPress;
 	
 	if(key == GLFW_KEY_F5 && action == GLFW_PRESS)
-		reloadShaders();
+		reloadShaders();	
+	else if(key == GLFW_KEY_F6 && action == GLFW_PRESS)
+		reloadConfig();	
 	else if(key == GLFW_KEY_F4 && action == GLFW_PRESS)
 		takeScreenshot = true;
 	else if(key == GLFW_KEY_F3 && action == GLFW_RELEASE) { 
@@ -403,6 +375,37 @@ static int blockPlaceId = 1;
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
 	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 15);
 }
+
+
+static bool checkChunkInView(vec3i const coord) {
+	return coord.clamp(-viewDistance, +viewDistance) == coord;
+}
+
+struct GPUChunksIndex {
+	chunk::Chunks::index_t lastIndex;
+	std::vector<chunk::Chunks::index_t> vacant;
+	
+	chunk::Chunks::index_t reserve() {
+		if(vacant.empty()) return ++lastIndex; //never 0
+		else {
+			auto const index{ vacant.back() };
+			vacant.pop_back();
+			return index;
+		}
+	}
+	
+	void recycle(chunk::Chunks::index_t const index) {
+		if(index == 0) return;
+		assert(std::find(vacant.begin(), vacant.end(), index) == vacant.end());
+		assert(index > 0);
+		vacant.push_back(index);
+	}
+	
+	void reset() { // = GPUChunksIndex{}, but vector keeps its capacity
+		lastIndex = 0;
+		vacant.clear();
+	}
+} static gpuChunksIndex{}; 
 
 void gpuBuffersReseted() {
 	auto const renderDiameter{ viewDistance*2+1 };
@@ -515,33 +518,40 @@ void printLinkErrors(GLuint const prog, char const *const name) {
 	delete[] msg;
 } 
 
-static void reloadShaders() {
-	{ //reload config as well
-		Config cfg{};
-			cfg.viewDistance =  viewDistance;
-			cfg.loadChunks = saveChunks;
-			cfg.saveChunks = saveChunks;
-			cfg.playerCameraFovDeg = playerCamera.fov / misc::pi * 180.0;
-			cfg.mouseSensitivity = mouseSensitivity;
-			cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
-			cfg.lockFramerate = lockFramerate;
-			cfg.screenshotSize = screenshotSize;
-			
-		parseConfigFromFile(cfg);
+static void reloadConfig() {
+	Config cfg{};
+		cfg.viewDistance =  viewDistance;
+		cfg.loadChunks = saveChunks;
+		cfg.saveChunks = saveChunks;
+		cfg.playerCameraFovDeg = playerCamera.fov / misc::pi * 180.0;
+		cfg.mouseSensitivity = mouseSensitivity;
+		cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
+		cfg.lockFramerate = lockFramerate;
+		cfg.screenshotSize = screenshotSize;
 		
-		viewDistance = cfg.viewDistance;
-		loadChunks = cfg.loadChunks;
-		saveChunks = cfg.saveChunks;
-		desiredPlayerCamera.fov = cfg.playerCameraFovDeg / 180.0 * misc::pi;
-		mouseSensitivity = cfg.mouseSensitivity;
-		playerCamera = desiredPlayerCamera;
-		chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
-		lockFramerate = cfg.lockFramerate;
-		screenshotSize = cfg.screenshotSize;
-	}
+	parseConfigFromFile(cfg);
 	
+	bool shouldReloadShaders = viewDistance != cfg.viewDistance || !(screenshotSize == cfg.screenshotSize);
+	
+	viewDistance = cfg.viewDistance;
+	loadChunks = cfg.loadChunks;
+	saveChunks = cfg.saveChunks;
+	desiredPlayerCamera.fov = cfg.playerCameraFovDeg / 180.0 * misc::pi;
+	mouseSensitivity = cfg.mouseSensitivity;
+	playerCamera = desiredPlayerCamera;
+	chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
+	lockFramerate = cfg.lockFramerate;
+	screenshotSize = cfg.screenshotSize;
+	
+	if(shouldReloadShaders) reloadShaders();
+}
+
+static void reloadShaders() {
 	glDeleteTextures(texturesCount, &textures[0]);
 	glGenTextures   (texturesCount, &textures[0]);
+	
+	glDeleteBuffers(ssbosCount, &ssbos[0]);
+	glGenBuffers   (ssbosCount, &ssbos[0]);
 	
 	/*{
 		//color
@@ -599,9 +609,6 @@ static void reloadShaders() {
 	}
 	
 	{
-		glDeleteBuffers(ssbosCount, &ssbos[0]);
-		glGenBuffers   (ssbosCount, &ssbos[0]);
-		
 		{ //atlas desctiption
 			auto const c = [](int16_t const x, int16_t const y) -> int32_t {
 				return int32_t( uint32_t(uint16_t(x)) | (uint32_t(uint16_t(y)) << 16) );
@@ -2239,7 +2246,6 @@ bool performBlockAction() {
 		pBlock const blockInChunkPos{ chunk::indexBlock(result.blockIndex) };
 		pCube const cubeInBlockPos{ chunk::Block::cubeIndexPos(result.cubeIndex) };
 		auto chunk{ result.chunk };
-		auto const &chunkData{ chunk.data() };
 		auto &block{ chunk.data()[result.blockIndex] };
 		auto const blockId{ block.id() };
 		auto const emitter{ isBlockEmitter(blockId) };
@@ -2290,6 +2296,8 @@ bool performBlockAction() {
 		
 		chunk.modified() = true;
 		
+		updateAOandBlocksWithoutNeighbours(chunk, first, last);
+		
 		auto &aabb{ chunk.aabb() };
 		vec3i const start_{ aabb.start() };
 		vec3i const end_  { aabb.end  () };
@@ -2297,25 +2305,23 @@ bool performBlockAction() {
 		vec3i start{ units::blocksInChunkDim-1 };
 		vec3i end  { 0 };
 		
+		auto const &blocksData{ chunk.blocksData() };
 		for(int32_t x = start_.x; x <= end_.x; x++)
 		for(int32_t y = start_.y; y <= end_.y; y++)
 		for(int32_t z = start_.z; z <= end_.z; z++) {
-			vec3i const blk{x, y, z};
-			if(chunkData[chunk::blockIndex(blk)].id() != 0) {
-				start = start.min(blk);
-				end   = end  .max(blk);
+			pBlock const blk{x, y, z};
+			if(!blocksData[blk].noCubes()) {
+				start = start.min(blk.val());
+				end   = end  .max(blk.val());
 			}
 		}
 		
 		aabb = chunk::AABB(start, end);
-		
 	
 		if(emitter && wholeBlockRemoved) {
 			chunk.emitters().remove(blockCoord);
 			setChunksUpdateNeighbouringEmitters(chunk);
 		}
-		
-		updateAOandBlocksWithoutNeighbours(chunk, first, last);
 		
 		iterate3by3Volume([&](vec3i const dir, int const index) {
 			auto const chunkOffset{ (blockInChunkPos + pBlock{dir}).valAs<pChunk>() };
@@ -2528,7 +2534,7 @@ static void update(chunk::Chunks &chunks) {
 	playerCamera.fov = misc::lerp( playerCamera.fov, desiredPlayerCamera.fov / curZoom, 0.1 );
 	
 	updateChunks(chunks);
-	chunksLiquid.update();
+	if(!numpad[0]) chunksLiquid.update();
 	
 	auto const diff{ pos::fracToPos(playerCoord+playerCameraOffset - playerCamPos) };
 	playerCamPos = playerCamPos + pos::posToFrac(vec3lerp(vec3d{}, vec3d(diff), vec3d(0.4)));
@@ -2665,9 +2671,9 @@ int main(void) {
         std::cout << err << std::endl;
     }
 
-	reloadShaders();
-
+	reloadConfig();
 	updateChunks(chunks);
+	reloadShaders();
 	
     auto const completionTime = std::chrono::steady_clock::now();
 	std::cout << "Time to start (ms): " << ( double(std::chrono::duration_cast<std::chrono::microseconds>(completionTime - startupTime).count()) / 1000.0 ) << '\n';
@@ -2808,6 +2814,8 @@ int main(void) {
 			if(numpad[3]) glFinish();
 			auto const endTraceTime{ std::chrono::steady_clock::now() };
 			
+			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+			
 			if(takeScreenshot) {
 				takeScreenshot = false;
 				
@@ -2892,9 +2900,38 @@ int main(void) {
 					pCube const cubeInChunkPos{ pBlock{blockInChunkCoord} + pCube{cubeInBlockCoord} };
 					
 					ss.precision(1);
-					auto const block{ chunk.data()[blockInChunkCoord] };
-					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << (vec3f(blockInChunkCoord*units::cubesInBlockDim + cubeInBlockCoord)/units::cubesInBlockDim)  << " : block id=" << block.id() << '\n';
-					ss << "sky lighting: " << int(chunk.skyLighting()[cubeInChunkPos.val()]) << " block lighting: " << int(chunk.blockLighting()[cubeInChunkPos.val()]) << '\n';
+					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << (vec3f(blockInChunkCoord*units::cubesInBlockDim + cubeInBlockCoord)/units::cubesInBlockDim) << '\n';
+					
+					{
+						auto const block{ chunk.data()[blockInChunkCoord] };
+						auto const liquid{ chunk.liquid()[cubeInChunkPos] };
+						ss << "sky lighting: " << int(chunk.skyLighting()[cubeInChunkPos.val()]) 
+						   << " block lighting: " << int(chunk.blockLighting()[cubeInChunkPos.val()]) << '\n';
+						ss << "block id=" << int{block.id()} << "; liquid id=" << int{liquid.id} << " liquid level=" << int{liquid.level} << '\n';
+					}
+					
+					{
+						auto const intersectionAxis{ result.intersectionAxis };
+						vec3i const dirSign{ pd.direction };
+						auto const normal{ -dirSign * intersectionAxis };
+						
+						auto const beforePosInStartChunk { cubeInChunkPos + pCube{normal} };
+						
+						auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(beforePosInStartChunk.valAs<pChunk>()) };
+						if(chunkIndex.is()) {
+							auto chunk{ chunks[chunkIndex.get()] };
+							
+							auto const cubeInChunkPos{ beforePosInStartChunk.in<pChunk>() };
+							auto const blockInChunkPos{ cubeInChunkPos.as<pBlock>() };
+							
+							auto const block{ chunk.data()[blockInChunkPos] };
+							auto const liquid{ chunk.liquid()[cubeInChunkPos] };
+							ss << "cube before: \n";
+							ss << "sky lighting: " << int(chunk.skyLighting()[cubeInChunkPos.val()]) 
+							<< " block lighting: " << int(chunk.blockLighting()[cubeInChunkPos.val()]) << '\n';
+							ss << "block id=" << int{block.id()} << "; liquid id=" << int{liquid.id} << " liquid level=" << int{liquid.level} << '\n';
+						}
+					}
 				};
 				
 				ss.precision(4);

@@ -1,5 +1,12 @@
 #version 450
 
+#define DEBUG 1
+
+#if DEBUG
+#extension GL_ARB_shader_group_vote : enable
+#extension GL_ARB_shader_ballot : enable
+#endif
+
 in vec4 gl_FragCoord;
 layout(location = 0) out vec4 color;
 
@@ -29,11 +36,11 @@ uniform vec3 startCoord;
 uniform int viewDistance;
 const int renderDiameter = viewDistance*2 + 1;
 
-
+#if DEBUG
 //these variables are used for debugging purpposes. Like `discard` but allows outputing different colors
-//bool exit_ = false; 
-//vec3 exitVec3 = vec3(5,5,5);
-
+bool exit_ = false; 
+vec3 exitVec3 = vec3(5,5,5);
+#endif
 
 //copied from Units.h
 const int blocksInChunkDimAsPow2 = 4;
@@ -685,6 +692,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 			);
 
 			if(!isEmpty(fromBlock) || !isEmpty(toBlock)) {
+			
 				const bvec4 cubes = bvec4(
 					blockCubeAt (fromBlock, cubeLocalToBlock(fromCubeCoord)),
 					liquidCubeAt(fromBlock, cubeLocalToBlock(fromCubeCoord)),
@@ -692,7 +700,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 					liquidCubeAt(toBlock  , cubeLocalToBlock(toCubeCoord  ))
 				);
 				
-				if(any(cubes)) {
+				if(any(cubes)) {	
 					uint fBlockId = 0;
 					uint fLiquidId = 0;
 					
@@ -849,6 +857,13 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 }
 
 
+volatile buffer A {
+	float aaaaaaa;	
+};
+
+#define WRITE_TRACE 0
+#define READ_TRACE 0
+
 const int rayTypeStandard = 0;
 const int rayTypeShadowBlock = 1;
 const int rayTypeShadowSky = 2;
@@ -892,7 +907,43 @@ void setCurResultPos(const int pos) { putResultPos = pos + 1; }
 int paramsPosOffset(const int pos) { return size - (pos+1) * 7; }
 int resultPosOffset(const int pos) { return pos * 4; }
 
+restrict buffer TraceTest {
+	uint data[];
+} traceB;
+
+const ivec3 fragCoord = ivec3(floor(gl_FragCoord));
+const int maxPosOffset = int((fragCoord.x + fragCoord.y * windowSize.x) * (10 * 7 + 1) + 10 * 7);
+
+#if WRITE_TRACE
+
+int setParamsPos = 0;
+void writeParams0(const Params it) {
+	if(setParamsPos < 0 || setParamsPos >= 10) discard;
+	
+	const int offset = int((fragCoord.x + fragCoord.y * windowSize.x) * (10 * 7 + 1) + setParamsPos * 7);
+	
+	if(offset < 0 || offset >= traceB.data.length()) discard;
+
+	traceB.data[offset+0] = floatBitsToUint(it.ray.orig.x);
+	traceB.data[offset+1] = floatBitsToUint(it.ray.orig.y);
+	traceB.data[offset+2] = floatBitsToUint(it.ray.orig.z);
+	
+	traceB.data[offset+3] = floatBitsToUint(it.ray.dir.x);
+	traceB.data[offset+4] = floatBitsToUint(it.ray.dir.y);
+	traceB.data[offset+5] = floatBitsToUint(it.ray.dir.z);
+	
+	traceB.data[offset+6] = (uint(it.bias - minBias) & 0xfu) | ((it.rayIndex & 7u) << 16) | ((it.rayType & 7u) << 19) | ((uint(it.parent) & 0xffu) << 22) | (uint(it.last) << 30);
+
+	setParamsPos++;
+	traceB.data[maxPosOffset] = setParamsPos;
+}
+
+#endif
+
 void writeParams(const Params it, const int position) {
+	#if WRITE_TRACE
+	writeParams0(it);
+	#endif
 	const int offset = paramsPosOffset(position);
 	
 	stack[offset+0] = floatBitsToUint(it.ray.orig.x);
@@ -905,7 +956,46 @@ void writeParams(const Params it, const int position) {
 	
 	stack[offset+6] = (uint(it.bias - minBias) & 0xfu) | ((it.rayIndex & 7u) << 16) | ((it.rayType & 7u) << 19) | ((uint(it.parent) & 0xffu) << 22) | (uint(it.last) << 30);
 }
+
+#if READ_TRACE
+const uint maxGetPos = traceB.data[maxPosOffset];
+
+int getParamsPos = 0;
+Params readParams0() {
+	if(getParamsPos < 0 || getParamsPos >= maxGetPos) discard;
+	
+	const int offset = int((fragCoord.x + fragCoord.y * windowSize.x) * (10 * 7 + 1) + getParamsPos * 7);
+	
+	if(offset < 0 || offset >= traceB.data.length()) discard;
+
+	getParamsPos++;
+	return Params(
+		Ray(
+			vec3(
+				uintBitsToFloat(traceB.data[offset+0]),
+				uintBitsToFloat(traceB.data[offset+1]),
+				uintBitsToFloat(traceB.data[offset+2])
+			),
+			vec3(
+				uintBitsToFloat(traceB.data[offset+3]),
+				uintBitsToFloat(traceB.data[offset+4]),
+				uintBitsToFloat(traceB.data[offset+5])
+			)
+		),
+		int((traceB.data[offset+6] >> 0) & 0xfu) + minBias,
+		(traceB.data[offset+6] >> 16) & 7u,
+		(traceB.data[offset+6] >> 19) & 3u,
+		(int(traceB.data[offset+6] << 2) >> (22+2)), //sign extended shift
+		bool((traceB.data[offset+6] >> 30) & 1u)
+	);	
+}
+
+#endif
 Params readParams(const int position) {
+	#if READ_TRACE	
+	return readParams0();
+	#endif
+	
 	const int offset = paramsPosOffset(position);
 		
 	return Params(
@@ -928,6 +1018,7 @@ Params readParams(const int position) {
 		bool((stack[offset+6] >> 30) & 1u)
 	);
 }
+
 
 void writeResult(const Result it, const int position) {
 	const int offset = resultPosOffset(position);
@@ -977,7 +1068,6 @@ bool canPushResult() {
 	&& resultPosOffset(putResultPos+1)-1 < paramsPosOffset(putParamsPos-1); //resultEnd < paramsEnd
 }
 
-
 vec3 background(const vec3 dir) {
 	const float t = 0.5 * (dir.y + 1.0);
 	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.02) + t * vec3(0.5, 0.7, 1.0);
@@ -1005,7 +1095,8 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 	if(surfaceId == 7 || surfaceId == 15) {
 		const bool glass = surfaceId == 7;
 		
-		const float fresnel = unpackHalf2x16(current.data).x;
+		float fresnel_ = unpackHalf2x16(current.data).x;
+		const float fresnel = isnan(fresnel_) ? 0.5 : fresnel_;
 		const bool backside = bool(current.data >> 16);
 		const bool both = childrenCount == 2;
 		
@@ -1097,6 +1188,28 @@ struct RayResult {
 	bool pushedRays;
 };
 
+#if READ_TRACE
+RayResult traceStep(const int iteration) {
+	const Params p = readParams0();
+	const Ray ray = p.ray;
+	const vec3 dirSign = calcDirSign(ray.dir);
+	
+	const uint rayIndex = p.rayIndex;
+	const uint type = p.rayType;
+	const int startBias = p.bias;
+	const int parent = p.parent;
+	const bool last = p.last;
+	
+	const bool shadow = type == rayTypeShadowBlock || type == rayTypeShadowSky || type == rayTypeLightingBlock || type == rayTypeLightingEmitter;
+	
+	const IntersectionInfo i = isInters(ray, startBias);	
+	
+	float aa = float(last) + parent + float(shadow) + rayIndex + dot(dirSign, vec3(1));
+	aaaaaaa += aa + i.blockId + dot(i.coord, vec3(1)) + dot(i.localSpaceCoord, vec3(1)) + dot(i.intersectionSide, vec3(1)) + i.bias + i.blockId;
+	
+	return RayResult(false);
+}
+#else
 RayResult traceStep(const int iteration) {
 	bool pushed = false;
 	
@@ -1127,7 +1240,9 @@ RayResult traceStep(const int iteration) {
 	const bool playerFrist = isPlayer && dot(i.coord - ray.orig, i.coord - ray.orig) > playerTsq;
 	
 	if(i.blockId != 0 && !playerFrist) { //block
-		//if(exit_) return RayResult(false);
+		#if DEBUG
+		if(exit_) return RayResult(false);
+		#endif
 		const vec3 coord = i.coord;        
 		const vec3 localSpaceCoord = i.localSpaceCoord;
 		const ivec3 chunkPosition = ivec3(floor(coord / blocksInChunkDim));
@@ -1278,11 +1393,9 @@ RayResult traceStep(const int iteration) {
 
 			pushResult(Result( color * (emitter ? 5 : 1), t, 0u, blockId, rayIndex, (emitter && type == rayTypeLightingBlock) ? rayTypeLightingEmitter : type, parent, last));
 			
-			if(blockId == 5 && iteration < 3) {
-				if(canPushParams()) {
+			if(blockId == 5 && iteration < 3 && canPushParams()) {
 					pushParams(Params( Ray(coord, ray.dir), bias+1, 1u, type, curFrame, !pushed));
 					pushed = true;
-				}
 			}
 			if(!shadow && !emitter) {
 				const int shadowOffsetsCount = 4;
@@ -1320,6 +1433,7 @@ RayResult traceStep(const int iteration) {
 					pushParams(Params( Ray(position, newDir), newBias, 0u, rayTypeShadowBlock, curFrame, !pushed));
 					pushed = true;
 				}
+				
 				
 				if(canPushParams()) {
 					const NE ne = neFromChunk(intersectionChunkIndex, dirIndex);
@@ -1382,20 +1496,31 @@ RayResult traceStep(const int iteration) {
 	else { //sky
 		pushResult(Result(shadow ? vec3(2) : background(ray.dir), far, 0, 0u, rayIndex, type == rayTypeShadowBlock ? rayTypeShadowSky : type, parent, last));
 	}
-	
+
 	return RayResult(pushed);
 }
+#endif
 
 vec3 trace(const Ray startRay) {	
 	if(!canPushParams()) return vec3(1,0,1);
 	pushParams(Params(startRay, 0, 0u, rayTypeStandard, curResultPos(), true));
 	
 	int iteration = 0;
+	
+	#if READ_TRACE
+	while(getParamsPos < maxGetPos) {
+		const RayResult result = traceStep(iteration);
+	}
+	return vec3(1, 1, 1);
+	#endif
+	
 	while(true) {
 		const bool lastRay = !canPopParams();
 		if(!lastRay) {
 			const RayResult result = traceStep(iteration);
-			//if(exit_) return vec3(0);
+			#if DEBUG
+			if(exit_) return vec3(0);
+			#endif
 			iteration++;
 			if(result.pushedRays) continue;
 		}
@@ -1408,7 +1533,7 @@ vec3 trace(const Ray startRay) {
 			const int currentParent = currentResult.parent;
 			if(currentParent < 0) { stop = true; break; }
 			if(!last && !lastRay) break;
-
+		
 			combineSteps(currentParent, curFrame);
 			curFrame = currentParent;
 		}
@@ -1417,7 +1542,7 @@ vec3 trace(const Ray startRay) {
 	}
 		
 	if(curResultPos() < 0) return vec3(1, 0, 1);
-
+	
 	return readResult(0).color;
 }
 
@@ -1432,7 +1557,6 @@ vec3 colorMapping(const vec3 col) {
 		pow(log(c.z + 1.0) / log(bw + 7.8), 1.25)
 	));
 }
-
 void main() {
 	const vec2 uv = gl_FragCoord.xy / windowSize.xy;
     const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
@@ -1444,9 +1568,22 @@ void main() {
 	const Ray ray = Ray(startCoord, rayDir);
 
 	const vec3 col = trace(ray);
-	//if(exit_) { color = exitVec3; return; }
 	
+	#if DEBUG
+	if(anyInvocationARB(exit_)) { color = vec4(exitVec3, 1.0); return; }
+	#endif
 	const vec3 c2 = colorMapping(col);
+	
+	//getParamsPos = 1;
+	//if(getParamsPos < maxGetPos) {
+	//	const Params p = getParamsAt(0);
+	//
+	//	color = vec4(abs(p.ray.dir), 1.0);
+	//}
+	//else {
+	//	color = vec4(0);
+	//}
+	//return;
 	
 	if(length(gl_FragCoord.xy - windowSize / 2) < 3) 
 		color = vec4(vec3(0.98), 1);

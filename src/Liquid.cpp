@@ -54,9 +54,13 @@ void ChunksLiquidCubes::update() {
 				return result;
 			};
 			
+			
 			updatedBlocksNeighbours.fill({});
 			
 			auto prevChunkChunk{ chunks[prevChunk.get()] };
+			auto &aabb{ prevChunkChunk.aabb() };
+			auto start{ aabb.start() };
+			auto end  { aabb.end  () };		
 			
 			for(int blockI{}; blockI < decltype(blocksUpdatedInPrevChunk)::size; blockI++) {
 				if(!blocksUpdatedInPrevChunk[blockI]) continue;
@@ -69,7 +73,12 @@ void ChunksLiquidCubes::update() {
 				});
 	
 				updateBlockDataWithoutNeighbours(prevChunkChunk, blockCoord);
+				start = start.min(blockCoord.val());
+				end   = end  .max(blockCoord.val());
 			}
+			
+			aabb = { start, end };
+			
 			
 			for(int blockI{}; blockI < int(updatedBlocksNeighbours.size()); blockI++) {
 				if(!updatedBlocksNeighbours[blockI]) continue;
@@ -83,7 +92,8 @@ void ChunksLiquidCubes::update() {
 				auto neighbourChunk{ chunks[neighbourChunkIndex.get()] };
 				
 				updateBlockDataNeighboursInfo(neighbourChunk, blockInChunkCoord);
-				if(blockChunkOffsetCoord != 0) neighbourChunk.status().setBlocksUpdated(true);
+				if(blockChunkOffsetCoord == 0) /*current chunk status is already set*/;
+				else neighbourChunk.status().setBlocksUpdated(true);
 			}
 			
 			prevChunkChunk.status().setBlocksUpdated(true);
