@@ -18,12 +18,10 @@ enum class LightingCubeType {
 	static uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube);
 };*/
 
-//all of the functions should probably be inline
-
 namespace AddLighting {
 	namespace {
 		template<typename Config>
-		static void propagateAddLight(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const startLight) {
+		inline void propagateAddLight(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const startLight) {
 			cubeChunk.status().setLightingUpdated(true);
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord, 
@@ -49,13 +47,13 @@ namespace AddLighting {
 	}
 	
 	template<typename Config>
-	static void fromCube(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) {	
+	inline void fromCube(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) {	
 		auto const startLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 		propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, startLight);
 	}
 	
 	template<typename Config>
-	static void fromCubeForcedFirst(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) {
+	inline void fromCubeForcedFirst(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) {
 		auto const startLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 		iterateCubeNeighbours(
 			cubeChunk, cubeInChunkCoord, 
@@ -87,7 +85,7 @@ namespace SubtractLighting {
 		struct CubeInfo { vec3i cubeCoord;/*could fit in 32 bits*/ int chunkIndex; };
 		
 		template<typename Config>
-		static void propagateLightRemove(std::vector<CubeInfo> &endCubes, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const cubeLight) {
+		inline void propagateLightRemove(std::vector<CubeInfo> &endCubes, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const cubeLight) {
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord,
 				[&endCubes, fromLight = cubeLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
@@ -116,7 +114,7 @@ namespace SubtractLighting {
 		}
 		
 		template<typename Config>
-		static void removeLightInChunkCubes(
+		inline void removeLightInChunkCubes(
 			chunk::Chunk cubesChunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord, 
 			std::vector<CubeInfo> &endCubes
 		) {
@@ -164,7 +162,7 @@ namespace SubtractLighting {
 	}
 	
 	template<typename Config>
-	void inChunkCubes(chunk::Chunk chunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord) {
+	inline void inChunkCubes(chunk::Chunk chunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord) {
 		static std::vector<CubeInfo> endCubes{};
 		endCubes.clear();
 		

@@ -27,10 +27,18 @@ iterateArea(vec3<C> const begin, vec3<C> const end, Action &&action) {
 }
 
 struct Area {
+public:
 	using value_type = vec3i;
-	
+	static Area empty() {
+		return Area{1, 0};
+	}
+public:
 	value_type first; 
 	value_type last; 
+public:
+	Area() = default;
+	Area(value_type const it) : first{it}, last{it} {}
+	Area(value_type const first_, value_type const last_) : first{first_}, last{last_} {}
 	
 	bool isEmpty() const {
 		return (last < first).any();
@@ -40,6 +48,9 @@ struct Area {
 		if(isEmpty()) return false;
 		else return value.clamp(first, last) == value;
 	}
+	
+	Area &operator*=(Area const a2) { return *this = *this * a2; }
+	Area &operator+=(Area const a2) { return *this = *this + a2; }
 	
 	friend Area operator*(Area const a1, Area const a2) {
 		using T = value_type::value_type;

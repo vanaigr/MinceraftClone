@@ -50,7 +50,9 @@ uniform float playerHeight;
 uniform vec3 startCoord;
 
 uniform int viewDistance;
-const int renderDiameter = viewDistance*2 + 1;
+
+/*const*/ int renderDiameter = viewDistance*2 + 1;
+//ERROR: '=' : global const initializers must be constant ' const int'
 
 #if DEBUG
 //these variables are used for debugging purpposes. Like `discard` but allows outputing different colors
@@ -756,7 +758,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 						*/
 						const float yLevelDiff = levelY - curCoord.y;
 						
-						if(liquidLevel == 255u || (intersectionSide.xz != 0 && yLevelDiff >= 0) || (intersectionSide.y != 0 && yLevelDiff >= 0))
+						if(liquidLevel == 255u || (intersectionSide.xz != ivec2(0) && yLevelDiff >= 0) || (intersectionSide.y != 0 && yLevelDiff >= 0))
 							fLiquidId = id(fLiquid);
 					}
 					
@@ -781,13 +783,13 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 						const float levelY = (cubeCoord.y + max((liquidLevel+1) / 16, 1) / 16.0) / cubesInBlockDim;
 						const float yLevelDiff = levelY - coordRay.orig.y;
 						
-						if(liquidLevel == 255u || (intersectionSide.xz != 0 && yLevelDiff >= 0) || (intersectionSide.y != 0 && yLevelDiff >= 0))
+						if(liquidLevel == 255u || (intersectionSide.xz != ivec2(0) && yLevelDiff >= 0) || (intersectionSide.y != 0 && yLevelDiff >= 0))
 							tLiquidId = liquidId;
 						
 						{
 							const float yLevelDist = yLevelDiff * dirSign.y;
 							
-							if(intersectionSide == 0 && bias <= 0 && yLevelDiff > 0) return IntersectionInfo(
+							if(intersectionSide == ivec3(0) && bias <= 0 && yLevelDiff > 0) return IntersectionInfo(
 								coordRay.orig,
 								coordRay.orig - cubeBlock(cubeCoord),
 								ivec3(0, 0, 0),
@@ -829,7 +831,7 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 						const vec3 blockCoord = blocksCoord[int(surface >= 0)];
 						
 						if(blockId == 0) continue; 
-						if(intersectionSide == 0 || !alphaTest(curCoord, vec3(intersectionSide), dirSign, blockCoord, blockId)) continue;
+						if(intersectionSide == ivec3(0) || !alphaTest(curCoord, vec3(intersectionSide), dirSign, blockCoord, blockId)) continue;
 						if(blockId == lowestIntersectionId && (blockId == 7 || blockId == 15)) { lowestIntersectionId = 0; continue; }
 						if(lowestIntersectionId != 0 && lowestIntersectionId != 15 && blockId == 15) continue; //ignore water backside
 						
