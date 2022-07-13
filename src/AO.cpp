@@ -1,5 +1,6 @@
 #include"AO.h"
 #include"Area.h"
+#include"MiscChunk.h"
 #include"Position.h"
 #include"Units.h"
 #include"BlockProperties.h"

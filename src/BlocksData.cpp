@@ -1,5 +1,6 @@
 #include"BlocksData.h"
 #include"Area.h"
+#include"MiscChunk.h"
 
 void updateBlockDataWithoutNeighbours(chunk::Chunk chunk, pBlock const blockCoord) {
 	assert(chunk::checkBlockCoordInChunkValid(blockCoord));

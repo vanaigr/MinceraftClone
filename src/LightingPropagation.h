@@ -2,6 +2,7 @@
 
 #include"Position.h"
 #include"Chunk.h"
+#include"MiscChunk.h"
 
 enum class LightingCubeType {
 	medium, wall, emitter

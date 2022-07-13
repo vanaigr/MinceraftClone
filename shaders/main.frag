@@ -17,6 +17,7 @@ sign0_(int)
 sign0_(ivec2)
 sign0_(ivec3)
 sign0_(ivec4)
+#undef sign0_
 
 #define sign(ARG) { int   You_probably_meant_to_use_sign_with_no_zeroes_calcDirSign_If_not_use_sign0; \
 					float You_probably_meant_to_use_sign_with_no_zeroes_calcDirSign_If_not_use_sign0; }
@@ -159,12 +160,13 @@ vec3 at(const Ray r, const float t) {
     return r.orig + r.dir * t;
 }
 
+//copied from Main.cpp PackedAABB
 restrict readonly buffer ChunksBounds {
-    uint bounds[];
-} bs;
+    uint data[];
+} aabb;
 
 uint chunkBounds(const int chunkIndex) {
-	return bs.bounds[chunkIndex];
+	return aabb.data[chunkIndex];
 }
 ivec3 indexBlock(const uint data) { //copied from Chunks.h
 	return ivec3( data % blocksInChunkDim, (data / blocksInChunkDim) % blocksInChunkDim, (data / blocksInChunkDim / blocksInChunkDim) );

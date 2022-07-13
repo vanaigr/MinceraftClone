@@ -80,6 +80,17 @@ struct Area {
 	}
 };
 
+template<typename Action> 
+inline std::enable_if_t<std::is_same_v< decltype(std::declval<Action>() ( std::declval<Area::value_type>() )), void >>
+iterateArea(Area const area, Action &&action) {
+	using C = Area::value_type::value_type;
+	for(C z{area.first.z}; z <= area.last.z; ++z)
+	for(C y{area.first.y}; y <= area.last.y; ++y)
+	for(C x{area.first.x}; x <= area.last.x; ++x) {
+		action(vec3<C>{x, y, z});
+	}
+}
+
 inline auto intersectAreas3(Area const a1, Area const a2) { return a1 * a2; }
 inline auto intersectAreas3i(Area const a1, Area const a2) { return intersectAreas3(a1, a2); }
 
@@ -146,76 +157,3 @@ template<typename T> inline void iterate3by3Volume(T &&action) {
 	}
 }
 
-inline chunk::ChunkAndCube getNeighbourCube(
-	chunk::Chunk cubeChunk, pCube const cubeCoord,
-	vec3i const neighbourDir
-) {	
-	pCube const neighbourCubePos{ cubeCoord + pCube{neighbourDir} };
-	auto const neighbourCubeChunkCoord{ neighbourCubePos.valAs<pos::Chunk>() };
-	auto const neighbourCubeInChunkCoord{ neighbourCubePos.in<pos::Chunk>() };
-	
-	auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{cubeChunk}.offset(neighbourCubeChunkCoord).get() };
-	if(neighbourCubeChunkIndex == -1) return { -1, 0 };
-
-	return { neighbourCubeChunkIndex, chunk::cubeCoordToIndex(neighbourCubeInChunkCoord) };
-}
-
-template<typename Action>
-inline void iterateCubeNeighbours(
-	chunk::Chunk cubeChunk, vec3i const cubeCoord, 
-	Action &&action
-) {
-	auto &chunks{ cubeChunk.chunks() };
-	auto const chunkCoord{ cubeChunk.position() };
-	
-	for(auto i{decltype(chunk::ChunkLighting::dirsCount){}}; i < chunk::ChunkLighting::dirsCount; i++) {
-		auto const neighbourDir{ chunk::ChunkLighting::indexAsDir(i) };
-		auto const [neighbourCubeChunkIndex, neighbourCubeInChunkIndex] = getNeighbourCube(cubeChunk, pCube{cubeCoord}, neighbourDir);
-		if(neighbourCubeChunkIndex == -1) continue;
-
-		action(neighbourDir, chunks[neighbourCubeChunkIndex], chunk::cubeIndexToCoord(neighbourCubeInChunkIndex).val());
-	}
-}
-
-template<typename Action>
-inline void iterateChunks(chunk::Chunk const startChunk, pChunk const first, pChunk const last, Action &&action) {
-	auto const fChunk{ first.val() };
-	auto const lChunk{ last .val() };
-	chunk::MovingChunk zMTNChunk{ startChunk };
-	
-	for(auto cz{ fChunk.z }; cz <= lChunk.z; cz++) {
-		zMTNChunk = zMTNChunk.moved({fChunk.x, fChunk.y, cz});
-		auto yMTNChunk{ zMTNChunk };
-		
-	for(auto cy{ fChunk.y }; cy <= lChunk.y; cy++) {
-		yMTNChunk = yMTNChunk.moved({fChunk.x, cy, cz});
-		auto xMTNChunk{ zMTNChunk };
-		
-	for(auto cx{ fChunk.x }; cx <= lChunk.x; cx++) {
-		xMTNChunk = xMTNChunk.moved({cx, cy, cz});
-		if(!xMTNChunk.is()) continue;
-		
-		action(xMTNChunk.get(), {cx, cy, cz});
-	}}}
-}
-
-template<typename Action>
-inline void iterateAllChunks(chunk::Chunk const startChunk, pChunk const first, pChunk const last, Action &&action) {
-	auto const fChunk{ first.val() };
-	auto const lChunk{ last .val() };
-	chunk::MovingChunk zMTNChunk{ startChunk };
-	
-	for(auto cz{ fChunk.z }; cz <= lChunk.z; cz++) {
-		zMTNChunk = zMTNChunk.moved({fChunk.x, fChunk.y, cz});
-		auto yMTNChunk{ zMTNChunk };
-		
-	for(auto cy{ fChunk.y }; cy <= lChunk.y; cy++) {
-		yMTNChunk = yMTNChunk.moved({fChunk.x, cy, cz});
-		auto xMTNChunk{ zMTNChunk };
-		
-	for(auto cx{ fChunk.x }; cx <= lChunk.x; cx++) {
-		xMTNChunk = xMTNChunk.moved({cx, cy, cz});
-		
-		action(xMTNChunk.getIndex().get(), {cx, cy, cz});
-	}}}
-}

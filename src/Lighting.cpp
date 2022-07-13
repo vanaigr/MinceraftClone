@@ -131,7 +131,7 @@ static void propagateHorisontalLightingIn(
 					+ oAxis2 * (units::blocksInChunkDim-1)
 				};
 				auto const testBlocksArea{ intersectAreas3i(
-					{ aabb.start()         , aabb.end()           },
+					aabb,
 					{ firstInChunkPos.val(), lastInChunkPos.val() }
 				) };
 				
@@ -216,7 +216,7 @@ vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY) {
 							+ oAxis2 * (units::blocksInChunkDim-1)
 						};
 						auto const testNeighbourBlocksArea{ intersectAreas3i(
-							{ neighbourAabb.start()         , neighbourAabb.end()           },
+							neighbourAabb,
 							{ firstInNeighbourChunkPos.val(), lastInNeighbourChunkPos.val() }
 						) };
 	
@@ -266,7 +266,7 @@ vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY) {
 				auto chunk{ chunks[chunkIndices[chunkY - chunkColumnChunkYMin]] };
 				
 				auto const &aabb{ chunk.aabb() };
-				Area const blocksArea{ aabb.start(), aabb.end() };
+				Area const blocksArea{ aabb };
 				
 				auto &chunkLighting{ SkyLightingConfig::getLighting(chunk) };
 				auto const &chunkLightingBefore{ [&](){
@@ -397,7 +397,7 @@ vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY) {
 							+ oAxis2 * (units::blocksInChunkDim-1)
 						};
 						auto const testNeighbourBlocksArea{ intersectAreas3i(
-							{ neighbourAabb.start()         , neighbourAabb.end()           },
+							neighbourAabb,
 							{ firstInNeighbourChunkPos.val(), lastInNeighbourChunkPos.val() }
 						) };
 						
@@ -545,7 +545,7 @@ vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY) {
 							+ oAxis2 * (units::blocksInChunkDim-1)
 						};
 						auto const testNeighbourBlocksArea{ intersectAreas3i(
-							{ neighbourAabb.start()         , neighbourAabb.end()           },
+							neighbourAabb,
 							{ firstInNeighbourChunkPos.val(), lastInNeighbourChunkPos.val() }
 						) };
 						

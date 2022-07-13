@@ -1,5 +1,6 @@
 #include"Liquid.h"
 #include"Area.h"
+#include"MiscChunk.h"
 #include"BlocksData.h"
 
 #include<iostream>
@@ -135,7 +136,7 @@ void ChunksLiquidCubes::update() {
 				auto &blocksData{ chunk.blocksData() };		
 				auto &aabb{ chunk.aabb() };
 				
-				auto const aabbPart1{ Area{aabb.start(), aabb.end()} * Area{
+				auto const aabbPart1{ aabb * Area{
 					dir.applied([&](auto const axis, auto const i) { return                         0 + (axis > 0 ? 1 : 0); }),
 					dir.applied([&](auto const axis, auto const i) { return units::blocksInChunkDim-1 - (axis < 0 ? 1 : 0); })
 				} }; //drop 1 plane of blocks from aabb (or nothing if dir == 0)

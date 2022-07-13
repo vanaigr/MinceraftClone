@@ -3,6 +3,7 @@
 #include"Units.h"
 #include"Position.h"
 #include"Vector.h"
+#include"Area.h"
 
 #include<vector>
 #include<unordered_map>
@@ -215,29 +216,6 @@ namespace chunk {
 		constexpr bool isEmpty() const { return id() == 0; }
 		constexpr bool empty() const { return isEmpty(); }	
 	};
-	
-	struct AABB { //used in main.shader
-		static constexpr int64_t cd = units::blocksInChunkDim-1;
-		static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two block indices must fit into 32 bits" );
-	private:
-		uint32_t data;
-	public:
-		AABB() = default;
-		//AABB(int16_t const b1, int16_t const b2) : data{ uint32_t(uint16_t(b1)) | (uint32_t(uint16_t(b2)) << 16) } {}
-		AABB(vec3i const start, vec3i const end) : data{ 
-			uint32_t(uint16_t(blockIndex(start)))
-			| (uint32_t(uint16_t(blockIndex(end))) << 16) 
-		} {
-			assert(checkBlockCoordInChunkValid(start) && checkBlockCoordInChunkValid(end));
-		}
-		
-		constexpr uint32_t getData() const { return data; } //used in vectex.shader, debug program
-		constexpr vec3i start() const { return indexBlock(int16_t(data&0xffff)); } //used in vectex.shader, debug program
-		constexpr vec3i end() const { return indexBlock(int16_t(data>>16)); } //used in main vertex shader //used in vectex.shader, debug program
-		constexpr vec3i onePastEnd() const { return end() + 1; } //used in main vertex shader //used in vectex.shader, debug program
-		constexpr bool empty() const { return (end() < start()).any(); };
-	};
-	
 	
 	struct OptionalChunkIndex { //used in main.shader
 	// -(chunkIndex) - 1	
@@ -618,7 +596,7 @@ namespace chunk {
 		std::vector<index_t> used{};
 	public:
 		std::vector<vec3i> chunksPos{};
-		std::vector<AABB> chunksAABB{};
+		std::vector<Area> chunksAABB{};
 		std::vector<ChunkStatus> chunksStatus{};
 		std::vector<bool> modified{};
 		std::vector<BlocksData> blocksData{};
