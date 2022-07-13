@@ -266,7 +266,7 @@ vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY) {
 				auto chunk{ chunks[chunkIndices[chunkY - chunkColumnChunkYMin]] };
 				
 				auto const &aabb{ chunk.aabb() };
-				Area<vec3i> const blocksArea{ aabb.start(), aabb.end() };
+				Area const blocksArea{ aabb.start(), aabb.end() };
 				
 				auto &chunkLighting{ SkyLightingConfig::getLighting(chunk) };
 				auto const &chunkLightingBefore{ [&](){

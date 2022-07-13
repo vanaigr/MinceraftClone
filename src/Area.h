@@ -4,6 +4,7 @@
 #include"Chunk.h"
 
 #include<type_traits>
+#include<array>
 
 template<typename C, typename Action> 
 inline std::enable_if_t<std::is_same_v< decltype(std::declval<Action>() ( std::declval<vec3<C>>() )), void >>
@@ -25,49 +26,62 @@ iterateArea(vec3<C> const begin, vec3<C> const end, Action &&action) {
 	}
 }
 
-template<typename T> struct Area {
-	T first; T last; 
+struct Area {
+	using value_type = vec3i;
+	
+	value_type first; 
+	value_type last; 
 	
 	bool isEmpty() const {
 		return (last < first).any();
 	}
 	
-	bool contains(T const value) const {
+	bool contains(value_type const value) const {
 		if(isEmpty()) return false;
 		else return value.clamp(first, last) == value;
 	}
-};
-template<typename T> inline constexpr Area<vec3<T>> intersectAreas3(Area<vec3<T>> const a1, Area<vec3<T>> const a2) {
-	auto const i = [](T const v1, T const v2, T const u1, T const u2) -> Area<T> {
-		auto const vi{ misc::min(v1, v2) };
-		auto const va{ misc::max(v1, v2) };
-		auto const ui{ misc::min(u1, u2) };
-		auto const ua{ misc::max(u1, u2) };
+	
+	friend Area operator*(Area const a1, Area const a2) {
+		using T = value_type::value_type;
 		
-		//	 if(va <= ui) return { ui, va }; //empty
-		//else if(ua <= vi) return { vi, ua }; //empty
-		if(va < ui || ua < vi) return {0, -1};
-		else return { misc::clamp(v1, u1, u2), misc::clamp(v2, u1, u2) };
-	};
+		auto const i = [](T const v1, T const v2, T const u1, T const u2) -> std::array<T, 2> {
+			auto const vi{ misc::min(v1, v2) };
+			auto const va{ misc::max(v1, v2) };
+			auto const ui{ misc::min(u1, u2) };
+			auto const ua{ misc::max(u1, u2) };
+			
+			if(va < ui || ua < vi) return {0, -1};
+			else return { misc::clamp(v1, u1, u2), misc::clamp(v2, u1, u2) };
+		};
+		
+		if(a1.isEmpty()) return a1;
+		if(a2.isEmpty()) return a2;
+		
+		std::array<T, 2> const is[] = { 
+			i(a1.first.x, a1.last.x, a2.first.x, a2.last.x),
+			i(a1.first.y, a1.last.y, a2.first.y, a2.last.y),
+			i(a1.first.z, a1.last.z, a2.first.z, a2.last.z)
+		};
+		
+		return {
+			value_type{ is[0][0], is[1][0], is[2][0] },
+			value_type{ is[0][1], is[1][1], is[2][1] }
+		};
+	}
 	
-	if(a1.isEmpty()) return a1;
-	if(a2.isEmpty()) return a2;
-	
-	Area<T> const is[] = { 
-		i(a1.first.x, a1.last.x, a2.first.x, a2.last.x),
-		i(a1.first.y, a1.last.y, a2.first.y, a2.last.y),
-		i(a1.first.z, a1.last.z, a2.first.z, a2.last.z)
-	};
-	
-	return {
-		vec3<T>{ is[0].first, is[1].first, is[2].first },
-		vec3<T>{ is[0].last , is[1].last , is[2].last  }
-	};
-}
+	friend Area operator+(Area const a1, Area const a2) {
+		if(a2.isEmpty()) return a1;
+		if(a1.isEmpty()) return a2;
+		
+		return {
+			a1.first.min(a2.first),
+			a1.last .max(a2.last )
+		};
+	}
+};
 
-inline constexpr Area<vec3i> intersectAreas3i(Area<vec3i> const a1, Area<vec3i> const a2) {
-	return intersectAreas3<vec3i::value_type>(a1, a2);
-}
+inline auto intersectAreas3(Area const a1, Area const a2) { return a1 * a2; }
+inline auto intersectAreas3i(Area const a1, Area const a2) { return intersectAreas3(a1, a2); }
 
 /*static_assert(
 	intersectAreas3i({vec3i{1, 2, 3}, vec3i{4, 5, 6}}, {vec3i{3, 1, 1}, vec3i{6, 4, 4}}).first == vec3i{ 3, 2, 3 } &&

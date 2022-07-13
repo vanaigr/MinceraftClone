@@ -89,7 +89,7 @@ static void updateAOInChunks(chunk::Chunk origChunk, pCube const firstRel, pCube
 }
 
 void updateAOInArea(chunk::Chunk origChunk, pCube const first, pCube const last) {
-	if(Area<vec3i>{first.val(), last.val()}.isEmpty()) return;
+	if(Area{first.val(), last.val()}.isEmpty()) return;
 	
 	auto const volume{ (last - first).val() };
 	if(volume.x * volume.y * volume.z > units::cubesInChunkDim * 5/*arbitrary number*/) {

@@ -1239,6 +1239,10 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 	
 	auto &status{ chunk.status() };
 			
+	if(numpad[4]) {
+		updateBlocksDataInArea(chunk, pBlock{0}, pBlock{units::blocksInChunkDim-1});
+		status.setBlocksUpdated(true);
+	}
 	auto const &chunkCoord{ chunk.position() };
 	auto const chunkIndex{ chunk.chunkIndex() };
 	
@@ -1251,6 +1255,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 	
 	auto const isnLoaded{ gpuIndex == 0 };
 	auto const shouldUpdate{ status.needsUpdate() || status.isInvalidated() || isnLoaded };
+	
 	
 	if(shouldUpdate && (cameraChunkCoord == chunkCoord || !maxUpdated)) {
 		if(!gpuIndex) gpuIndex = gpuChunksIndex.reserve();
@@ -1728,7 +1733,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 		
 		auto const updateBlocksNoNeighbours{ !aabb.empty() };
 		auto const areaUpdateNoNeighbours{ intersectAreas3i(
-			Area<vec3i>{ vec3i{-1} , vec3i{units::blocksInChunkDim-1 + 1} },
+			Area{ vec3i{-1} , vec3i{units::blocksInChunkDim-1 + 1} },
 			{ first.val() - 1, last.val() + 1 }
 		) };
 		
@@ -1762,7 +1767,7 @@ static void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition)
 			}
 			
 			if(updateBlocksNoNeighbours) { //blocks with no neighbours
-				Area<vec3i> const updatedAreaBlocks_{ 
+				Area const updatedAreaBlocks_{ 
 					areaUpdateNoNeighbours.first - offset*units::blocksInChunkDim,
 					areaUpdateNoNeighbours.last  - offset*units::blocksInChunkDim
 				};
@@ -1792,9 +1797,9 @@ static void updateChunks(chunk::Chunks &chunks) {
 	chunksPresent.clear();
 	chunksPresent.resize(viewWidth*viewWidth);
 	
-	vec3i const playerChunk{ currentCoord().valAs<pos::Chunk>() };
+	vec3i const currentChunk{ currentCoord().valAs<pos::Chunk>() };
 	chunks.filterUsed([&](int chunkIndex) -> bool { //should keep
-			auto const relativeChunkPos = chunks.chunksPos[chunkIndex] - vec3i{ playerChunk.x, 0, playerChunk.z };
+			auto const relativeChunkPos = chunks.chunksPos[chunkIndex] - vec3i{ currentChunk.x, 0, currentChunk.z };
 			auto const chunkInBounds{ relativeChunkPos.in(vec3i{-viewDistance, -16, -viewDistance}, vec3i{viewDistance, 15, viewDistance}).all() };
 			auto const relativeChunkPosPositive = relativeChunkPos + vec3i{viewDistance, 16, viewDistance};
 			auto const index{ relativeChunkPosPositive.x + relativeChunkPosPositive.z * viewWidth };
@@ -1818,7 +1823,7 @@ static void updateChunks(chunk::Chunks &chunks) {
 					chunks[neighbourIndex].neighbours()[chunk::Neighbours::mirror(i)] = chunk::OptionalChunkIndex{};
 					
 					/*
-						note: we could call updateAOInArea, updateBlocksWithNoNeighboursInArea for this chunk
+						note: we could call updateAOInArea, updateBlocksDataInArea for this chunk
 						but it is not critical
 					*/
 				}
@@ -1831,7 +1836,7 @@ static void updateChunks(chunk::Chunks &chunks) {
 			auto const index{ chunksPresent[i+k*viewWidth] };
 			if(index == false) {//generate chunk
 				auto const relativeChunksPos{ vec2i{i, k} - vec2i{viewDistance} };
-				auto const chunksPos{ playerChunk.xz() + relativeChunksPos };
+				auto const chunksPos{ currentChunk.xz() + relativeChunksPos };
 			
 				genChunksColumnAt(chunks, chunksPos);
 			}
@@ -2155,7 +2160,7 @@ static void updateCollision(chunk::Chunks &chunks, pos::Fractional &player, vec3
 }
 
 bool checkCanPlaceBlock(pBlock const blockPos) {
-	auto const relativeBlockPos{ blockPos - currentCoord() };
+	auto const relativeBlockPos{ blockPos - playerCoord };
 	vec3l const blockStart{ relativeBlockPos.value() };
 	vec3l const blockEnd{ (relativeBlockPos + pos::Block{1}).value() };
 	
@@ -2306,15 +2311,11 @@ bool performBlockAction() {
 		vec3i end  { 0 };
 		
 		auto const &blocksData{ chunk.blocksData() };
-		for(int32_t x = start_.x; x <= end_.x; x++)
-		for(int32_t y = start_.y; y <= end_.y; y++)
-		for(int32_t z = start_.z; z <= end_.z; z++) {
-			pBlock const blk{x, y, z};
-			if(!blocksData[blk].noCubes()) {
-				start = start.min(blk.val());
-				end   = end  .max(blk.val());
-			}
-		}
+		iterateArea(start_, end_, [&](vec3i const blockCoord) {
+			if(blocksData[pBlock{blockCoord}].isEmpty()) return;
+			start = start.min(blockCoord);
+			end   = end  .max(blockCoord);
+		});
 		
 		aabb = chunk::AABB(start, end);
 	
@@ -2457,7 +2458,7 @@ static void update(chunk::Chunks &chunks) {
 		}
 	}
 
-	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE && !isSpectator) {
+	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE) {
 		bool const isPerformed = performBlockAction();
 		if(isPerformed) lastBlockUpdate = now;
 	}
@@ -2545,6 +2546,19 @@ void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id, GLenum 
 							GLsizei length, const char *message, const void *userParam) {
 	if(id == 131169 || id == 131185 || id == 131218 || id == 131204) return; 
 	//std::cout << message << '\n';
+}
+
+template<typename T>
+void printBinary(std::ostream &o, T const it_) {
+	static constexpr auto bits = sizeof(T) * 8;
+	
+	typename std::make_unsigned<T>::type it{ it_ };
+	o << "0b";
+	for(int i{bits-1}; i >= 0; i--) {
+		auto const bit{ (it / (1 << i)) % 2 };
+		o << (bit ? '1' : '0');
+        if((i % 8) == 0 && i != 0 && i != bits-1) o << '\'';
+	}
 }
 
 void drawBlockHitbox(vec3f const blockRelativePos, float const size, float const (&toLoc4)[4][4]) {
@@ -2901,6 +2915,7 @@ int main(void) {
 					
 					ss.precision(1);
 					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << (vec3f(blockInChunkCoord*units::cubesInBlockDim + cubeInBlockCoord)/units::cubesInBlockDim) << '\n';
+					ss << "chunk aabb: " << chunk.aabb().start() << ' ' << chunk.aabb().end() << '\n';
 					
 					{
 						auto const block{ chunk.data()[blockInChunkCoord] };
@@ -2924,12 +2939,17 @@ int main(void) {
 							auto const cubeInChunkPos{ beforePosInStartChunk.in<pChunk>() };
 							auto const blockInChunkPos{ cubeInChunkPos.as<pBlock>() };
 							
+							auto const blockData{ chunk.blocksData()[blockInChunkPos] };
 							auto const block{ chunk.data()[blockInChunkPos] };
 							auto const liquid{ chunk.liquid()[cubeInChunkPos] };
 							ss << "cube before: \n";
 							ss << "sky lighting: " << int(chunk.skyLighting()[cubeInChunkPos.val()]) 
 							<< " block lighting: " << int(chunk.blockLighting()[cubeInChunkPos.val()]) << '\n';
 							ss << "block id=" << int{block.id()} << "; liquid id=" << int{liquid.id} << " liquid level=" << int{liquid.level} << '\n';
+							ss << "solid cubes=";
+							printBinary(ss, blockData.solidCubes); ss << ' ';
+							ss << "liquid cubes=";
+							printBinary(ss, blockData.liquidCubes); ss << '\n';
 						}
 					}
 				};

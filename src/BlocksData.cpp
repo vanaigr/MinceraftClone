@@ -47,7 +47,7 @@ void updateBlockDataNeighboursInfo(chunk::Chunk chunk, pBlock const blockCoord) 
 		liquid[blockCoord.as<pCube>()].id //we can pick any cube in block
 	};
 
-	auto const calcNoNeighbours{ blockData.solidCubes == 0 };
+	auto const calcNoNeighbours{ blockData.noCubes() };
 	auto const calcNeighboursFullSameLiquid{ bool(blockData.fullSameLiquid) };
 	
 	if(calcNoNeighbours || calcNeighboursFullSameLiquid) {
@@ -116,9 +116,7 @@ void updateBlocksDataInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlo
 		) };
 		
 		if(area.isEmpty()) return;
-		
 
-		
 		iterateArea(area.first, area.last, [&](pBlock const blockInChunkCoord) {
 			updateBlockDataNeighboursInfo(chunk, blockInChunkCoord);
 		});	

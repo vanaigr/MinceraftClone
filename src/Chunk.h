@@ -368,17 +368,11 @@ namespace chunk {
 		CubesArray() = default;
 		explicit CubesArray(T const value) { fill(value); }
 	
-		value_type       &operator[](int const index)       { return data[index]; }
-		value_type const &operator[](int const index) const { return data[index]; }
+		value_type       &operator[](int const index)       { assert(checkCubeIndexInChunkValid(index)); return data[index]; }
+		value_type const &operator[](int const index) const { assert(checkCubeIndexInChunkValid(index)); return data[index]; }
 		
-		//value_type       &operator[](vec3i const cubeCoord)       { return (*this)[cubeIndexInChunk(cubeCoord)]; }
-		//value_type const &operator[](vec3i const cubeCoord) const { return (*this)[cubeIndexInChunk(cubeCoord)]; }	
-		
-		//value_type       &operator[](pCube const cubeCoord)       { return (*this)[cubeCoord.val()]; }
-		//value_type const &operator[](pCube const cubeCoord) const { return (*this)[cubeCoord.val()]; }
-		
-		value_type       &operator[](pCube const coord)       { return (*this)[cubeCoordToIndex(coord)]; }
-		value_type const &operator[](pCube const coord) const { return (*this)[cubeCoordToIndex(coord)]; }
+		value_type       &operator[](pCube const coord)       { assert(checkCubeCoordInChunkValid(coord)); return (*this)[cubeCoordToIndex(coord)]; }
+		value_type const &operator[](pCube const coord) const { assert(checkCubeCoordInChunkValid(coord)); return (*this)[cubeCoordToIndex(coord)]; }
 		
 		void fill(T const value) { data.fill(value); }
 		void reset() { data.fill(T()); }
@@ -394,11 +388,11 @@ namespace chunk {
 		BlocksArray() = default;
 		explicit BlocksArray(T const value) { fill(value); }
 	
-		value_type       &operator[](int const index)       { return data[index]; }
-		value_type const &operator[](int const index) const { return data[index]; }
+		value_type       &operator[](int const index)       { assert(checkBlockIndexInChunkValid(index)); return data[index]; }
+		value_type const &operator[](int const index) const { assert(checkBlockIndexInChunkValid(index)); return data[index]; }
 		
-		value_type       &operator[](pBlock const coord)       { return (*this)[blockCoordToIndex(coord)]; }
-		value_type const &operator[](pBlock const coord) const { return (*this)[blockCoordToIndex(coord)]; }
+		value_type       &operator[](pBlock const coord)       { assert(checkBlockCoordInChunkValid(coord)); return (*this)[blockCoordToIndex(coord)]; }
+		value_type const &operator[](pBlock const coord) const { assert(checkBlockCoordInChunkValid(coord)); return (*this)[blockCoordToIndex(coord)]; }
 		
 		void fill(T const value) { data.fill(value); }
 		void reset() { data.fill(T()); }
@@ -487,6 +481,9 @@ namespace chunk {
 		
 		constexpr bool noCubes() const {
 			return solidCubes == 0 && liquidCubes == 0;
+		}		
+		constexpr bool isEmpty() const {
+			return noCubes();
 		}
 	};
 	static_assert(sizeof(BlockData) == 4);

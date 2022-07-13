@@ -20,6 +20,49 @@ struct ChunkAndCubeHash {
 
 static constexpr chunk::LiquidCube::level_t maxLiquidToNeighbour{8};
 
+template<typename T, int neighbours_>
+struct ChunkBlocksWithNeighbours {
+	using value_type = T;
+	static constexpr auto neighbours{ neighbours_ };
+	static constexpr auto dim{ units::blocksInChunkDim + neighbours*2 };
+	static constexpr auto size{ pos::cubed(dim) };
+	
+	static constexpr bool checkIndexValid(int const index) {
+		return index >= 0 && index < size;
+	}
+	static constexpr bool checkCoordValid(pBlock const coord) {
+		return coord.val().in(-neighbours, units::blocksInChunkDim-1 + neighbours).all();
+	}	
+	static constexpr bool checkCoordValid2(pBlock const coord) {
+		if(checkCoordValid(coord)) return true;
+		else { std::cout << coord.val() << '\n'; assert(false); return false; }
+	}
+	
+	static constexpr int blockToIndex(pBlock const coord) {
+		assert(checkCoordValid(coord));
+		return (coord.val() + neighbours).dot(vec3i(1, dim, dim*dim));
+	};
+	static constexpr pBlock indexToBlock(int const index) {
+		assert(checkIndexValid(index));
+		return pBlock{index % dim, (index / dim) % dim, (index / dim / dim) % dim} - neighbours;
+	};
+	
+private:
+	std::array<value_type, size> data; 
+public:
+	ChunkBlocksWithNeighbours() = default;
+	explicit ChunkBlocksWithNeighbours(value_type const value) { fill(value); }
+	
+	value_type       &operator[](int const index)       { assert(checkIndexValid(index)); return data[index]; }
+	value_type const &operator[](int const index) const { assert(checkIndexValid(index)); return data[index]; }
+	
+	value_type       &operator[](pBlock const coord)       { assert(checkCoordValid2(coord)); return (*this)[blockToIndex(coord)]; }
+	value_type const &operator[](pBlock const coord) const { assert(checkCoordValid2(coord)); return (*this)[blockToIndex(coord)]; }
+	
+	void fill(value_type const value) { data.fill(value); }
+	void reset() { data.fill(value_type()); }
+};
+
 void ChunksLiquidCubes::update() {
 	auto &chunks{ this->chunks() };
 	auto &gen{ gens[genIndex] };
@@ -34,69 +77,88 @@ void ChunksLiquidCubes::update() {
 	std::sort(gen.begin(), gen.end());
 	
 	chunk::OptionalChunkIndex prevChunk{}; //no index if previous chunk is not updated
-	static chunk::BlocksArray<bool> blocksUpdatedInPrevChunk{};
+	static ChunkBlocksWithNeighbours<bool, 1> blocksUpdatedInPrevChunk{};
 	
 	auto const updatePrevChunkData = [&]() {
 		if(prevChunk.is()) {
-			static constexpr auto dim{ units::blocksInChunkDim + 2 }; //+ 2 neighbours from neighbouring chunks
-			static std::array<bool, pos::cubed(dim)> updatedBlocksNeighbours; 
-			auto const blockToIndex = [](pBlock const pos) {
-				auto const coord{ pos.val() };
-				assert(coord.in(-1, units::blocksInChunkDim-1 + 1).all());
-				
-				return (coord.x+1) + (coord.y+1) * dim + (coord.z+1) * dim * dim;
-			};
-			auto const indexToBlock = [](int const index) {
-				assert(index >= 0);
-				
-				auto const result{ pBlock{index % dim, (index / dim) % dim, (index / dim/ dim) % dim} - 1 };
-				assert(result.val().in(-1, units::blocksInChunkDim-1 + 1).all());
-				return result;
-			};
-			
-			
+			static ChunkBlocksWithNeighbours<bool, 2> updatedBlocksNeighbours{};
 			updatedBlocksNeighbours.fill({});
 			
-			auto prevChunkChunk{ chunks[prevChunk.get()] };
-			auto &aabb{ prevChunkChunk.aabb() };
-			auto start{ aabb.start() };
-			auto end  { aabb.end  () };		
+			std::array<bool, pos::cubed(3)> neighbourChunksUpdated{};
 			
-			for(int blockI{}; blockI < decltype(blocksUpdatedInPrevChunk)::size; blockI++) {
+			
+			auto prevChunkChunk{ chunks[prevChunk.get()] };
+			
+			//update BlockData block state
+			for(int blockI{}; blockI < blocksUpdatedInPrevChunk.size; blockI++) {
 				if(!blocksUpdatedInPrevChunk[blockI]) continue;
 				
-				auto const blockCoord{ chunk::blockIndexToCoord(blockI) };
-				
-				iterate3by3Volume([&](vec3i const neighbourDir, int const index) {
-					auto const offsetedBlockCoord{ blockCoord + neighbourDir };
-					updatedBlocksNeighbours[blockToIndex(offsetedBlockCoord)] = true;
-				});
-	
-				updateBlockDataWithoutNeighbours(prevChunkChunk, blockCoord);
-				start = start.min(blockCoord.val());
-				end   = end  .max(blockCoord.val());
-			}
-			
-			aabb = { start, end };
-			
-			
-			for(int blockI{}; blockI < int(updatedBlocksNeighbours.size()); blockI++) {
-				if(!updatedBlocksNeighbours[blockI]) continue;
-				
-				auto const blockCoord{ indexToBlock(blockI) };
-				auto const blockChunkOffsetCoord{ blockCoord.as<pChunk>() };
+				auto const blockCoord{ blocksUpdatedInPrevChunk.indexToBlock(blockI) };
+				auto const blockChunkOffsetCoord{ blockCoord.as<pChunk>().val() };
 				auto const blockInChunkCoord{ blockCoord.in<pChunk>() };
 				
-				auto const neighbourChunkIndex{ chunk::MovingChunk{ prevChunkChunk }.offseted(blockChunkOffsetCoord.val()).getIndex() };
+				auto const neighbourChunkIndex{ chunk::MovingChunk{prevChunkChunk}.offseted(blockChunkOffsetCoord).getIndex() };
+				assert(neighbourChunkIndex.is()); //chunk can't be invalid if one of its blocks was added to the list
+				auto neighbourChunk{ chunks[neighbourChunkIndex.get()] };
+				
+				updateBlockDataWithoutNeighbours(neighbourChunk, blockCoord.in<pChunk>());
+				
+				iterate3by3Volume([&](vec3i const neighbourDir, int const index) {
+					updatedBlocksNeighbours[blockCoord + neighbourDir] = true;
+				});
+				
+				neighbourChunksUpdated[index3FromDir(blockChunkOffsetCoord)] = true;
+			}
+			
+			//update BlockData neighbours state
+			for(int blockI{}; blockI < updatedBlocksNeighbours.size; blockI++) {
+				if(!updatedBlocksNeighbours[blockI]) continue;
+				
+				auto const blockCoord{ updatedBlocksNeighbours.indexToBlock(blockI) };
+				auto const blockChunkOffsetCoord{ blockCoord.as<pChunk>().val() };
+				auto const blockInChunkCoord{ blockCoord.in<pChunk>() };
+				
+				auto const neighbourChunkIndex{ chunk::MovingChunk{prevChunkChunk}.offseted(blockChunkOffsetCoord).getIndex() };
 				if(!neighbourChunkIndex.is()) continue;
 				auto neighbourChunk{ chunks[neighbourChunkIndex.get()] };
 				
 				updateBlockDataNeighboursInfo(neighbourChunk, blockInChunkCoord);
-				if(blockChunkOffsetCoord == 0) /*current chunk status is already set*/;
-				else neighbourChunk.status().setBlocksUpdated(true);
 			}
 			
-			prevChunkChunk.status().setBlocksUpdated(true);
+			//update AABB and status
+			iterate3by3Volume([&](vec3i const dir, int const index3) {
+				if(!neighbourChunksUpdated[index3]) return;
+				
+				auto const chunkIndex{ chunk::MovingChunk{prevChunkChunk}.offseted(dir).getIndex() };
+				assert(chunkIndex.is()); //chunk can't be invalid if it was edded to updatedBlocksNeighbours
+				auto chunk{ chunks[chunkIndex.get()] };		
+				auto &blocksData{ chunk.blocksData() };		
+				auto &aabb{ chunk.aabb() };
+				
+				auto const aabbPart1{ Area{aabb.start(), aabb.end()} * Area{
+					dir.applied([&](auto const axis, auto const i) { return                         0 + (axis > 0 ? 1 : 0); }),
+					dir.applied([&](auto const axis, auto const i) { return units::blocksInChunkDim-1 - (axis < 0 ? 1 : 0); })
+				} }; //drop 1 plane of blocks from aabb (or nothing if dir == 0)
+				
+				Area const updateArea{
+					dir.applied([&](auto const axis, auto const i) { return (axis < 0 ? units::blocksInChunkDim-1 - 1 : 0); }),
+					dir.applied([&](auto const axis, auto const i) { return (axis > 0 ? 1 : units::blocksInChunkDim-1); })
+				}; //dropped part of aabb
+				
+				vec3i first{ units::blocksInChunkDim };
+				vec3i last { -1 };
+				
+				iterateArea(updateArea.first, updateArea.last, [&](vec3i const blockCoord) {
+					if(blocksData[pBlock{blockCoord}].isEmpty()) return;
+					first = first.min(blockCoord);
+					last  = last .max(blockCoord);
+				});
+				
+				auto const aabbCombined{ aabbPart1 + Area{ first, last } };
+				aabb = { aabbCombined.first, aabbCombined.last };
+				
+				chunk.status().setBlocksUpdated(true);
+			});
 		}
 		
 		prevChunk = {};
@@ -123,18 +185,20 @@ void ChunksLiquidCubes::update() {
 		
 		//move liquid downwards
 		if(level != 0) [&]() {
-			auto const neighbourCubePosData = getNeighbourCube(chunk, cubeCoord, vec3i{0, -1, 0});
-			auto const [neighbourCubeChunkIndex, neighbourCubeCubeIndex] = neighbourCubePosData; 
+			pCube const neighbourCubePos{ cubeCoord + vec3i{0, -1, 0} };
+			auto const neighbourCubeChunkCoord{ neighbourCubePos.as<pos::Chunk>() };
+			auto const neighbourCubeInChunkCoord{ neighbourCubePos.in<pos::Chunk>() };
+			
+			auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.offset(neighbourCubeChunkCoord.val()).get() };
 			if(neighbourCubeChunkIndex == -1) return;
 			
 			auto neighbourCubeChunk{ chunks[neighbourCubeChunkIndex] };
-			auto const neighbourCubeCoord{ chunk::cubeIndexToCoord(neighbourCubeCubeIndex) };
-			if(neighbourCubeChunk.data().cubeAt(neighbourCubeCoord).isSolid) return;
+			if(neighbourCubeChunk.data().cubeAt(neighbourCubeInChunkCoord).isSolid) return;
 			
-			auto &neighbourLiquidCube{ neighbourCubeChunk.liquid()[neighbourCubeCubeIndex] };
+			auto &neighbourLiquidCube{ neighbourCubeChunk.liquid()[neighbourCubeInChunkCoord] };
 			auto const toMax( chunk::LiquidCube::maxLevel - neighbourLiquidCube.level );
 			
-			if(toMax != 0 && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
+			if(toMax > 0 && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
 				auto diff{ std::min<int>(level, toMax) };
 				//if(diff > maxLiquidToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; } //limit on downwards flow
 				
@@ -142,20 +206,23 @@ void ChunksLiquidCubes::update() {
 				level -= diff;		
 				neighbourLiquidCube = { id, neighbourLiquidCube.level + diff };
 				
-				genNext.push_back(neighbourCubePosData);
-				blocksUpdatedInPrevChunk[neighbourCubeCoord.as<pBlock>()] = true;
+				genNext.push_back({ neighbourCubeChunkIndex, chunk::cubeCoordToIndex(neighbourCubeInChunkCoord) });
+				blocksUpdatedInPrevChunk[neighbourCubePos.as<pBlock>()] = true;
 				return;
 			}
 			
 			return;
 		}();
 		
-		//move liquid sideways(?)
+		//move liquid sideways
 		if(level != 0) [&]() {
 			struct LiquidCubeAndPos { 
 				chunk::LiquidCube liquidCube; //copy
 				chunk::LiquidCube *liquidCubeLoc; 
-				chunk::ChunkAndCube posData; 
+				
+				chunk::ChunkAndCube posData;
+				pCube cubeCoord;
+				
 				bool modified; 
 				bool valid; 
 			};
@@ -169,17 +236,23 @@ void ChunksLiquidCubes::update() {
 			for(int i{}; i < sideNeighboursCount; i++) {
 				auto const dir{ dirs[i] };
 				
-				auto const neighbourCubePosData = getNeighbourCube(chunk, cubeCoord, dir);
-				auto const [cubeNeighbourChunkIndex, cubeNeighbourCubeIndex] = neighbourCubePosData; 
-				if(cubeNeighbourChunkIndex == -1) continue;
+				pCube const neighbourCubePos{ cubeCoord + dir };
+				auto const neighbourCubeChunkCoord{ neighbourCubePos.as<pos::Chunk>() };
+				auto const neighbourCubeInChunkCoord{ neighbourCubePos.in<pos::Chunk>() };
 				
-				auto cubeNeighbourChunk{ chunks[cubeNeighbourChunkIndex] };
-				auto const cubeNeighbourCoord{ chunk::cubeIndexToCoord(cubeNeighbourCubeIndex) };
-				if(cubeNeighbourChunk.data().cubeAt(cubeNeighbourCoord).isSolid) continue;
+				auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.offset(neighbourCubeChunkCoord.val()).get() };
+				if(neighbourCubeChunkIndex == -1) continue;
 				
-				auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[cubeNeighbourCubeIndex] };
+				auto cubeNeighbourChunk{ chunks[neighbourCubeChunkIndex] };
+				if(cubeNeighbourChunk.data().cubeAt(neighbourCubeInChunkCoord).isSolid) continue;
+				
+				auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[neighbourCubeInChunkCoord] };
 				if((level > neighbourLiquidCube.level) && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
-					cubes[i] = { neighbourLiquidCube, &neighbourLiquidCube, neighbourCubePosData, false, true };
+					cubes[i] = { 
+						neighbourLiquidCube, &neighbourLiquidCube, 
+						{ neighbourCubeChunkIndex, chunk::cubeCoordToIndex(neighbourCubeInChunkCoord) }, neighbourCubePos,
+						false, true
+					};
 				}
 			}
 			
@@ -229,8 +302,7 @@ void ChunksLiquidCubes::update() {
 				if(cube.modified) {
 					*cube.liquidCubeLoc = cube.liquidCube;
 					genNext.push_back(cube.posData);
-					auto const cubeCoord{ chunk::cubeIndexToCoord(cube.posData.cubeIndex) };
-					blocksUpdatedInPrevChunk[cubeCoord.as<pBlock>()] = true;
+					blocksUpdatedInPrevChunk[cube.cubeCoord.as<pBlock>()] = true;
 				}
 			}
 		}();
