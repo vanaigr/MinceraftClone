@@ -468,6 +468,14 @@ public:
 	
 	inline constexpr vec3<C> mix(vec3<C> const from, vec3<C> const to) {
 		return misc::mix<vec3<C>>(from, to, *this);
+	}	
+	
+	template<typename O>
+	inline constexpr vec3<O> select(vec3<O> const from, vec3<O> const to) {
+		return this->applied([&](auto const coord, auto const i) {
+			if(bool(coord)) return to[i];
+			else return from[i];
+		});
 	}
 	
 	inline constexpr vec3<C> atLeast(vec3<C> const other) const {

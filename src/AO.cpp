@@ -104,7 +104,7 @@ void updateAOInArea(chunk::Chunk origChunk, pCube const first, pCube const last)
 			if(startChunkIndex == -1) return;
 			
 			auto startChunk{ chunks[startChunkIndex] };
-			auto const cubeCoordInChunk{ startCoord.valIn<pChunk>() };
+			auto const cubeCoordInChunk{ startCoord.in<pChunk>() };
 			startChunk.ao()[cubeCoordInChunk] = calcAO(startChunk, cubeCoordInChunk);
 		});
 	}

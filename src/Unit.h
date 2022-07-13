@@ -93,8 +93,10 @@ namespace unit {
 	public:
 		constexpr Unit() = default;
 		explicit constexpr Unit(value_type const src) : value_(src) {}	
-		template<typename... Args, typename = decltype(value_type{ std::forward<Args>(std::declval<Args>())... } /*brace constructor!*/)> 
-		constexpr Unit(Args &&...args) : value_{ std::forward<Args>(args)... } {}	
+		template<typename... Args, 
+			std::enable_if_t<sizeof...(Args) != 1 || !(... || std::is_same_v<remove_cvref_t<Args>, This>), int> = 0,
+			typename = decltype(value_type{ std::forward<Args>(std::declval<Args>())... }) /*brace constructor!*/
+		> constexpr Unit(Args &&...args) : value_{ std::forward<Args>(args)... } {}	
 		
 		template<typename Other, typename = std::enable_if_t<
 			!std::is_same_v<remove_cvref_t<Other>, This> //this constructor is disabled if argument is of type This
@@ -112,8 +114,14 @@ namespace unit {
 			return Cast<Hierarchy, This, Other>::castUnit(*this);
 		} */
 		
-		constexpr value_type value() const { return value_; };
-		constexpr value_type val  () const { return value_; };
+		value_type const & operator*() const { return value_; }
+		value_type       & operator*()       { return value_; }
+		
+		value_type const * operator->() const { return &value_; }
+		value_type       * operator->()       { return &value_; }
+		
+		constexpr value_type value() const { return value_; }
+		constexpr value_type val  () const { return value_; }
 		
 		constexpr friend This operator+(This const c1, This const c2) { return This{value_type(c1.val() + c2.val()) }; }
 		constexpr friend This &operator+=(This &c1, This const c2) { return c1 = c1 + c2; }
@@ -135,6 +143,16 @@ namespace unit {
 			
 			return Cast<Hierarchy, This , common>::castUnit(c1)
 				 - Cast<Hierarchy, Other, common>::castUnit(c2);
+		}
+		
+		template<typename Other, std::enable_if_t<!HaveCommon<Hierarchy, This, Other>::value, int> = 0, typename = decltype(Unit{std::declval<Other>()})> 
+		constexpr friend auto operator+(This const c1, Other const c2) {
+			return c1 + Unit{c2};
+		}
+		
+		template<typename Other, std::enable_if_t<!HaveCommon<Hierarchy, This, Other>::value, int> = 0, typename = decltype(Unit{std::declval<Other>()})> 
+		constexpr friend auto operator-(This const c1, Other const c2) {
+			return c1 - Unit{c2};
 		}
 		
 		template<typename T>

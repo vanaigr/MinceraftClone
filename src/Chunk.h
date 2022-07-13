@@ -94,7 +94,7 @@ namespace chunk {
 	
 	inline constexpr pCube cubeIndexInBlockToCoord(uint8_t const index) {
 		assert(checkCubeIndexInBlockValid(index));
-		return vec3i(
+		return pCube(
 			 index                                      % units::cubesInBlockDim, 
 			(index >>  units::cubesInBlockDimAsPow2   ) % units::cubesInBlockDim, 
 			(index >> (units::cubesInBlockDimAsPow2*2)) % units::cubesInBlockDim

@@ -19,6 +19,8 @@
 #include"BlockProperties.h"
 #include"BlocksData.h"
 #include"Liquid.h"
+#include"Trace.h"
+#include"Physics.h"
 
 #include"Config.h"
 #include"Font.h"
@@ -91,7 +93,12 @@ static double const playerHeight{ 1.95 };
 static double const playerWidth{ 0.6 };
 
 static int64_t const height_i{ units::posToFracRAway(playerHeight).value() };
-static int64_t const width_i{ units::posToFracRAway(playerWidth).value() }; 
+static int64_t const width_i{ units::posToFracRAway(playerWidth).value() };
+// /*static_*/assert(dimensions->x % 2 == 0);
+// /*static_*/assert(dimensions->z % 2 == 0);
+
+vec3l const playerOffsetMin{ -width_i/2, 0       , -width_i/2 };
+vec3l const playerOffsetMax{  width_i/2, height_i,  width_i/2 };
 
 static double speedModifier = 2.5;
 static double playerSpeed{ 2.7 };
@@ -1844,321 +1851,6 @@ static void updateChunks(chunk::Chunks &chunks) {
 	}
 }
 
-struct PosDir {
-	vec3l start; //start inside chunk
-	vec3l end;
-	
-	vec3i direction;
-	vec3i chunk;
-	
-	PosDir(pos::Fractional const coord, vec3l const line): 
-		start{ coord.valIn<pos::Chunk>() },
-		end{ start + line },
-		
-		direction{ line.sign() },
-		chunk{ coord.valAs<pos::Chunk>() }
-	{} 
-	
-	constexpr int64_t atCoord(vec3i const inAxis_, int64_t coord, vec3i const outAxis_) const {
-		vec3l const inAxis( inAxis_ );
-		vec3l const outAxis( outAxis_ );
-		auto const ist = start.dot(inAxis);
-		auto const ind = end.dot(inAxis); 
-		auto const ost = start.dot(outAxis); 
-		auto const ond = end.dot(outAxis); 
-		return ist == ind ? ost : ( ost + (ond - ost)*(coord-ist) / (ind - ist) );		
-	};
-	
-	int difference(vec3l const p1, vec3l const p2) const {
-		vec3l const diff{p1 - p2};
-		return (diff * vec3l(direction)).sign().dot(1);
-	};
-	
-	constexpr vec3l part_at(vec3i inAxis, int64_t const coord) const { 
-		return vec3l{
-			atCoord(inAxis, coord, vec3i{1,0,0}),
-			atCoord(inAxis, coord, vec3i{0,1,0}),
-			atCoord(inAxis, coord, vec3i{0,0,1})
-		};
-	}
-	pos::Fractional at(vec3i inAxis, int64_t const coord) const { return { pos::Chunk{chunk} + pos::Fractional{part_at(inAxis, coord)} }; }
-	
-	friend std::ostream &operator<<(std::ostream &o, PosDir const v) {
-		return o << "PosDir{" << v.start << ", " << v.end << ", " << v.direction << ", " << v.chunk << "}";
-	}
-};
-
-struct DDA {
-private:
-	//const
-	PosDir posDir;
-	
-	//mutable
-	vec3l current;
-	bool end;
-public:
-	DDA(PosDir const pd_) : 
-	    posDir{ pd_ },
-		current{ pd_.start },
-		end{ false }
-	{}
-	
-	vec3b next() {
-		if(end) return {};
-
-		struct Candidate { vec3l coord; vec3b side; };
-		
-		vec3l const nextC{ nextCoords(current, posDir.direction) };
-		
-		Candidate const candidates[] = {
-			Candidate{ posDir.part_at(vec3i{1,0,0}, nextC.x), vec3b{1,0,0} },
-			Candidate{ posDir.part_at(vec3i{0,1,0}, nextC.y), vec3b{0,1,0} },
-			Candidate{ posDir.part_at(vec3i{0,0,1}, nextC.z), vec3b{0,0,1} },
-			Candidate{ posDir.end, 0 }//index == 3
-		};
-		
-		int minI{ 3 };
-		Candidate minCand{ candidates[minI] };
-		
-		for(int i{}; i < 4; i++) {
-			auto const cand{ candidates[i] };
-			auto const diff{ posDir.difference(cand.coord, minCand.coord) };
-			if(posDir.difference(cand.coord, current) > 0 && diff <= 0) {
-				minI = i;
-				if(diff == 0) {
-					minCand = Candidate{ 
-						minCand.coord * vec3l(!vec3b(cand.side)) + cand.coord * vec3l(cand.side),
-						minCand.side || cand.side
-					};
-				}
-				else {
-					minCand = cand;
-				}
-			}
-		}
-		
-		end = minI == 3;
-		current = minCand.coord;
-		
-		return minCand.side;
-	}
-	
-	static constexpr vec3l nextCoords(vec3l const current, vec3i const dir) {
-		return current.applied([&](auto const coord, auto const i) -> int64_t {
-			if(dir[i] >= 0) //round down
-				return ((coord >> units::fracInCubeDimAsPow2) + 1) << units::fracInCubeDimAsPow2;
-			else //round up
-				return (-((-coord) >> units::fracInCubeDimAsPow2) - 1) << units::fracInCubeDimAsPow2;
-		});
-	};
-	
-	#define G(name) auto get_##name() const { return name ; }
-	G(posDir)
-	G(current)
-	G(end)
-	#undef G
-};
-
-static bool checkCanPlaceCollider(chunk::Chunks &chunks, pos::Fractional const coord1, pos::Fractional const coord2) {
-	chunk::Move_to_neighbour_Chunk mtnChunk{chunks, coord1.valAs<pos::Chunk>() };
-	
-	auto const c1c{ coord1.valAs<pos::Cube>() };
-	auto const c2c{ coord2.valAs<pos::Cube>() };
-	
-	for(auto z{ c1c.z }; z <= c2c.z; z++) 
-	for(auto y{ c1c.y }; y <= c2c.y; y++)
-	for(auto x{ c1c.x }; x <= c2c.x; x++) {
-		pos::Cube cubePos{{x, y, z}};
-		
-		auto const chunkIndex{ mtnChunk.move(cubePos.valAs<pos::Chunk>()).get() };
-		if(chunkIndex == -1) return false;
-		
-		auto cube{ chunks[chunkIndex].data().cubeAt(cubePos.valIn<pos::Chunk>()) };
-		if(cube.isSolid) return false;
-	}
-	
-	return true;
-}
-
-static void updateCollision(chunk::Chunks &chunks, pos::Fractional &player, vec3d &playerForce, bool &isOnGround) {	
-	//note: with this collision resolution it is possible to get stuck outside of the chunks if the player was spawned there
-	
-	vec3l playerPos{ player.val() };
-	vec3l force{ pos::posToFracTrunk(playerForce).val() };
-	
-	vec3l maxPlayerPos{};
-	
-	vec3i dir{};
-	vec3b positive_{};
-	vec3b negative_{};
-	
-	vec3l playerMin{};
-	vec3l playerMax{};
-	
-	vec3i min{};
-	vec3i max{};
-	
-	chunk::Move_to_neighbour_Chunk chunk{ chunks, player.valAs<pos::Chunk>() };
-	
-	auto const updateBounds = [&]() {			
-		dir = force.sign();
-		positive_ = dir > vec3i(0);
-		negative_ = dir < vec3i(0);
-		
-		maxPlayerPos = playerPos + force;
-		
-		/*static_*/assert(width_i % 2 == 0);
-		playerMin = vec3l{ playerPos.x-width_i/2, playerPos.y         , playerPos.z-width_i/2 };
-		playerMax = vec3l{ playerPos.x+width_i/2, playerPos.y+height_i, playerPos.z+width_i/2 };
-		
-		min = pos::Fractional(playerPos - vec3l{width_i/2,0,width_i/2}).valAs<pos::Cube>();
-		max = pos::Fractional(playerPos + vec3l{width_i/2,height_i,width_i/2} - 1).valAs<pos::Cube>();
-	};
-	
-	struct MovementResult {
-		pos::Fractional coord;
-		bool isCollision;
-		bool continueMovement;
-	};
-	
-	auto const moveAlong = [&](vec3b const axis, int64_t const axisPlayerOffset, vec3b const otherAxis1, vec3b const otherAxis2, bool const upStep) -> MovementResult {
-		if(!( (otherAxis1 || otherAxis2).equal(!axis).all() )) {
-			std::cout << "Error, axis not valid: " << axis << " - " << otherAxis1 << ' ' << otherAxis2 << '\n';
-			assert(false);
-		}
-		
-		auto const otherAxis{ otherAxis1 || otherAxis2 };
-		
-		auto const axisPositive{ positive_.dot(axis) };
-		auto const axisNegative{ negative_.dot(axis) };
-		auto const axisDir{ dir.dot(vec3i(axis)) };
-		
-		auto const axisPlayerMax{ playerMax.dot(vec3l(axis)) };
-		auto const axisPlayerMin{ playerMax.dot(vec3l(axis)) };
-		
-		auto const axisPlayerPos{ playerPos.dot(vec3l(axis)) };
-		auto const axisPlayerMaxPos{ maxPlayerPos.dot(vec3l(axis)) };
-		
-		auto const start{ units::Fractional{ axisPositive ? axisPlayerMax : axisPlayerMin }.valAs<units::Cube>() - axisNegative };
-		auto const end{ units::Fractional{ axisPlayerMaxPos + axisPlayerOffset }.valAs<units::Cube>() };
-		auto const count{ (end - start) * axisDir };
-		
-		
-		for(int32_t a{}; a <= count; a++) {
-			auto const axisCurCubeCoord{ start + a * axisDir };
-			
-			auto const axisNewCoord{ units::Cube{axisCurCubeCoord + axisNegative}.valAs<units::Fractional>() - axisPlayerOffset }; 
-			pos::Fractional const newPos{ vec3l(axisNewCoord) * vec3l(axis) + vec3l(playerPos) * vec3l(otherAxis) };
-				
-			vec3l const upStepOffset{ vec3l{0, units::fracInCubeDim, 0} + vec3l(axis) * vec3l(axisDir) };
-			pos::Fractional const upStepCoord{newPos + pos::Fractional{upStepOffset}};
-			
-			auto const upStepMin = (upStepCoord.val() - vec3l{width_i/2,0,width_i/2});
-			auto const upStepMax = (upStepCoord.val() + vec3l{width_i/2,height_i,width_i/2} - 1);
-			
-			auto const upStepPossible{ upStep && checkCanPlaceCollider(chunks, upStepMin, upStepMax)};
-			
-			auto const newCoordBigger{
-				axisPositive ? (axisNewCoord >= axisPlayerPos) : (axisNewCoord <= axisPlayerPos)
-			};
-			
-			for(auto o1{ min.dot(vec3i(otherAxis1)) }; o1 <= max.dot(vec3i(otherAxis1)); o1++)
-			for(auto o2{ min.dot(vec3i(otherAxis2)) }; o2 <= max.dot(vec3i(otherAxis2)); o2++) {
-				vec3i const cubeCoord{
-					  vec3i(axis      ) * axisCurCubeCoord
-					+ vec3i(otherAxis1) * o1
-					+ vec3i(otherAxis2) * o2
-				};
-				
-				auto const cubeLocalCoord{ 
-					cubeCoord.applied([](auto const coord, auto i) -> int32_t {
-						return int32_t(misc::mod<int64_t>(coord, units::cubesInBlockDim));
-					})
-				};
-				
-				pos::Fractional const coord{ pos::Cube(cubeCoord) };
-						
-				vec3i const blockChunk = coord.valAs<pos::Chunk>();
-				
-				auto const isWall{ [&]() {
-					auto const chunkIndex{ chunk.move(blockChunk).get() };
-					if(chunkIndex == -1) return true;
-					
-					auto const chunkData{ chunks.chunksData[chunkIndex] };
-					auto const index{ chunk::blockIndex(coord.as<pos::Block>().valIn<pos::Chunk>()) };
-					auto const block{ chunkData[index] };
-					
-					return block.id() != 0 && block.cube(cubeLocalCoord);
-				}() };
-				
-				if(isWall) {
-					if(newCoordBigger) {
-						auto const diff{ playerPos.y - coord.value().y };
-						if(upStepPossible && diff <= units::fracInCubeDim && diff >= 0) return { upStepCoord, false, true };
-						else return { newPos, true, false };
-					}
-				}
-			}
-		}
-		
-		return { vec3l(axisPlayerMaxPos) * vec3l(axis) + vec3l(playerPos) * vec3l(otherAxis), false, false };
-	};
-	
-	updateBounds();
-		
-	if(dir.y != 0) {
-		MovementResult result;
-		do { 
-			result = moveAlong(vec3b{0,1,0}, (positive_.y ? height_i : 0), vec3b{0,0,1},vec3b{1,0,0}, false);
-			
-			if(result.continueMovement) {
-				force -= (result.coord.value() - playerPos) * vec3l{0,1,0};
-			}
-			else if(result.isCollision) {
-				if(negative_.y) isOnGround = true;
-				force = pos::posToFracTrunk(pos::fracToPos(force) * 0.8).value();
-				force.y = 0;
-			}
-			
-			playerPos = result.coord.value();
-			updateBounds();
-		} while(result.continueMovement);
-	}
-
-	if(dir.x != 0) {
-		MovementResult result;
-		do { 
-			result = moveAlong(vec3b{1,0,0}, width_i/2*dir.x, vec3b{0,0,1},vec3b{0,1,0}, isOnGround);
-			
-			if(result.continueMovement) {
-				force -= (result.coord.value() - playerPos) * vec3l{1,0,0};
-			}
-			else if(result.isCollision) { force.x = 0; }
-			
-			playerPos = result.coord.value();
-			updateBounds();
-		} while(result.continueMovement);
-	}
-	
-	if(dir.z != 0) {
-		MovementResult result;
-		do { 
-			result = moveAlong(vec3b{0,0,1}, width_i/2*dir.z, vec3b{0,1,0},vec3b{1,0,0}, isOnGround);
-			
-			if(result.continueMovement) {
-				force -= (result.coord.value() - playerPos) * vec3l{0,0,1};
-			}
-			else if(result.isCollision) { force.z = 0; }
-			
-			playerPos = result.coord.value();
-			updateBounds();
-		} while(result.continueMovement);
-	}
-	
-	player = pos::Fractional{ playerPos };
-	playerForce = pos::fracToPos(force) * (isOnGround ? vec3d{0.8,1,0.8} : vec3d{1});
-}
-
 bool checkCanPlaceBlock(pBlock const blockPos) {
 	auto const relativeBlockPos{ blockPos - playerCoord };
 	vec3l const blockStart{ relativeBlockPos.value() };
@@ -2173,63 +1865,6 @@ bool checkCanPlaceBlock(pBlock const blockPos) {
 	);
 }
 
-struct BlockIntersection {
-	chunk::Chunk chunk;
-	int16_t blockIndex;
-	uint8_t cubeIndex;
-	vec3i intersectionAxis;
-};
-
-static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir const pd) {
-	DDA checkBlock{ pd };
-		
-	chunk::Move_to_neighbour_Chunk mtnChunk{ chunks, pd.chunk };
-		
-	vec3i intersectionAxis{0};
-	for(int i = 0;; i++) {
-		vec3l const intersection{ checkBlock.get_current() };
-		
-		pos::Cube const cubePos{
-			pos::Chunk{ pd.chunk }.valAs<pos::Cube>()
-			+ pos::Fractional(intersection).valAs<pos::Cube>()
-			+ pd.direction.min(0) * intersectionAxis
-		};
-		
-		auto const cubeLocalCoord{ 
-			cubePos.value().applied([](auto const coord, auto i) -> int32_t {
-				return int32_t(misc::mod<int64_t>(coord, units::cubesInBlockDim));
-			})
-		};
-		
-		auto const chunkIndex{ mtnChunk.move(cubePos.valAs<pos::Chunk>()).get() };
-		if(chunkIndex == -1) break;
-		
-		auto const blockInChunkCoord{ cubePos.as<pos::Block>().valIn<pos::Chunk>() };
-		auto const blockIndex{ chunk::blockIndex(blockInChunkCoord) };
-		
-		auto const chunk{ chunks[chunkIndex] };
-		if(chunk.data().cubeAt(cubePos.valIn<pos::Chunk>()).isSolid) return { BlockIntersection{ 
-			chunk, 
-			blockIndex, 
-			chunk::Block::cubePosIndex(cubeLocalCoord), 
-			intersectionAxis 
-		} };
-		
-		if(i >= 10000) {
-			std::cout << __FILE__ << ':' << __LINE__ << " error: to many iterations!" << pd << '\n'; 
-			break;
-		}
-		
-		if(checkBlock.get_end()) {
-			break;
-		}
-		
-		intersectionAxis = vec3i(checkBlock.next());
-	}
-
-	return {};
-}
-
 void updateAOandBlocksWithoutNeighbours(chunk::Chunk chunk, pCube const first, pCube const last) {
 	updateAOInArea(chunk, first.val(), (last + pCube{1}).val() );
 	updateBlocksDataInArea(chunk, first.as<pBlock>() - pBlock{1}, last.as<pBlock>() + pBlock{1});
@@ -2239,7 +1874,6 @@ bool performBlockAction() {
 	auto const viewport{ currentCameraPos() };
 	PosDir const pd{ PosDir(viewport, pos::posToFracTrunk(viewportCurrent.forwardDir() * 7).value()) };
 	vec3i const dirSign{ pd.direction };
-	DDA checkBlock{ pd };
 	
 	if(blockAction == BlockAction::BREAK) {
 		auto optionalResult{ trace(chunks, pd) };
@@ -2248,16 +1882,16 @@ bool performBlockAction() {
 		
 		auto result{ *optionalResult };
 		
-		pBlock const blockInChunkPos{ chunk::indexBlock(result.blockIndex) };
-		pCube const cubeInBlockPos{ chunk::Block::cubeIndexPos(result.cubeIndex) };
+		pCube const cubeInChunkPos{ result.cubeInChunkCoord };
+		pBlock const blockInChunkPos{ cubeInChunkPos.as<pBlock>() };
+		pCube const cubeInBlockPos{ cubeInChunkPos.in<pBlock>() };
 		auto chunk{ result.chunk };
-		auto &block{ chunk.data()[result.blockIndex] };
+		auto &block{ chunk.data()[blockInChunkPos] };
 		auto const blockId{ block.id() };
 		auto const emitter{ isBlockEmitter(blockId) };
 		
 		auto const blockCoord{ blockInChunkPos.valAs<pBlock>() };
 		
-		pCube const cubeInChunkPos{ blockInChunkPos + cubeInBlockPos };
 		
 		pCube const first{ breakFullBlock ? blockInChunkPos.as<pCube>()             : cubeInChunkPos };
 		pCube const last { breakFullBlock ? blockInChunkPos + pBlock{1} - pCube{1}  : cubeInChunkPos };
@@ -2288,8 +1922,8 @@ bool performBlockAction() {
 			}
 		}
 		else {
-			auto const curCubeCoord{ blockCoord * units::cubesInBlockDim + chunk::Block::cubeIndexPos(result.cubeIndex) };
-			block = chunk::Block{ block.id(), uint8_t( block.cubes() & (~chunk::Block::blockCubeMask(result.cubeIndex)) ) };
+			auto const curCubeCoord{ cubeInChunkPos.val() };
+			block = chunk::Block{ block.id(), uint8_t( block.cubes() & (~chunk::Block::blockCubeMask(cubeInBlockPos.val())) ) };
 			
 			if(emitter) SubtractLighting::inChunkCubes<BlocksLightingConfig>(chunk, curCubeCoord, curCubeCoord);
 			else AddLighting::fromCubeForcedFirst<BlocksLightingConfig>(chunk, curCubeCoord);
@@ -2342,12 +1976,9 @@ bool performBlockAction() {
 		auto result{ *optionalResult };
 		auto const intersectionAxis{ result.intersectionAxis };
 		auto startChunk{ result.chunk };
-		auto const normal{ -dirSign * intersectionAxis };
+		auto const normal{ -dirSign * vec3i{intersectionAxis} };
 		
-		pBlock const startBlockInChunkPos{ chunk::indexBlock(result.blockIndex) };
-		pCube  const startCubeInBlockPos { chunk::Block::cubeIndexPos(result.cubeIndex) };
-		pCube  const startCubeInChunkPos { startBlockInChunkPos + startCubeInBlockPos };
-		auto   const cubePosInStartChunk { startCubeInChunkPos + pCube{normal} };
+		auto const cubePosInStartChunk { result.cubeInChunkCoord + pCube{normal} };
 		
 		auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{startChunk}.moveToNeighbour(cubePosInStartChunk.valAs<pChunk>()) };
 		if(!chunkIndex.is()) return false;
@@ -2512,7 +2143,7 @@ static void update(chunk::Chunks &chunks) {
 				}
 
 				isOnGround = false;
-				updateCollision(chunks, playerCoord, playerForce, isOnGround);
+				updateCollision(chunks, playerCoord, playerOffsetMin, playerOffsetMax, playerForce, isOnGround);
 			}
 			
 			playerMovement = 0;
@@ -2864,13 +2495,10 @@ int main(void) {
 				auto const result{ *optionalResult };
 				auto const chunk { result.chunk };
 				
-				auto const blockCoord{ pos::Chunk{chunk.position()} + pos::Block{chunk::indexBlock(result.blockIndex)} };
-				
-				auto const blockRelativePos{ 
-					vec3f(pos::fracToPos(blockCoord - cameraCoord)) +  
-					(breakFullBlock ? vec3f{0} : (vec3f{chunk::Block::cubeIndexPos(result.cubeIndex)} * 0.5))
-				};
-				float const size{ breakFullBlock ? 1.0f : 0.5f };
+				auto const blockRelativePos{ vec3f(pos::fracToPos(
+					(breakFullBlock ? result.cubePos.as<pBlock>().as<pCube>() : result.cubePos) - cameraCoord
+				)) };
+				float const size{ breakFullBlock ? 1.0f : (1.0f / units::cubesInBlockDim) };
 
 				drawBlockHitbox(blockRelativePos, size, toLoc4);
 			}
@@ -2908,13 +2536,13 @@ int main(void) {
 					auto const result{ *optionalResult };
 					auto const chunk { result.chunk };
 					
-					auto const blockInChunkCoord{ chunk::indexBlock(result.blockIndex) };
-					auto const cubeInBlockCoord{ chunk::Block::cubeIndexPos(result.cubeIndex) };
+					auto const cubeInChunkPos{ result.cubeInChunkCoord };
+					auto const blockInChunkCoord{ cubeInChunkPos.as<pBlock>() };
+					auto const cubeInBlockCoord { cubeInChunkPos.in<pBlock>() };
 					
-					pCube const cubeInChunkPos{ pBlock{blockInChunkCoord} + pCube{cubeInBlockCoord} };
 					
 					ss.precision(1);
-					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << (vec3f(blockInChunkCoord*units::cubesInBlockDim + cubeInBlockCoord)/units::cubesInBlockDim) << '\n';
+					ss << "looking at: chunk=" << chunk.position() << " inside chunk=" << vec3f(pos::fracToPos(cubeInChunkPos.as<pFrac>())) << '\n';
 					ss << "chunk aabb: " << chunk.aabb().start() << ' ' << chunk.aabb().end() << '\n';
 					
 					{
@@ -2928,7 +2556,7 @@ int main(void) {
 					{
 						auto const intersectionAxis{ result.intersectionAxis };
 						vec3i const dirSign{ pd.direction };
-						auto const normal{ -dirSign * intersectionAxis };
+						auto const normal{ -dirSign * vec3i{intersectionAxis} };
 						
 						auto const beforePosInStartChunk { cubeInChunkPos + pCube{normal} };
 						

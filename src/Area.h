@@ -152,7 +152,7 @@ inline chunk::ChunkAndCube getNeighbourCube(
 ) {	
 	pCube const neighbourCubePos{ cubeCoord + pCube{neighbourDir} };
 	auto const neighbourCubeChunkCoord{ neighbourCubePos.valAs<pos::Chunk>() };
-	auto const neighbourCubeInChunkCoord{ neighbourCubePos.valIn<pos::Chunk>() };
+	auto const neighbourCubeInChunkCoord{ neighbourCubePos.in<pos::Chunk>() };
 	
 	auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{cubeChunk}.offset(neighbourCubeChunkCoord).get() };
 	if(neighbourCubeChunkIndex == -1) return { -1, 0 };
@@ -195,7 +195,7 @@ inline void iterateChunks(chunk::Chunk const startChunk, pChunk const first, pCh
 		xMTNChunk = xMTNChunk.moved({cx, cy, cz});
 		if(!xMTNChunk.is()) continue;
 		
-		action(xMTNChunk.get(), vec3i{cx, cy, cz});
+		action(xMTNChunk.get(), {cx, cy, cz});
 	}}}
 }
 
@@ -216,6 +216,6 @@ inline void iterateAllChunks(chunk::Chunk const startChunk, pChunk const first, 
 	for(auto cx{ fChunk.x }; cx <= lChunk.x; cx++) {
 		xMTNChunk = xMTNChunk.moved({cx, cy, cz});
 		
-		action(xMTNChunk.getIndex().get(), vec3i{cx, cy, cz});
+		action(xMTNChunk.getIndex().get(), {cx, cy, cz});
 	}}}
 }
