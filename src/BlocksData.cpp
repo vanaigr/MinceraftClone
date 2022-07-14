@@ -90,7 +90,8 @@ void updateBlockDataNeighboursInfo(chunk::Chunk chunk, pBlock const blockCoord) 
 	blockDataLoc = blockData; 
 }
 
-void updateBlocksDataInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlock const lastRel) {
+
+void updateBlocksDataWithoutNeighboursInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlock const lastRel) {
 	pChunk const startChunkPos{ startChunk.position() };
 	
 	auto const first{ firstRel + startChunkPos };
@@ -109,6 +110,13 @@ void updateBlocksDataInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlo
 			updateBlockDataWithoutNeighbours(chunk, blockCoord);
 		});
 	});
+}
+
+void updateBlocksDataNeighboursInfoInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlock const lastRel) {
+	pChunk const startChunkPos{ startChunk.position() };
+	
+	auto const first{ firstRel + startChunkPos };
+	auto const last { lastRel  + startChunkPos };
 	
 	iterateChunks(startChunk, first.as<pChunk>(), last.as<pChunk>(), [&](chunk::Chunk chunk, pChunk const chunkPos) {		
 		auto const area{ intersectAreas3i(
@@ -122,4 +130,9 @@ void updateBlocksDataInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlo
 			updateBlockDataNeighboursInfo(chunk, blockInChunkCoord);
 		});	
 	});
+}
+
+void updateBlocksDataInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlock const lastRel) {
+	updateBlocksDataWithoutNeighboursInArea(startChunk, firstRel, lastRel);
+	updateBlocksDataNeighboursInfoInArea   (startChunk, firstRel, lastRel);
 }

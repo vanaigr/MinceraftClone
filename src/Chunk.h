@@ -102,6 +102,42 @@ namespace chunk {
 		);
 	}
 	
+	template<typename Unit> struct PackedAABB;
+	
+	template<> struct PackedAABB<pBlock> { //used in main.frag
+		static constexpr int64_t cd = units::blocksInChunkDim-1;
+		static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two block indices must fit into 32 bits" );
+	private:
+		uint32_t data;
+	public:
+		PackedAABB() = default;
+		PackedAABB(pBlock const start, pBlock const end) : data{ 
+			uint32_t(chunk::blockCoordToIndex(start))
+			| (uint32_t(chunk::blockCoordToIndex(end)) << 16) 
+		} {}
+		PackedAABB(Area const a) : PackedAABB{ a.first, a.last } {}
+		
+		constexpr pBlock first() const { return chunk::blockIndexToCoord(int16_t(data&0xffff)); }
+		constexpr pBlock last() const { return chunk::blockIndexToCoord(int16_t(data>>16)); } 
+	};
+	
+	template<> struct PackedAABB<pCube> { //used in main.frag
+		static constexpr int64_t cd = units::cubesInChunkDim-1;
+		static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two cube indices must fit into 32 bits" );
+	private:
+		uint32_t data;
+	public:
+		PackedAABB() = default;
+		PackedAABB(pCube const start, pCube const end) : data{ 
+			uint32_t(chunk::cubeCoordToIndex(start))
+			| (uint32_t(chunk::cubeCoordToIndex(end)) << 16) 
+		} {}
+		PackedAABB(Area const a) : PackedAABB{ a.first, a.last } {}
+		
+		constexpr pCube first() const { return chunk::cubeIndexToCoord(int16_t(data&0xffff)); }
+		constexpr pCube last() const { return chunk::cubeIndexToCoord(int16_t(data>>16)); } 
+	};
+	
 	template<typename Chunks>
 	struct Chunk_{
 	private:
@@ -152,6 +188,7 @@ namespace chunk {
 		static_assert(pos::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
 		
 		using id_t = uint16_t;
+		using cubes_t = uint8_t;
 		
 		static constexpr bool checkCubeCoordValid(vec3i const coord) {
 			return checkCubeCoordInBlockValid(pCube{coord});
@@ -199,11 +236,11 @@ namespace chunk {
 	public:
 		Block() = default;
 		explicit constexpr Block(uint32_t const data__) : data_{ data__ } {}
-		constexpr Block(id_t const id, uint8_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
+		constexpr Block(id_t const id, cubes_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
 			if(id == 0 || cubes == 0) data_ = 0;
 		}
 		uint32_t data() const { return data_; }
-		uint8_t cubes() const { return uint8_t(data_ >> 24); }
+		cubes_t cubes() const { return cubes_t(data_ >> 24); }
 		constexpr id_t id() const { return id_t(data_ & ((1 << 16) - 1)); }
 		
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
@@ -462,6 +499,9 @@ namespace chunk {
 		}		
 		constexpr bool isEmpty() const {
 			return noCubes();
+		}		
+		constexpr bool isFull() const {
+			return solidCubes == 0xffu && liquidCubes == 0xffu;
 		}
 	};
 	static_assert(sizeof(BlockData) == 4);
@@ -581,8 +621,43 @@ namespace chunk {
 	};
 	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);
 	
+	using chunkIndex_t = int32_t;
+	struct ChunkAndCube {
+		chunk::chunkIndex_t chunkIndex;
+		chunk::CubeInChunkIndex cubeIndex;
+		
+		constexpr bool operator==(ChunkAndCube const it) const  noexcept {
+			return chunkIndex == it.chunkIndex && cubeIndex == it.cubeIndex;
+		}	
+		
+		constexpr bool operator<(ChunkAndCube const it) const noexcept {
+			if(chunkIndex < it.chunkIndex) return true;
+			else if(chunkIndex > it.chunkIndex) return false;
+			else return cubeIndex < it.cubeIndex;
+		}
+	};
+	
+	struct ChunksLiquidCubes {
+	private:
+		static constexpr int gensCount = 2;
+		chunk::Chunks *chunks_;
+		std::vector<chunk::ChunkAndCube> gens[gensCount];
+		int genIndex;
+		
+		chunk::Chunks &chunks() { return *chunks_; } 
+	public:
+		ChunksLiquidCubes(chunk::Chunks &chunks) : 
+			chunks_{ &chunks }, gens{}, genIndex{} {}
+		
+		void update();
+		
+		void add(chunk::ChunkAndCube const cube) {
+			gens[genIndex].push_back(cube);
+		}
+	};
+
 	struct Chunks {	
-		using index_t = int32_t;
+		using index_t = chunkIndex_t;
 	private:
 		std::vector<index_t> vacant{};
 		std::vector<index_t> used_{};
@@ -610,6 +685,8 @@ namespace chunk {
 		std::vector<Chunk3x3BlocksList> chunksNeighbouringEmitters;
 		std::vector<index_t> chunksGPUIndex{};
 		std::unordered_map<vec3i, index_t, PosHash> chunksIndex_position{};
+		
+		ChunksLiquidCubes liquidCubes{ *this };
 	
 		std::vector<index_t> const &usedChunks() const { return used; }
 		
@@ -826,20 +903,5 @@ namespace chunk {
 			if(dir.z != 0) outChunk = outChunk.offsetedToImmediate(vec3i(0,0,dir.z));
 			return outChunk;
 		}		
-	};
-	
-	struct ChunkAndCube {
-		chunk::Chunks::index_t chunkIndex;
-		chunk::CubeInChunkIndex cubeIndex;
-		
-		constexpr bool operator==(ChunkAndCube const it) const  noexcept {
-			return chunkIndex == it.chunkIndex && cubeIndex == it.cubeIndex;
-		}	
-		
-		constexpr bool operator<(ChunkAndCube const it) const noexcept {
-			if(chunkIndex < it.chunkIndex) return true;
-			else if(chunkIndex > it.chunkIndex) return false;
-			else return cubeIndex < it.cubeIndex;
-		}
 	};
 }

@@ -3,7 +3,7 @@
 #include"Chunk.h"
 #include"Vector.h"
 
-void writeChunk  (chunk::Chunk chunk);
-bool tryReadChunk(chunk::Chunk chunk);
+#include<string_view>
 
-void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool const loadChunks);
+void writeChunk(chunk::Chunk chunk, std::string_view const worldName);
+void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::string_view const worldName, bool const loadChunks);

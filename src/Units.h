@@ -42,10 +42,10 @@ namespace units {
 	struct UnitCube;
 
 	//units
-	using Fractional = unit::Unit<UnitsHierarchy, UnitFractional, long long>;
-	using Chunk      = unit::Unit<UnitsHierarchy, UnitChunk     , int>;
-	using Block      = unit::Unit<UnitsHierarchy, UnitBlock     , int>;
-	using Cube       = unit::Unit<UnitsHierarchy, UnitCube      , int>;
+	using Fractional = unit::Unit<UnitsHierarchy, UnitFractional, int64_t>;
+	using Chunk      = unit::Unit<UnitsHierarchy, UnitChunk     , int32_t>;
+	using Block      = unit::Unit<UnitsHierarchy, UnitBlock     , int32_t>;
+	using Cube       = unit::Unit<UnitsHierarchy, UnitCube      , int32_t>;
 }
 
 //type conversions
@@ -76,6 +76,18 @@ namespace units {
 	
 	static constexpr inline double fracToPos(Fractional value) { return static_cast<double>(value.value()) / fracInBlockDim; }
 	
+	//more constants
+	constexpr Cube::value_type cubeMin( std::numeric_limits<Cube::value_type>::lowest() );
+	constexpr Cube::value_type cubeMax( std::numeric_limits<Cube::value_type>::max() );
+	
+	constexpr Block::value_type blockMin( cubeMin >> cubesInBlockDimAsPow2 );
+	constexpr Block::value_type blockMax( cubeMax >> cubesInBlockDimAsPow2 );
+	
+	constexpr Chunk::value_type chunkMin( blockMin >> blocksInChunkDimAsPow2 );
+	constexpr Chunk::value_type chunkMax( blockMax >> blocksInChunkDimAsPow2 );
+	
+	constexpr Fractional::value_type fracMin( Fractional::value_type{chunkMin} * fracInChunkDim );
+	constexpr Fractional::value_type fracMax( Fractional::value_type{chunkMax} * fracInChunkDim );
 	
 	namespace /*test*/ {
 		template<typename T1, typename T1::value_type V1, typename T2, typename T2::value_type V2>

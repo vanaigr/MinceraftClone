@@ -174,8 +174,10 @@ static void propagateHorisontalLightingIn(
 	}
 }
 
-void calculateLighting(chunk::Chunks &chunks, int (&chunkIndices)[chunksCoumnChunksCount], 
-vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY) {
+void calculateLighting(
+	chunk::Chunks &chunks, int (&chunkIndices)[chunksCoumnChunksCount], vec2i const columnPosition, 
+	int const lowestEmptyY, int const lowestNotFullY
+) {
 	{//sky lighting
 		{ //sky cuhnks
 			/* Iterate over emptyChunks with maximum sky lighting's neighbours.
@@ -444,6 +446,13 @@ vec2i const columnPosition, int const lowestEmptyY, int const lowestNotFullY) {
 
 	{//block lighting
 		Sides invalidated[chunksCoumnChunksCount] = {}; //I hope it is 0-initialized
+		
+		//setup emitters
+		for(int chunkY{chunkColumnChunkYMax}; chunkY >= lowestNotFullY; chunkY--) {
+			auto const chunkI{ chunkY - chunkColumnChunkYMin };
+			auto chunk{ chunks[chunkIndices[chunkI]] };
+			fillEmittersBlockLighting(chunk);
+		}
 		
 		//propagate borders lighting in
 		propagateHorisontalLightingIn(

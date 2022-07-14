@@ -1,7 +1,7 @@
 #pragma once
 
 #include"Vector.h"
-#include"Chunk.h"
+#include"Units.h"
 
 #include<type_traits>
 #include<array>
@@ -88,6 +88,16 @@ public:
 			a1.first.min(a2.first),
 			a1.last .max(a2.last )
 		};
+	}
+	
+	friend bool operator==(Area const a1, Area const a2) {
+		if(a1.isEmpty() && a2.isEmpty()) return true;
+		else if(a1.isEmpty() ^ a2.isEmpty()) return false;
+		else return a1.first == a2.first && a1.last == a2.last;
+	}
+	
+	friend bool operator!=(Area const a1, Area const a2) {
+		return !(a1 == a2);
 	}
 };
 

@@ -1,4 +1,3 @@
-#include"Liquid.h"
 #include"Area.h"
 #include"MiscChunk.h"
 #include"BlocksData.h"
@@ -64,7 +63,7 @@ public:
 	void reset() { data.fill(value_type()); }
 };
 
-void ChunksLiquidCubes::update() {
+void chunk::ChunksLiquidCubes::update() {
 	auto &chunks{ this->chunks() };
 	auto &gen{ gens[genIndex] };
 	auto &genNext{ gens[(genIndex+1) % gensCount] };
@@ -126,7 +125,7 @@ void ChunksLiquidCubes::update() {
 				updateBlockDataNeighboursInfo(neighbourChunk, blockInChunkCoord);
 			}
 			
-			//update AABB and status
+			//update AABB, status, modified
 			iterate3by3Volume([&](vec3i const dir, int const index3) {
 				if(!neighbourChunksUpdated[index3]) return;
 				
@@ -159,6 +158,7 @@ void ChunksLiquidCubes::update() {
 				aabb = { aabbCombined.first, aabbCombined.last };
 				
 				chunk.status().setBlocksUpdated(true);
+				chunk.modified() = true;
 			});
 		}
 		

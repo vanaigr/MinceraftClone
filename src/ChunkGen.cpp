@@ -3,17 +3,25 @@
 #include"Lighting.h"
 #include"BlocksData.h"
 #include"AO.h"
+#include"Counter.h"
+#include"Units.h"
 
 #include"PerlinNoise.h"
 
 #include<string>
 #include<sstream>
 #include<fstream>
+#include<array>
+#include<algorithm>
+#include<type_traits>
+#include<string_view>
+#include<filesystem>
+
 
 static std::string chunkFilename(chunk::Chunk const chunk) {
 	auto const &pos{ chunk.position() };
 	std::stringstream ss{};
-	ss << "./save/" << pos << ".cnk";
+	ss << "./save0/" << pos << ".cnk";
 	return ss.str();
 }
 
@@ -24,33 +32,103 @@ static std::string chunkNewFilename(chunk::Chunk const chunk) {
 	return ss.str();
 }
 
-static std::string chunkColumnFilename(vec2i const columnChunkCoordXY) {
+
+static std::string chunkColumnFilename(vec2<pChunk::value_type::value_type> const xz) {
+	static constexpr auto lookupSizeAsPow2{ 6 };
+	static constexpr auto lookupSize{ 1 << lookupSizeAsPow2 };
+	static constexpr long long oneCoordSize{ 5 };
+	static_assert((((long long) units::chunkMax) - ((long long) units::chunkMin)) < lookupSize*lookupSize*lookupSize*lookupSize*lookupSize);
+	static constexpr char const (&lookup)[lookupSize+1] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ=-";
+	
+	using ut = typename std::make_unsigned<decltype(xz)::value_type>::type;
+		
+	std::array<char, oneCoordSize*2 + 1> result;
+	long long offset{};
+	
+	for(long long i{}; i < oneCoordSize; i++)
+		result[offset++] = lookup[(ut(xz.x) >> (i * lookupSizeAsPow2)) & (lookupSize-1)];
+	
+	result[offset++] = '_';
+	
+	for(long long i{}; i < oneCoordSize; i++) 
+		result[offset++] = lookup[(ut(xz.y) >> (i * lookupSizeAsPow2)) & (lookupSize-1)];
+	
 	std::stringstream ss{};
-	ss << "./save/" << columnChunkCoordXY << ".ccm";
+	ss << std::string_view{ &*std::begin(result), result.size() } << ".ccm";
 	return ss.str();
 }
 
-void writeChunk(chunk::Chunk chunk) {
-	std::cout << "!";
-	auto const &data{ chunk.data() };
+static void writeChunksColumn(chunk::Chunks &chunks, vec2<pChunk::value_type::value_type> const xz, std::string_view const worldName) {	
+	std::stringstream ss{};
+	ss << "./save/" << worldName << '/';
+	std::filesystem::create_directories(ss.str());
+	ss << chunkColumnFilename(xz);
 	
-	std::ofstream chunkFileOut{ chunkNewFilename(chunk), std::ios::binary };
+	std::ofstream file{ ss.str(), std::ios::binary };
+	if(!file) { std::cout << "ERROR: could not write chunk column " << xz << '\n'; return; }
 	
-	for(int x{}; x < units::blocksInChunkDim; x++) 
-	for(int y{}; y < units::blocksInChunkDim; y++) 
-	for(int z{}; z < units::blocksInChunkDim; z++) {
-		vec3i const blockCoord{x,y,z};
-		auto const blockData = data[chunk::blockIndex(blockCoord)].data();
+	uint32_t const version{};
+	file.write((char*) &version, sizeof(version));
+	
+	chunk::MovingChunk curMChunk{ chunks, vec3i{xz.x, chunkColumnChunkYMin, xz.y} };
+	for(auto y{chunkColumnChunkYMin}; y <= chunkColumnChunkYMax; y++) {
+		auto chunk{ curMChunk.get() };
 		
-		uint8_t const blk[] = { 
-			(unsigned char)((blockData >> 0) & 0xff), 
-			(unsigned char)((blockData >> 8) & 0xff),
-			(unsigned char)((blockData >> 16) & 0xff),
-			(unsigned char)((blockData >> 24) & 0xff),
-		};
-		chunkFileOut.write(reinterpret_cast<char const *>(&blk[0]), 4);
+		chunk.modified() = false;
+		
+		//blocks aabb
+		auto const aabb{ chunk.aabb() };
+		chunk::PackedAABB<pBlock> const aabbData{ aabb };
+		file.write((char*) &aabbData, sizeof(aabbData));
+			
+		//blocks
+		auto const &blocks{ chunk.blocks() };
+		iterateArea(aabb, [&](pBlock const blockCoord) {
+			auto const &block{ blocks[blockCoord] };
+			auto const id{ block.id() };
+			auto const cubes{ block.cubes() };
+			
+			file.write((char*) &id, sizeof(id));
+			file.write((char*) &cubes, sizeof(cubes));
+		});
+		
+		//liquid aabb
+		auto const blocksData{ chunk.blocksData() };
+		auto liquidAABB{ Area::empty() };
+		iterateArea(aabb, [&](pBlock const blockCoord) {
+			auto const &blockData{ blocksData[blockCoord] };
+			
+			for(int i{}; i < pos::cubesInBlockCount; i++) {
+				auto const cubeInBlockCoord{ chunk::cubeIndexInBlockToCoord(i) };
+				auto const cubeCoord{ blockCoord + cubeInBlockCoord };
+				
+				if(blockData.liquidCubes & (1 << i)) liquidAABB += cubeCoord.val();
+			}
+		});
+		chunk::PackedAABB<pCube> liquidAABBData{ liquidAABB };
+		file.write((char*) &liquidAABBData, sizeof(liquidAABBData));
+		
+		//liquid
+		auto const liquid{ chunk.liquid() };
+		iterateArea(liquidAABB, [&](pCube const cubeCoord) {
+			auto const &liquidCube{ liquid[cubeCoord] };
+			auto const id{ liquidCube.id };
+			auto const level{ liquidCube.level };
+			
+			file.write((char*) &id, sizeof(id));
+			file.write((char*) &level, sizeof(level));
+		});
+		
+		curMChunk = curMChunk.offseted(vec3i{0, 1, 0});
 	}
+	
+	file.close();
 }
+
+struct ReadStatus {
+	bool all;
+	std::array<bool, chunksCoumnChunksCount> is;
+};
 
 bool tryReadChunk(chunk::Chunk chunk) {
 	auto &data{ chunk.data() };
@@ -113,6 +191,87 @@ bool tryReadChunk(chunk::Chunk chunk) {
 	}
 	
 	return false;
+}
+
+static ReadStatus readChunksColumn(
+	chunk::Chunks &chunks, int (&chunksIndices)[chunksCoumnChunksCount], vec2<pChunk::value_type::value_type> const xz, 
+	std::string_view const worldName
+) {	
+	std::stringstream ss{};
+	ss << "./save/" << worldName << '/';
+	std::filesystem::create_directories(ss.str());
+	ss << chunkColumnFilename(xz);
+	
+	std::ifstream file{ ss.str(), std::ios::binary };
+	if(!file) { 
+		ReadStatus rs{};
+		rs.all = true;
+		
+		for(auto i{0}; i < chunksCoumnChunksCount; i++) {
+			auto chunk{ chunks[chunksIndices[i]] };
+			auto const is{ (rs.is[i] =/*!*/ tryReadChunk(chunk)) };
+			rs.all = rs.all && is;
+			if(is) chunk.modified() = true; //if chunk is read fromb old file, write it later using new method
+		}
+		
+		return rs;
+	}
+	
+	uint32_t version{};
+	file.read((char*) &version, sizeof(version));
+	assert(version == 0);
+
+	for(auto y{chunkColumnChunkYMin}; y <= chunkColumnChunkYMax; y++) {
+		auto const chunkIndex{ chunksIndices[y - chunkColumnChunkYMin] };
+		auto chunk{ chunks[chunkIndex] };
+		auto &emitters{ chunk.emitters() };
+		
+		//blocks aabb
+		chunk::PackedAABB<pBlock> aabbData;
+		file.read((char*) &aabbData, sizeof(aabbData));
+		auto const aabb{ chunk.aabb() = Area{ aabbData.first().val(), aabbData.last().val() } };
+		
+		//blocks
+		auto &blocks{ chunk.blocks() };
+		iterateArea(aabb, [&](pBlock const blockCoord) {
+			auto &block{ blocks[blockCoord] };
+			
+			chunk::Block::id_t id;
+			chunk::Block::cubes_t cubes;
+			file.read((char*) &id, sizeof(id));
+			file.read((char*) &cubes, sizeof(cubes));
+			
+			block = { id, cubes };
+			if(isBlockEmitter(id)) emitters.add(blockCoord.val());
+		});
+		
+		//liquid aabb
+		chunk::PackedAABB<pCube> liquidAABBData;
+		file.read((char*) &liquidAABBData, sizeof(liquidAABBData));
+		Area liquidAABB{ liquidAABBData.first().val(), liquidAABBData.last().val() };
+		
+		//liquid
+		auto &liquid{ chunk.liquid() };
+		iterateArea(liquidAABB, [&](pCube const cubeCoord) {
+			auto &liquidCube{ liquid[cubeCoord] };
+			chunk::Block::id_t id;
+			chunk::LiquidCube::level_t level;
+			
+			file.read((char*) &id, sizeof(id));
+			file.read((char*) &level, sizeof(level));
+			
+			liquidCube = { id, level };
+			chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
+		});
+	}
+
+	file.close();
+	
+	return { true, {true} };
+}
+
+void writeChunk(chunk::Chunk chunk, std::string_view const worldName) {
+	writeChunksColumn(chunk.chunks(), chunk.position().xz(), worldName);
 }
 
 static double heightAt(vec2i const flatChunk, vec2i const block) {
@@ -191,12 +350,15 @@ static void genTrees(chunk::Chunk chunk) {
 }
 
 static void genChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk) {
+	auto &chunks{ chunk.chunks() };
+	auto const chunkIndex{ chunk.chunkIndex() };
 	auto const &pos{ chunk.position() };
 	auto &blocks{ chunk.data() };
 	auto &liquid{ chunk.liquid() };
 	auto &emitters{ chunk.emitters() };
+	chunk.modified() = true;
 	
-	auto &aabbLoc{ chunk.aabb() };
+	auto &aabbLoc{ chunk.aabb() = Area::empty() };
 	auto aabb{ aabbLoc };
 	
 	for(int z{}; z < units::blocksInChunkDim; ++z)
@@ -225,6 +387,8 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 					pCube const cubeLocalCoord{ chunk::Block::cubeIndexPos(cubeIndex) };
 					auto const cubeCoord{ pBlock{blockCoord} + cubeLocalCoord }; 
 					
+					chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
+					
 					if(cubeLocalCoord.val().y == units::cubesInBlockDim-1)
 						liquid[cubeCoord] = chunk::LiquidCube{15, 254u};
 					else 
@@ -235,10 +399,10 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
 					auto const cubeCoord{ pBlock{blockCoord} + pCube{ chunk::Block::cubeIndexPos(cubeIndex) } }; 
 					liquid[cubeCoord] = chunk::LiquidCube{15, 255u};
+					chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
 				}
 			}
 		}
-		
 		
 		if(isBlockEmitter(blocks[blockCoord].id())) emitters.add(blockCoord);
 	}
@@ -247,23 +411,32 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 	genTrees(chunk);	
 }
 
-static void fillChunkData(double const (&heights)[units::blocksInChunkDim * units::blocksInChunkDim], chunk::Chunk chunk, bool const loadChunks) {
-	if(loadChunks  && tryReadChunk(         chunk)) chunk.modified() = false;
-	else {            genChunkData(heights, chunk); chunk.modified() = true ; }
+static void fillChunksData(
+	chunk::Chunks &chunks, int (&chunkIndices)[chunksCoumnChunksCount], vec2<pChunk::value_type::value_type> const xz, 
+	std::string_view const worldName,bool const loadChunks
+) {
+	ReadStatus rs{};
+	if(loadChunks) rs = readChunksColumn(chunks, chunkIndices, xz, worldName);
 	
+	if(!rs.all) {
+		//generate heights for each block column in the chunk column
+		double heights[units::blocksInChunkDim * units::blocksInChunkDim];
+		auto minHeight{ std::numeric_limits<double>::infinity() };
+		for(int z{}; z < units::blocksInChunkDim; z++) 
+		for(int x{}; x < units::blocksInChunkDim; x++) {
+			auto const height{  heightAt(vec2i{xz.x,xz.y}, vec2i{x,z}) };
+			heights[z* units::blocksInChunkDim + x] = height;
+			minHeight = std::min(minHeight, height);
+		}
+		
+		for(int i{}; i < chunksCoumnChunksCount; i++) {
+			if(rs.is[i]) continue;
+			genChunkData(heights, chunks[chunkIndices[i]]);
+		}
+	}
 }
 
-void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool const loadChunks) {
-	//generate heights for each block column in the chunk column
-	double heights[units::blocksInChunkDim * units::blocksInChunkDim];
-	auto minHeight{ std::numeric_limits<double>::infinity() };
-	for(int z{}; z < units::blocksInChunkDim; z++) 
-	for(int x{}; x < units::blocksInChunkDim; x++) {
-		auto const height{  heightAt(vec2i{columnPosition.x,columnPosition.y}, vec2i{x,z}) };
-		heights[z* units::blocksInChunkDim + x] = height;
-		minHeight = std::min(minHeight, height);
-	}
-
+void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::string_view const worldName, bool const loadChunks) {
 	constexpr int neighbourDirsCount = 8; //horizontal neighbours only
 	vec3i const neighbourDirs[] = { 
 		vec3i{-1,0,-1}, vec3i{-1,0,0}, vec3i{-1,0,+1}, vec3i{0,0,+1}, vec3i{+1,0,+1}, vec3i{+1,0,0}, vec3i{+1,0,-1}, vec3i{0,0,-1}
@@ -293,9 +466,6 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool c
 	auto lowestEmptyY{ chunkColumnChunkYMax + 1 };
 	auto lowestNotFullY  { chunkColumnChunkYMax + 1 };
 	auto emptyBefore{ true };
-
-	auto lowestWithBlockLighting { chunkColumnChunkYMax + 1 };
-	auto highestWithBlockLighting{ chunkColumnChunkYMin - 1 };
 	
 	struct ChunkIndexAndNeighbours{ 
 		int chunkIndex; 
@@ -303,6 +473,7 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool c
 	};
 	ChunkIndexAndNeighbours chunkIndicesWithNeighbours[chunksCoumnChunksCount];
 	
+	//setup chunks
 	for(auto y { chunkColumnChunkYMax }; y >= chunkColumnChunkYMin; y--) {
 		auto const usedIndex{ chunks.reserve() };
 		
@@ -314,17 +485,35 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool c
 		
 		auto chunk{ chunks[chunkIndex] };
 		
+
 		chunk.position() = chunkPosition;
+		
 		chunk.status() = chunk::ChunkStatus{};
 		chunk.status().setEverythingUpdated();
 		chunk.status().setUpdateAO(true);
 		chunk.status().setUpdateNeighbouringEmitters(true);
+		
 		chunk.gpuIndex() = chunk::Chunks::index_t{};
+		
 		chunk.liquid().reset();
+		chunk.blocks().reset();
+		//blocks data is filled later
 		chunk.ao().reset();
+		
 		chunk.blockLighting().reset();
+		//sky lighting is filled later
 		chunk.emitters().clear();
 		chunk.neighbouringEmitters().clear();
+		
+	}
+	
+	fillChunksData(chunks, chunkIndices, columnPosition, worldName, loadChunks);
+	
+	//setup neighbours and update data inside chunks
+	for(int i {chunksCoumnChunksCount-1}; i >= 0; i--) {
+		auto const y{ i + chunkColumnChunkYMin };
+		auto const chunkIndex{ chunkIndices[i] };
+		auto chunk{ chunks[chunkIndex] };
 		
 		chunk.neighbours() = [&] {
 			chunk::Neighbours neighbours{};
@@ -357,58 +546,71 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool c
 			return neighbours;
 		}();
 		
-		chunk.aabb() = Area::empty();
 		
-		fillChunkData(heights, chunk, loadChunks);
-		fillEmittersBlockLighting(chunk);
+		updateBlocksDataWithoutNeighboursInArea(chunk, pBlock{0}, pBlock{units::blocksInChunkDim-1});
 		
+
 		if(emptyBefore && chunk.aabb().isEmpty()) {
 			chunk.skyLighting().fill(chunk::ChunkLighting::maxValue);
-			lowestEmptyY = misc::min(lowestEmptyY, chunkPosition.y);
+			lowestEmptyY = misc::min(lowestEmptyY, y);
 		}
 		else {
 			chunk.skyLighting().reset();
 			emptyBefore = false;
 		}
-		if(chunk.emitters().size() != 0) {
-			highestWithBlockLighting = std::max(highestWithBlockLighting, chunkPosition.y);
-			lowestWithBlockLighting  = std::min(lowestWithBlockLighting , chunkPosition.y);
+		
+		{
+			auto isFull{ false };
+				
+			if(chunk.aabb() == Area{ 0, units::blocksInChunkDim-1 }) {
+				isFull = true;
+				
+				auto const &blocksData{ chunk.blocksData() };
+				for(int j{}; j < pos::blocksInChunkCount; j++) {
+					if(!blocksData[j].isFull()) {
+						isFull = false;
+						break;
+					}
+				}
+			}	
+			
+			if(!isFull) lowestNotFullY = std::min(lowestNotFullY, y);
 		}
 		
-		if((y + 1)*units::blocksInChunkDim-1 >= minHeight) lowestNotFullY = std::min(lowestNotFullY, y);
-		
-		chunkIndicesWithNeighbours[y - chunkColumnChunkYMin].chunkIndex = chunkIndex;
 		
 		//updateNeighbourChunks and move to next
-		for(int i{}; i < neighbourDirsCount; i ++) {
-			vec3i const offset{ neighbourDirs[i] };
-			auto const optChunkIndex{ neighbourChunks[i].optChunk() };
-			chunkIndicesWithNeighbours[y - chunkColumnChunkYMin].neighbours[i] = optChunkIndex;
+		chunkIndicesWithNeighbours[y - chunkColumnChunkYMin].chunkIndex = chunkIndex;
+		
+		for(int j{}; j < neighbourDirsCount; j ++) {
+			vec3i const offset{ neighbourDirs[j] };
+			auto const optChunkIndex{ neighbourChunks[j].optChunk() };
+			chunkIndicesWithNeighbours[i].neighbours[j] = optChunkIndex;
 			
 			vec3 const next{ vec3i{0,-1,0} };
-			neighbourChunks[i].offset(next);
+			neighbourChunks[j].offset(next);
 		}
 		topNeighbourIndex = chunk::OptionalChunkIndex{ chunkIndex };
 	}
 	
+	//update AO and blocks neighbours info 
 	for(auto const &[chunkIndex, neighbours] : chunkIndicesWithNeighbours) {		
 		auto chunk{ chunks[chunkIndex] };
 		
 		auto const &aabb{ chunk.aabb() };
 		
-		auto const updateBlocksNoNeighbours{ !aabb.isEmpty() };
 		auto const areaUpdateNoNeighbours{ intersectAreas3i(
 			Area{ vec3i{-1} , vec3i{units::blocksInChunkDim-1 + 1} },
 			{ aabb.first - 1, aabb.last + 1 }
 		) };
 		
-		//AO is updated later in updateChunk()
+		{ //updates for current chunk
+			assert(chunk.status().isUpdateAO()); //AO is updated later in updateChunk()
 		
-		if(updateBlocksNoNeighbours) { //blocks with no neighbours
-			updateBlocksDataInArea(chunk, pBlock{aabb.first}, pBlock{aabb.last});
-			//chunk.status().setBlocksUpdated(true); //already set
+			updateBlocksDataNeighboursInfoInArea(chunk, pBlock{aabb.first}, pBlock{aabb.last});
+			assert(chunk.status().isBlocksUpdated()); //chunk.status().setBlocksUpdated(true); //already set
 		}
 		
+		//updates for neighbouring chunks
 		for(int i{}; i < neighbourDirsCount; i++) {
 			auto const &neighbourIndex{ neighbours[i] };
 			if(!neighbourIndex.is()) continue;
@@ -416,22 +618,18 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool c
 			auto const offset{ neighbourDirs[i] };	
 			auto neighbourChunk{ chunks[neighbourIndex.get()] };
 			auto const &neighbourAabb{ neighbourChunk.aabb() };
-			auto const neighbourFirst{ neighbourAabb.first };
-			auto const neighbourLast { neighbourAabb.last  };
-
+			
 			if(!neighbourChunk.status().isUpdateAO()) { //AO
 				auto const updatedAreaCubes{ intersectAreas3i(
 					{ vec3i{0} - offset*units::cubesInChunkDim, vec3i{units::cubesInChunkDim} - offset*units::cubesInChunkDim },
-					{ neighbourFirst * units::cubesInBlockDim, (neighbourLast+1) * units::cubesInBlockDim - 1 })
+					{ neighbourAabb.first * units::cubesInBlockDim, (neighbourAabb.last+1) * units::cubesInBlockDim - 1 })
 				};
 				
-				if(!updatedAreaCubes.isEmpty()) {
-					updateAOInArea(neighbourChunk, pCube{updatedAreaCubes.first}, pCube{updatedAreaCubes.last});
-					neighbourChunk.status().setAOUpdated(true);
-				}
+				updateAOInArea(neighbourChunk, pCube{updatedAreaCubes.first}, pCube{updatedAreaCubes.last});
+				neighbourChunk.status().setAOUpdated(true);
 			}
 			
-			if(updateBlocksNoNeighbours) { //blocks with no neighbours
+			{ //neighbours info
 				Area const updatedAreaBlocks_{ 
 					areaUpdateNoNeighbours.first - offset*units::blocksInChunkDim,
 					areaUpdateNoNeighbours.last  - offset*units::blocksInChunkDim
@@ -441,10 +639,8 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool c
 					{ 0, units::blocksInChunkDim-1 }
 				) };
 				
-				if(!updatedAreaBlocks.isEmpty()) {
-					updateBlocksDataInArea(neighbourChunk, pBlock{updatedAreaBlocks.first}, pBlock{updatedAreaBlocks.last});
-					neighbourChunk.status().setBlocksUpdated(true);
-				}
+				updateBlocksDataNeighboursInfoInArea(neighbourChunk, pBlock{updatedAreaBlocks.first}, pBlock{updatedAreaBlocks.last});
+				neighbourChunk.status().setBlocksUpdated(true);
 			}
 			
 			neighbourChunk.status().setUpdateNeighbouringEmitters(true);
@@ -452,4 +648,15 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, bool c
 	}
 	
 	calculateLighting(chunks, chunkIndices, columnPosition, lowestEmptyY, lowestNotFullY);
+	
+	
+	static Counter<1024> lowestEmptyY_{}, lowestNotFullY_{};
+	static int i__ = 0;
+	
+	lowestEmptyY_.add(lowestEmptyY);
+	lowestNotFullY_.add(lowestNotFullY);
+	
+	i__++;
+	if(i__ == 11*11-2) std::cout << lowestEmptyY_.mean() << ' ' << lowestNotFullY_.mean() << '\n';
+	
 }

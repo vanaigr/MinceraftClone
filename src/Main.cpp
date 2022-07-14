@@ -16,7 +16,6 @@
 #include"Area.h"
 #include"BlockProperties.h"
 #include"BlocksData.h"
-#include"Liquid.h"
 #include"Trace.h"
 #include"Physics.h"
 #include"ChunkGen.h"
@@ -34,6 +33,7 @@
 #include<chrono>
 #include<vector>
 #include<sstream>
+#include<string>
 
 //https://learnopengl.com/In-Practice/Debugging
 GLenum glCheckError_(const char *file, int line)
@@ -78,6 +78,8 @@ GLFWwindow* window;
 
 static int  viewDistance = 3;
 static bool loadChunks = false, saveChunks = false;
+static std::string worldName{ "world0" };
+
 static vec2d mouseSensitivity{ 0.8, -0.8 };
 static int chunkUpdatesPerFrame = 5;
 
@@ -242,8 +244,6 @@ static vec2i screenshotSize{ windowSize };
 bool takeScreenshot;
 
 static chunk::Chunks chunks{};
-static ChunksLiquidCubes chunksLiquid{ chunks };
-
 
 enum class Key : uint8_t { RELEASE = GLFW_RELEASE, PRESS = GLFW_PRESS, REPEAT = GLFW_REPEAT, NOT_PRESSED };
 static_assert(GLFW_RELEASE >= 0 && GLFW_RELEASE < 256 && GLFW_PRESS >= 0 && GLFW_PRESS < 256 && GLFW_REPEAT >= 0 && GLFW_REPEAT < 256);
@@ -406,26 +406,6 @@ struct GPUChunksIndex {
 	}
 } static gpuChunksIndex{}; 
 
-struct PackedAABB { //used in main.frag
-	static constexpr int64_t cd = units::blocksInChunkDim-1;
-	static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two block indices must fit into 32 bits" );
-private:
-	uint32_t data;
-public:
-	PackedAABB() = default;
-	PackedAABB(vec3i const start, vec3i const end) : data{ 
-		uint32_t(uint16_t(chunk::blockCoordToIndex(pBlock{start})))
-		| (uint32_t(uint16_t(chunk::blockCoordToIndex(pBlock{end}))) << 16) 
-	} {}
-	PackedAABB(Area const a) : PackedAABB{ a.first, a.last } {}
-	
-	//constexpr uint32_t getData() const { return data; }
-	//constexpr vec3i start() const { return chunk::blockIndexToCoord(int16_t(data&0xffff)).val(); }
-	//constexpr vec3i end() const { return chunk::blockIndexToCoord(int16_t(data>>16)).val(); } 
-	//constexpr vec3i onePastEnd() const { return end() + 1; }
-	//constexpr bool empty() const { return (end() < start()).any(); };
-	};
-
 void gpuBuffersReseted() {
 	auto const renderDiameter{ viewDistance*2+1 };
 	auto const gridSize{ renderDiameter * renderDiameter * renderDiameter };
@@ -486,7 +466,7 @@ void gpuBuffersReseted() {
 	static chunk::Block::id_t blocksId[pos::blocksInChunkCount] = {};
 	static chunk::ChunkLiquid liquid{};
 	static chunk::BlocksData blocksData{};
-	static PackedAABB aabb{ vec3i{units::blocksInChunkDim-1}, vec3i{0} };
+	static chunk::PackedAABB<pBlock> aabb{ pBlock{units::blocksInChunkDim-1}, pBlock{0} };
 	static chunk::ChunkAO ao{};
 	static chunk::ChunkLighting lighting[2] = { chunk::ChunkLighting{chunk::ChunkLighting::maxValue}, chunk::ChunkLighting{chunk::ChunkLighting::maxValue} };
 	static chunk::Chunk3x3BlocksList nEmitters{};
@@ -534,6 +514,7 @@ static void reloadConfig() {
 		cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
 		cfg.lockFramerate = lockFramerate;
 		cfg.screenshotSize = screenshotSize;
+		cfg.worldName = worldName;
 		
 	parseConfigFromFile(cfg);
 	
@@ -548,6 +529,7 @@ static void reloadConfig() {
 	chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
 	lockFramerate = cfg.lockFramerate;
 	screenshotSize = cfg.screenshotSize;
+	worldName = cfg.worldName;
 	
 	if(shouldReloadShaders) reloadShaders();
 }
@@ -1182,7 +1164,7 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 		if(isnLoaded || status.isBlocksUpdated()) {
 			if constexpr(updateChunkDebug) std::cout << "b ";
 			
-			PackedAABB const aabbData{ chunk.aabb() };
+			chunk::PackedAABB<pBlock> const aabbData{ chunk.aabb() };
 			
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t) * gpuIndex, sizeof(uint32_t), &aabbData);
@@ -1291,7 +1273,11 @@ static void updateChunks(chunk::Chunks &chunks) {
 			auto chunk{ chunks[chunkIndex] };
 			gpuChunksIndex.recycle(chunk.gpuIndex());
 			chunks.chunksIndex_position.erase( chunk.position() );
-			if(chunk.modified() && saveChunks) writeChunk(chunk);
+			if(chunk.modified() && saveChunks) writeChunk(chunk, worldName); /*
+				note: it is not 100% safe to write chunk whose column neighbours may be deleted.
+				WriteChunk goes through all of the chunks in the column without using neighbours info,
+				so it works for now.
+			*/
 			
 			auto const &neighbours{ chunk.neighbours() };
 			for(int i{}; i < chunk::Neighbours::neighboursCount; i++) {
@@ -1316,7 +1302,7 @@ static void updateChunks(chunk::Chunks &chunks) {
 				auto const relativeChunksPos{ vec2i{i, k} - vec2i{viewDistance} };
 				auto const chunksPos{ currentChunk.xz() + relativeChunksPos };
 			
-				genChunksColumnAt(chunks, chunksPos, loadChunks);
+				genChunksColumnAt(chunks, chunksPos, worldName, loadChunks);
 			}
 		}	
 	}
@@ -1354,7 +1340,7 @@ bool performBlockAction() {
 			if(!neighbourChunkIndex.is()) return;
 			auto neighbourInChunkCoord{ neighbourCubeCoord.in<pChunk>() };
 			
-			chunksLiquid.add({neighbourChunkIndex.get(), chunk::cubeCoordToIndex(neighbourInChunkCoord)});
+			chunks.liquidCubes.add({neighbourChunkIndex.get(), chunk::cubeCoordToIndex(neighbourInChunkCoord)});
 		});
 		
 		if(breakFullBlock) {
@@ -1451,7 +1437,7 @@ bool performBlockAction() {
 			if(block.id() == 0) {
 				
 				liquid[cubeInChunkPos] = chunk::LiquidCube{ uint16_t(blockPlaceId), 255 };
-				chunksLiquid.add({chunk.chunkIndex(), chunk::cubeCoordToIndex(cubeInChunkPos)});
+				chunks.liquidCubes.add({chunk.chunkIndex(), chunk::cubeCoordToIndex(cubeInChunkPos)});
 				chunk.status().setBlocksUpdated(true);
 			}
 			else return false;
@@ -1611,7 +1597,7 @@ static void update(chunk::Chunks &chunks) {
 	playerCamera.fov = misc::lerp( playerCamera.fov, desiredPlayerCamera.fov / curZoom, 0.1 );
 	
 	updateChunks(chunks);
-	if(!numpad[0]) chunksLiquid.update();
+	if(!numpad[0]) chunks.liquidCubes.update();
 	
 	auto const diff{ pos::fracToPos(playerCoord+playerCameraOffset - playerCamPos) };
 	playerCamPos = playerCamPos + pos::posToFrac(vec3lerp(vec3d{}, vec3d(diff), vec3d(0.4)));
@@ -2129,7 +2115,7 @@ int main(void) {
 			for(auto const chunkIndex : chunks.usedChunks()) {
 				auto chunk{ chunks[chunkIndex] };
 				if(chunk.modified()) {
-					writeChunk(chunk);
+					writeChunk(chunk, worldName);
 					count++;
 				}
 			}

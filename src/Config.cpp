@@ -7,9 +7,8 @@
 
 //field type
 struct NoValue{}; //for default constructor of variant
-using Field = std::variant<NoValue, int, double, bool>;
-enum class FT { NO_VALUE, INT, REAL, BOOL };
-
+using Field = std::variant<NoValue, int, double, bool, std::string>;
+enum class FT { NO_VALUE, INT, REAL, BOOL, STRING };
 
 
 //cofig fields
@@ -24,8 +23,9 @@ enum class CF {
 	lockFramerate,
 	screenshotWidth,
 	screenshotHeight,
+	worldName
 };
-static constexpr int fieldCount = 10;
+static constexpr int fieldCount = 11;
 
 //Config field names
 static constexpr char const *CFN[] = {
@@ -38,7 +38,8 @@ static constexpr char const *CFN[] = {
 	"chunkUpdatesPerFrame",
 	"lockFramerate",
 	"screenshotWidth",
-	"screenshotHeight"
+	"screenshotHeight",
+	"worldName"
 };
 
 //Config field types
@@ -52,7 +53,8 @@ static constexpr FT CFT[] = {
 	FT::INT ,
 	FT::BOOL,
 	FT::REAL,
-	FT::REAL
+	FT::REAL,
+	FT::STRING
 };
 
 
@@ -113,6 +115,7 @@ void parseConfigFromFile(Config &dst) {
 				break; case FT::INT      : parsedValue.emplace<indexOf(FT::INT     )>(result(stoi));
 				break; case FT::REAL     : parsedValue.emplace<indexOf(FT::REAL    )>(result(stod));
 				break; case FT::BOOL     : parsedValue.emplace<indexOf(FT::BOOL    )>(result(stoi));
+				break; case FT::STRING   : parsedValue.emplace<indexOf(FT::STRING  )>(value       );
 			}
 			
 			#undef result
@@ -137,6 +140,7 @@ void parseConfigFromFile(Config &dst) {
 				break; case CF::lockFramerate        : dst.lockFramerate        = result(CF::lockFramerate);
 				break; case CF::screenshotWidth      : dst.screenshotSize.x     = result(CF::screenshotWidth);
 				break; case CF::screenshotHeight     : dst.screenshotSize.y     = result(CF::screenshotHeight);
+				break; case CF::worldName            : dst.worldName            = result(CF::worldName);
 			}
 			#undef result
 		}
