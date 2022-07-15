@@ -372,7 +372,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 
 static int blockPlaceId = 1;
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 15);
+	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 16);
 }
 
 
@@ -632,6 +632,7 @@ static void reloadShaders() {
 				c(16, 0), c(16, 0), c(16, 0), c(0, 1), //lamp 1
 				c(17, 0), c(17, 0), c(17, 0), c(0, 1), //lamp 2
 				c(18, 0), c(18, 0), c(18, 0), c(0, 1), //water
+				c(19, 0), c(19, 0), c(19, 0), c(19, 1), //grass
 			};
 			
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, atlasDescription_ssbo);

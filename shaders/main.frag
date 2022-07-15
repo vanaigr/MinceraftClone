@@ -127,7 +127,7 @@ float map(const float value, const float min1, const float max1, const float min
     return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
 }
 
-float rand(vec2 co){
+float rand(vec2 co) {
     return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
@@ -571,29 +571,33 @@ bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, co
 	const vec3 localBlockCoord = atPosition - blockCoord;
 	const vec2 uv_ = blockUv(atPosition, intersectionSide, dirSign);
 	
-	const vec2 offset = sin(uv_ + time*1.31);
+	vec2 alphaUv;
+	if(blockId == 5) {
+		const vec2 offset = sin(uv_ + time*1.31);
+		
+		const vec3 posOffseted = atPosition + vec3(
+			intersectionSide.x == 1 ? 0 : offset.x, 
+			intersectionSide.y == 1 ? 0 : offset.y, 
+			intersectionSide.z == 1 ? 0 : (intersectionSide.x == 1 ? offset.x : offset.y) 
+		)*0.01;
+		
+		const vec2 uv = blockUv(posOffseted, intersectionSide, dirSign);
+		
+		const float index = dot(floor(posOffseted), vec3(7, 13, 17));
+		const float cindex = mod(index, 4);
+		const float sindex = mod(1 - index, 4);//sinA = cos(90deg - A)
+		const mat2 rot = mat2(//	1, 0, 0, 1);					
+			/*cos(floor(index) * 90deg) <=> index: 0->1, 1->0, 2->-1, 3->0*/
+			(1 - cindex) * float(!(cindex == 3)),
+			-(1 - sindex) * float(!(sindex == 3)),
+			(1 - sindex) * float(!(sindex == 3)),
+			(1 - cindex) * float(!(cindex == 3))
+		); //some multiple 90 degree rotation per block coord
+		alphaUv = rot * (uv-0.5) + 0.5; //rotation around (0.5, 0.5)
+	}
+	else alphaUv = uv_;
 	
-	const vec3 posOffseted = atPosition + vec3(
-		intersectionSide.x == 1 ? 0 : offset.x, 
-		intersectionSide.y == 1 ? 0 : offset.y, 
-		intersectionSide.z == 1 ? 0 : (intersectionSide.x == 1 ? offset.x : offset.y) 
-	)*0.01;
-	
-	const vec2 uv = blockUv(posOffseted, intersectionSide, dirSign);
-	
-	const float index = dot(floor(posOffseted), vec3(7, 13, 17));
-	const float cindex = mod(index, 4);
-	const float sindex = mod(1 - index, 4);//sinA = cos(90deg - A)
-	const mat2 rot = mat2(//	1, 0, 0, 1);					
-		/*cos(floor(index) * 90deg) <=> index: 0->1, 1->0, 2->-1, 3->0*/
-		(1 - cindex) * float(!(cindex == 3)),
-		-(1 - sindex) * float(!(sindex == 3)),
-		(1 - sindex) * float(!(sindex == 3)),
-		(1 - cindex) * float(!(cindex == 3))
-	); //some multiple 90 degree rotation per block coord
-	const vec2 alphaUv = mod(rot * (uv-0.5) + 0.5, 1); //rotation around (0.5, 0.5)
-	
-	return sampleAtlas(alphaAt(blockId), alphaUv).x > 0.5;
+	return sampleAtlas(alphaAt(blockId), mod(alphaUv, 1)).x > 0.5;
 }
 
 
@@ -616,6 +620,8 @@ struct IntersectionInfo {
 	vec3 coord;
 	vec3 localSpaceCoord;
 	ivec3 intersectionSide;
+	vec3 normal;
+	vec2 uv;
 	int bias;
 	uint blockId;
 };
@@ -738,13 +744,18 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 					uint tBlockId = 0;
 					uint tLiquidId = 0;
 					
-					//uint/*uint16_t[4]*/ blocks[2] = {0, 0};
-					
 					IntersectionInfo i = noIntersectionInfo();
+					
+					#define shouldWriteInterrsection(INTERSECTION_CCORD) (i.blockId == 0 ? \
+						  true /*dot((INTERSECTION_CCORD - curCoord) * dirSign, intersectionSide) < 0*/\
+						: dot((INTERSECTION_CCORD - i.coord) * dirSign, intersectionSide) < 0\
+						)
 					
 					if(cubes.x) {
 						const ivec3 fromBlockChunk = cubeChunk(fromCubeCoord);
 						fBlockId = blockIdAt(chunkAt(fromBlockChunk), blockLocalToChunk(cubeBlock(fromCubeCoord)));
+						
+						if(fBlockId == 16) fBlockId = 0;
 					}
 					if(cubes.y) {
 						const ivec3 fromCubeChunk = cubeChunk(fromCubeCoord);
@@ -763,10 +774,62 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 					}
 					
 					if(cubes.z) {
+						const ivec3 toBlockCoord = cubeBlock(toCubeCoord);
 						tBlockId = blockIdAt(
 							toBlockInCurChunk ? curChunkIndex : nextChunkIndex, 
-							blockLocalToChunk(cubeBlock(toCubeCoord))
-						);				
+							blockLocalToChunk(toBlockCoord)
+						);
+						
+						if(tBlockId == 16) {
+							const Ray coordRay = Ray(curCoord, ray.dir);
+							
+							const vec3 normals[] = { normalize(vec3(1,(sin(time*0.71)+sin(time))*0.1,1)), normalize(vec3(-1,(sin(time*0.71)+sin(time))*0.1,1)) };
+							
+							for(int index = 0; index < 2; index++) {
+								const vec3 rand_ = vec3(rand(vec2(toBlockCoord.xy)), rand(vec2(toBlockCoord.yz)), rand(vec2(toBlockCoord.xz)));
+								
+								const vec3 normal = normals[index];//vec3(1, 0, 0);
+								const vec3 dir1 = normal;
+								const vec3 dir2 = cross(vec3(0, 1, 0), dir1);
+								const vec3 dir3 = cross(dir1, dir2);
+								
+								
+								const vec3 center = vec3(toBlockCoord) + vec3(0.5, 0, 0.5) + dir2 * (rand_ - 0.5) * 0.2;
+								
+								const float t = intersectPlane(coordRay, center, normal);
+								if(t >= -0.0001) {
+									const vec3 intersectionCoord = at(coordRay, t);
+									
+									const int newBias = dot(dir, normal) > 0 ? -1 : 0;
+									
+									const bool isBias = (dot(curCoord-intersectionCoord, curCoord-intersectionCoord) > 0.001 || bias <= newBias);
+									
+									const vec3 cubeCoordF = toCubeCoord;
+									if(isBias && intersectionCoord == clamp(intersectionCoord, cubeCoordF / cubesInBlockDim, (cubeCoordF+1) / cubesInBlockDim)
+											&& shouldWriteInterrsection(intersectionCoord)) {												
+										const vec3 localInters = intersectionCoord - center;
+										
+										const vec2 uv_ = vec2(dot(localInters, dir2), dot(localInters, dir3));
+										const vec2 uvFrac = mod(uv_, 1) * mix(vec2(1.0/0.7, 2.1), vec2(1.0/0.95,1.1), rand_.xy);
+										const vec2 uv = floor(uv_) + uvFrac;
+										
+										const bool alpha = uvFrac.y > 1 ? false : (sampleAtlas(alphaAt(tBlockId), mod(uvFrac, 1)).x > 0.5);
+										
+										if(alpha) i = IntersectionInfo(
+											intersectionCoord,
+											intersectionCoord - toBlockCoord,
+											ivec3(0, 0, 0),
+											normal,
+											uv,
+											newBias,
+											tBlockId
+										);							
+									}
+								}
+							}
+							
+							tBlockId = 0;
+						}
 					}
 					if(cubes.w) {
 						const LiquidCube tLiquid = liquidAtCube(
@@ -793,31 +856,39 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 								coordRay.orig,
 								coordRay.orig - cubeBlock(cubeCoord),
 								ivec3(0, 0, 0),
+								-ray.dir,
+								vec2(0.5),
 								0,
 								liquidId
 							);
 							else if(liquidLevel == 255u);
 							else if(yLevelDist >= 0) {
+								const ivec3 intersectionSide = ivec3(0, 1, 0);
+								
 								vec3 intersectionCoord;
 								intersectionCoord.xz = at(coordRay, yLevelDist * stepLength.y).xz;
 								intersectionCoord.y = levelY;
 								
 								const int liquidBias = dirSign.y > 0 ? -1 : 0;
-								
 								const bool isBias = (coordRay.orig.y != levelY || bias <= liquidBias);
 								
 								const vec3 cubeCoordF = cubeCoord;
-								if(isBias && intersectionCoord == clamp(intersectionCoord, cubeCoordF / cubesInBlockDim, (cubeCoordF+1) / cubesInBlockDim)) 
+								if(isBias && intersectionCoord == clamp(intersectionCoord, cubeCoordF / cubesInBlockDim, (cubeCoordF+1) / cubesInBlockDim)
+									&& shouldWriteInterrsection(intersectionCoord)) 
 									i = IntersectionInfo(
 										intersectionCoord,
 										intersectionCoord - cubeBlock(cubeCoord),
-										ivec3(0, 1, 0),
+										intersectionSide,
+										intersectionSide,
+										blockUv(intersectionCoord, intersectionSide, dirSign),
 										liquidBias,
 										liquidId
 									);
 							}
 						}
 					}
+					
+					#undef shouldWriteInterrsection
 
 					const uint/*uint16_t[4]*/ blocks[2] = { fLiquidId | (fBlockId << 16), tBlockId | (tLiquidId << 16)  };
 					const ivec3 blocksCoord[2] = { cubeBlock(fromCubeCoord), cubeBlock(toCubeCoord) };
@@ -848,6 +919,8 @@ IntersectionInfo isInters(const Ray ray, const int startBias) {
 							curCoord,
 							localBlockCoord,
 							intersectionSide,
+							intersectionSide,
+							blockUv(curCoord, intersectionSide, dirSign),
 							lowestBias,
 							lowestIntersectionId
 						);
@@ -1107,7 +1180,7 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 			}
 		}
 		
-		if(surfaceId == 5 && i < childrenCount) {		
+		if((surfaceId == 16 || surfaceId == 5) && i < childrenCount) {		
 			const Result inner = readResult(currentIndex + i+1);
 			
 			if(inner.rayIndex == 1) {
@@ -1182,10 +1255,11 @@ RayResult traceStep(const int iteration) {
 		const ivec3 positive_ = max(dirSignI, ivec3(0));
 		const ivec3 negative_ = max(-dirSignI, ivec3(0));
 		const ivec3 side = intersectionSide * (bias >= 0 ? -1 : 1) * dirSignI;
+		const ivec3 normal = -intersectionSide * dirSignI;
+		const vec3 normalDir = normalize(i.normal) * (dot(ray.dir, i.normal) > 0 ? -1 : 1);
 		const bool backside = bias < 0;
-		const ivec3 normal = side * ( backside ? -1 : 1 );
 		
-		const vec2 uvAbs = blockUv(coord, intersectionSide, dirSign);
+		const vec2 uvAbs = i.uv;//blockUv(coord, intersectionSide, dirSign);
 		const vec2 uv    = mod(uvAbs, 1);
 		
 		const vec2 atlasOffset = atlasAt(blockId, side);
@@ -1321,7 +1395,8 @@ RayResult traceStep(const int iteration) {
 		else {
 			const bool emitter = blockId == 13 || blockId == 14;
 			const ivec3 relativeToChunk = chunkPosition;
-			const vec3 color_ = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * mix(0.3, 1.0, ambient));
+			const float AO = blockId == 16 ? 1.0 : mix(0.3, 1.0, ambient);
+			const vec3 color_ = sampleAtlas(atlasOffset, uv) * (emitter ? 1.0 : light * AO);
 			const vec3 color = fade(color_, t);
 			
 			float brightness;
@@ -1331,7 +1406,7 @@ RayResult traceStep(const int iteration) {
 
 			pushResult(Result( color * brightness, t, 0u, blockId, rayIndex, (emitter && type == rayTypeLightingBlock) ? rayTypeLightingEmitter : type, parent, last));
 			
-			if(blockId == 5 && iteration < 3 && canPushParams()) {
+			if((blockId == 5 && iteration < 3 || blockId == 16 && shadow) && canPushParams()) {
 				pushParams(Params( Ray(coord, ray.dir), bias+1, 1u, type, curFrame, !pushed));
 				pushed = true;
 			}
@@ -1343,7 +1418,7 @@ RayResult traceStep(const int iteration) {
 				const float shadowSmoothness = 32;
 				const int shadowsInChunkDim = blocksInChunkDim * shadowSubdiv;		
 				
-				const vec3 position = ( floor(coord * shadowSubdiv) + (1-abs(normal))*vec3(0.501, 0.501, 0.501) )/shadowSubdiv;
+				const vec3 position = blockId == 16 ? coord : (( floor(coord * shadowSubdiv) + (1-abs(normal))*vec3(0.501, 0.501, 0.501) )/shadowSubdiv);
 				
 				const ivec3 shadowInChunkCoord = ivec3(floor(mod(coord * shadowSubdiv, vec3(shadowsInChunkDim))));
 				const int shadowInChunkIndex = 
@@ -1361,12 +1436,12 @@ RayResult traceStep(const int iteration) {
 					);
 					const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
 					const vec4 q = vec4(normalize(vec3(-1-sin(time/4)/10,3,2)), cos(time/4)/5);
-					const vec3 v = normalize(vec3(-1, 4, 2) + offset);
+					const vec3 v = normalize(vec3(-1.5, 4, 2) + offset);
 					const vec3 temp = cross(q.xyz, v) + q.w * v;
 					const vec3 rotated = v + 2.0*cross(q.xyz, temp);
 					
 					const vec3 newDir = normalize(rotated);
-					const int newBias = bias * int(sign0(dot(ray.dir*newDir, intersectionSide)));
+					const int newBias = bias * (dot(ray.dir, normalDir) > 0 == dot(newDir, normalDir) > 0 ? 1 : -1);//bias * int(sign0(dot(ray.dir*newDir, intersectionSide)));
 					
 					pushParams(Params( Ray(position, newDir), newBias, 0u, rayTypeShadowBlock, curFrame, !pushed));
 					pushed = true;
@@ -1482,8 +1557,8 @@ vec3 colorMapping(const vec3 col) {
 	const vec3 c = rgb2hsv(col);
 	return hsv2rgb(vec3(
 		c.x,
-		(c.y+0.03) / pow(c.z+1.0, 1.0 / 25),
-		pow(log(c.z + 1.0) / log(bw + 7.8), 1.25)
+		(c.y+0.03) / pow(c.z+0.3, 1.0 / 15),
+		pow(log(c.z + 1.0) / log(bw + 8.8), 1.25)
 	));
 }
 void main() {

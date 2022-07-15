@@ -327,7 +327,7 @@ static void genTrees(chunk::Chunk chunk) {
 				auto const index{ chunk::blockIndex(blk) };
 				chunk::Block &curBlock{ data[index] };
 				
-				if(curBlock.id() == 0) {
+				if(curBlock.id() == 0 || curBlock.id() == 16) {
 					bool is = false;
 					if((is = tl.x == 0 && tl.z == 0 && tl.y <= 4)) curBlock = chunk::Block::fullBlock(4);
 					else if((is = 
@@ -381,8 +381,14 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 			aabb += {blockCoord};
 		}
 		else {
-			blocks[blockCoord] = chunk::Block::emptyBlock();
+			if(diff >= -1) {
+				blocks[blockCoord] = chunk::Block::fullBlock(16);
+				aabb += {blockCoord};
+			}
+			else blocks[blockCoord] = chunk::Block::emptyBlock();
+			
 			if(pos.y * units::blocksInChunkDim + y == 7) {
+				aabb += {blockCoord};
 				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
 					pCube const cubeLocalCoord{ chunk::Block::cubeIndexPos(cubeIndex) };
 					auto const cubeCoord{ pBlock{blockCoord} + cubeLocalCoord }; 
@@ -396,6 +402,8 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 				}
 			}
 			if(pos.y * units::blocksInChunkDim + y < 7) {
+				aabb += {blockCoord};
+				
 				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
 					auto const cubeCoord{ pBlock{blockCoord} + pCube{ chunk::Block::cubeIndexPos(cubeIndex) } }; 
 					liquid[cubeCoord] = chunk::LiquidCube{15, 255u};

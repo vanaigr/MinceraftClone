@@ -1,4 +1,5 @@
 #include"Physics.h"
+#include"BlockProperties.h"
 
 static bool checkCanPlaceCollider(chunk::Chunks &chunks, pos::Fractional const coord1, pos::Fractional const coord2) {
 	chunk::Move_to_neighbour_Chunk mtnChunk{chunks, coord1.valAs<pos::Chunk>() };
@@ -129,7 +130,7 @@ void updateCollision(chunk::Chunks &chunks,pos::Fractional &origin, pFrac const 
 					auto const index{ chunk::blockIndex(coord.as<pos::Block>().valIn<pos::Chunk>()) };
 					auto const block{ chunkData[index] };
 					
-					return block.id() != 0 && block.cube(cubeLocalCoord);
+					return useInCollision(block.id() * block.cube(cubeLocalCoord));
 				}() };
 				
 				if(isWall) {
