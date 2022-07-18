@@ -155,10 +155,9 @@ namespace chunk {
 		bool operator!=(Chunk_<Chunks> const other) const {
 			return !(*this == other);
 		}	
-			
-		auto &chunks() { return *chunks_; }	
-		auto const &chunks() const { return *chunks_; }
-
+		
+		auto &chunks() const { return *chunks_; }
+		
 		auto &chunkIndex() { return chunk_index; }	
 		auto const &chunkIndex() const { return chunk_index; }	
 			
@@ -566,6 +565,11 @@ namespace chunk {
 		}
 		
 		Cube cubeAt(pCube const cubeCoord) const { return cubeAt(cubeCoord.val()); }
+		
+		Block::id_t cubeAt2(pCube const coord) const { 
+			auto const cube{ cubeAt(coord) }; 
+			return cube.block.id() * cube.isSolid;
+		}
 	};
 	
 	struct Chunk3x3BlocksList {

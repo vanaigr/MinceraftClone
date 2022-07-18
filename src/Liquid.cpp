@@ -1,6 +1,7 @@
 #include"Area.h"
 #include"MiscChunk.h"
 #include"BlocksData.h"
+#include"BlockProperties.h"
 
 #include<iostream>
 #include<unordered_set>
@@ -194,7 +195,7 @@ void chunk::ChunksLiquidCubes::update() {
 			if(neighbourCubeChunkIndex == -1) return;
 			
 			auto neighbourCubeChunk{ chunks[neighbourCubeChunkIndex] };
-			if(neighbourCubeChunk.data().cubeAt(neighbourCubeInChunkCoord).isSolid) return;
+			if(!liquidThrough(neighbourCubeChunk.data().cubeAt2(neighbourCubeInChunkCoord))) return;
 			
 			auto &neighbourLiquidCube{ neighbourCubeChunk.liquid()[neighbourCubeInChunkCoord] };
 			auto const toMax( chunk::LiquidCube::maxLevel - neighbourLiquidCube.level );
@@ -245,7 +246,7 @@ void chunk::ChunksLiquidCubes::update() {
 				if(neighbourCubeChunkIndex == -1) continue;
 				
 				auto cubeNeighbourChunk{ chunks[neighbourCubeChunkIndex] };
-				if(cubeNeighbourChunk.data().cubeAt(neighbourCubeInChunkCoord).isSolid) continue;
+				if(!liquidThrough(cubeNeighbourChunk.data().cubeAt2(neighbourCubeInChunkCoord))) continue;
 				
 				auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[neighbourCubeInChunkCoord] };
 				if((level > neighbourLiquidCube.level) && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
@@ -326,7 +327,7 @@ void chunk::ChunksLiquidCubes::update() {
 				
 				auto cubeUpChunk{ chunks[cubeUpChunkIndex] };
 				auto const cubeUpCoord{ chunk::cubeIndexToCoord(cubeUpCubeIndex) };
-				if(cubeUpChunk.data().cubeAt(cubeUpCoord).isSolid) return false ;
+				if(!liquidThrough(cubeUpChunk.data().cubeAt2(cubeUpCoord))) return false ;
 				
 				auto &upLiquidCube{ cubeUpChunk.liquid()[cubeUpCubeIndex] };
 				if(upLiquidCube.id == id) {
@@ -347,7 +348,7 @@ void chunk::ChunksLiquidCubes::update() {
 					
 					auto cubeNeighbourChunk{ chunks[cubeNeighbourChunkIndex] };
 					auto const cubeNeighbourCoord{ chunk::cubeIndexToCoord(cubeNeighbourCubeIndex) };
-					if(cubeNeighbourChunk.data().cubeAt(cubeNeighbourCoord).isSolid) continue;
+					if(!liquidThrough(cubeNeighbourChunk.data().cubeAt2(cubeNeighbourCoord))) continue;
 					
 					auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[cubeNeighbourCubeIndex] };
 					if(neighbourLiquidCube.level > level && neighbourLiquidCube.id == id) {

@@ -1316,7 +1316,7 @@ bool performBlockAction() {
 	vec3i const dirSign{ pd.direction };
 	
 	if(blockAction == BlockAction::BREAK) {
-		auto optionalResult{ trace(chunks, pd) };
+		auto optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id) { return id != 0; }) };
 		
 		if(!optionalResult) return false;
 		
@@ -1407,7 +1407,7 @@ bool performBlockAction() {
 		});
 	}
 	else {
-		auto optionalResult{ trace(chunks, pd) };
+		auto optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id) { if(ctrl) return id != 0; else return !placeThrough(id); }) };
 		
 		if(!optionalResult) return false;
 		
@@ -1416,16 +1416,27 @@ bool performBlockAction() {
 		auto startChunk{ result.chunk };
 		auto const normal{ -dirSign * vec3i{intersectionAxis} };
 		
-		auto const cubePosInStartChunk { result.cubeInChunkCoord + pCube{normal} };
+		auto const [chunk, cubeInChunkPos] = [&]() {
+			auto const startBlockId{ startChunk.blocks()[result.cubeInChunkCoord.as<pBlock>()].id() };
+			auto const canPlaceStartingBlock{ placeThrough(startBlockId) };
+			
+			if(ctrl && canPlaceStartingBlock) {
+				return std::make_tuple(startChunk, result.cubeInChunkCoord);
+			}
+			else {
+				auto const cubePosInStartChunk { result.cubeInChunkCoord + pCube{normal} };
+			
+				auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{startChunk}.moveToNeighbour(cubePosInStartChunk.valAs<pChunk>()) };
+				if(!chunkIndex.is()) return std::make_tuple(chunk::Chunk(chunks, -1), pCube{0});
+				auto chunk{ chunks[chunkIndex.get()] };
+				
+				return std::make_tuple(chunk, cubePosInStartChunk.in<pChunk>());
+			}
+		}();
+		if(chunk.chunkIndex() == -1) return false;
 		
-		auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{startChunk}.moveToNeighbour(cubePosInStartChunk.valAs<pChunk>()) };
-		if(!chunkIndex.is()) return false;
-		auto chunk{ chunks[chunkIndex.get()] };
 		auto &liquid{ chunk.liquid() };
-		
 		pChunk const chunkPos{ chunk.position() };
-		
-		auto const cubeInChunkPos{ cubePosInStartChunk.in<pChunk>() };
 		auto const blockInChunkPos{ cubeInChunkPos.as<pBlock>() };
 		auto const blockInChunkCoord{ blockInChunkPos.val() };
 		
@@ -1435,8 +1446,7 @@ bool performBlockAction() {
 		if(blockPlaceId == 15) { //water
 			auto &block{ chunk.data()[blockInChunkCoord] };
 				
-			if(block.id() == 0) {
-				
+			if(placeThrough(block.id())) {
 				liquid[cubeInChunkPos] = chunk::LiquidCube{ uint16_t(blockPlaceId), 255 };
 				chunks.liquidCubes.add({chunk.chunkIndex(), chunk::cubeCoordToIndex(cubeInChunkPos)});
 				chunk.status().setBlocksUpdated(true);
@@ -1446,7 +1456,7 @@ bool performBlockAction() {
 		else {
 			auto &block{ chunk.data()[blockInChunkCoord] };
 				
-			if(checkCanPlaceBlock(chunkPos + blockInChunkPos) && block.id() == 0) {
+			if(checkCanPlaceBlock(chunkPos + blockInChunkPos) && placeThrough(block.id())) {
 				block = chunk::Block::fullBlock(blockPlaceId);
 				
 				for(int i{}; i < pos::cubesInBlockCount; i++) {
@@ -1482,7 +1492,7 @@ bool performBlockAction() {
 				}
 				updateAOandBlocksWithoutNeighbours(chunk, first, last);
 				
-				iterate3by3Volume([&](vec3i const dir, int const index) {
+				iterate3by3Volume([&, chunk = chunk](vec3i const dir, int const index) {
 					auto const chunkOffset{ (blockInChunkPos + pBlock{dir}).valAs<pChunk>() };
 					auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(chunkOffset) };
 					if(!chunkIndex.is()) return;
@@ -1922,7 +1932,7 @@ int main(void) {
 
 		{
 			PosDir const pd{ PosDir(cameraCoord, pos::posToFracTrunk(forwardDir * 7).value()) };
-			auto const optionalResult{ trace(chunks, pd) };
+			auto const optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id){ return id != 0; }) };
 				
 			if(optionalResult) {
 				auto const result{ *optionalResult };
@@ -1964,7 +1974,7 @@ int main(void) {
 				#endif
 				
 				PosDir const pd{ PosDir(cameraCoord, pos::posToFracTrunk(viewportCurrent.forwardDir() * 7).value()) };
-				auto const optionalResult{ trace(chunks, pd) };
+				auto const optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id){ return id != 0; }) };
 				if(optionalResult) {
 					auto const result{ *optionalResult };
 					auto const chunk { result.chunk };

@@ -123,7 +123,8 @@ struct Intersection {
 	vec3b intersectionAxis;
 };
 
-inline std::optional<Intersection> trace(chunk::Chunks &chunks, PosDir const pd) {
+template<typename StopAtBlock>
+inline std::optional<Intersection> trace(chunk::Chunks &chunks, PosDir const pd, StopAtBlock &&stopAtBlock) {
 	DDA checkBlock{ pd };
 	
 	for(int i = 0;; i++) {
@@ -146,7 +147,8 @@ inline std::optional<Intersection> trace(chunk::Chunks &chunks, PosDir const pd)
 		if(!chunkIndex.is()) break;
 		
 		auto const chunk{ chunks[chunkIndex.get()] };
-		if(chunk.data().cubeAt(cubeCoordInChunk.val()).isSolid) return { Intersection{ 
+		
+		if(stopAtBlock(chunk.data().cubeAt2(cubeCoordInChunk))) return { Intersection{ 
 			cubePos,
 			chunk, 
 			cubeCoordInChunk, 
