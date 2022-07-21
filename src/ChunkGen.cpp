@@ -472,7 +472,6 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 	int chunkIndices[chunksCoumnChunksCount];
 	
 	auto lowestEmptyY{ chunkColumnChunkYMax + 1 };
-	auto lowestNotFullY  { chunkColumnChunkYMax + 1 };
 	auto emptyBefore{ true };
 	
 	struct ChunkIndexAndNeighbours{ 
@@ -555,9 +554,8 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		}();
 		
 		
-		updateBlocksDataWithoutNeighboursInArea(chunk, pBlock{0}, pBlock{units::blocksInChunkDim-1});
+		updateBlocksDataWithoutNeighboursInArea(chunk, pBlock{0}, pBlock{units::blocksInChunkDim-1});		
 		
-
 		if(emptyBefore && chunk.aabb().isEmpty()) {
 			chunk.skyLighting().fill(chunk::ChunkLighting::maxValue);
 			lowestEmptyY = misc::min(lowestEmptyY, y);
@@ -566,25 +564,6 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 			chunk.skyLighting().reset();
 			emptyBefore = false;
 		}
-		
-		{
-			auto isFull{ false };
-				
-			if(chunk.aabb() == Area{ 0, units::blocksInChunkDim-1 }) {
-				isFull = true;
-				
-				auto const &blocksData{ chunk.blocksData() };
-				for(int j{}; j < pos::blocksInChunkCount; j++) {
-					if(!blocksData[j].isFull()) {
-						isFull = false;
-						break;
-					}
-				}
-			}	
-			
-			if(!isFull) lowestNotFullY = std::min(lowestNotFullY, y);
-		}
-		
 		
 		//updateNeighbourChunks and move to next
 		chunkIndicesWithNeighbours[y - chunkColumnChunkYMin].chunkIndex = chunkIndex;
@@ -655,16 +634,5 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		}
 	}
 	
-	calculateLighting(chunks, chunkIndices, columnPosition, lowestEmptyY, lowestNotFullY);
-	
-	
-	static Counter<1024> lowestEmptyY_{}, lowestNotFullY_{};
-	static int i__ = 0;
-	
-	lowestEmptyY_.add(lowestEmptyY);
-	lowestNotFullY_.add(lowestNotFullY);
-	
-	i__++;
-	if(i__ == 11*11-2) std::cout << lowestEmptyY_.mean() << ' ' << lowestNotFullY_.mean() << '\n';
-	
+	calculateLighting(chunks, chunkIndices, columnPosition, lowestEmptyY);
 }

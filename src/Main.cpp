@@ -1646,7 +1646,11 @@ static void update(chunk::Chunks &chunks) {
 	if(!numpad[0]) chunks.liquidCubes.update();
 	
 	auto const diff{ pos::fracToPos(playerCoord+playerCameraOffset - playerCamPos) };
-	playerCamPos = playerCamPos + pos::posToFrac(vec3lerp(vec3d{}, vec3d(diff), vec3d(0.4)));
+	playerCamPos = pFrac{ 
+		(playerCamPos + pos::posToFrac(vec3lerp(vec3d{}, vec3d(diff), vec3d(0.4)))).val()
+			.clamp((playerCoord+playerCameraOffset).val() - width_i/3, (playerCoord+playerCameraOffset).val() + width_i/3)
+			//'width / 3' is arbitrary value less than width/2
+	};
 	
 }
 
