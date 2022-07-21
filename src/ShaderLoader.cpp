@@ -16,7 +16,7 @@ struct ShaderLoader::Impl {
 ShaderLoader::ShaderLoader() : pimpl{ new Impl{} } {}
 ShaderLoader::~ShaderLoader() = default;
 
-GLuint ShaderLoader::addShaderFromCode(const std::string & shaderCode, const unsigned int shaderType, const std::string & name) {
+GLuint ShaderLoader::addShaderFromCode(std::string const &shaderCode, const unsigned int shaderType, const std::string &name) {
 	GLuint shader_id = glCreateShader(shaderType);
 
 	const char* c_source = shaderCode.c_str();
@@ -41,7 +41,7 @@ GLuint ShaderLoader::addShaderFromCode(const std::string & shaderCode, const uns
 	return shader_id;
 }
 
-GLuint ShaderLoader::addShaderFromProjectFileName(const std::string & fileName, const unsigned int shaderType, const std::string & name) {
+GLuint ShaderLoader::addShaderFromProjectFileName(const std::string &fileName, const unsigned int shaderType, const std::string & name) {
 	std::ifstream file(fileName);
 	if (file.fail()) fprintf(stderr, "%s: Shader file  does not exist: %s\n", name.c_str(), fileName.c_str());
 	const std::string shaderCode((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

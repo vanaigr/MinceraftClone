@@ -1,9 +1,19 @@
-#version 450
+#version 460
 
 #define DEBUG 1
 
 #extension GL_ARB_shader_group_vote : enable
 #extension GL_ARB_shader_ballot : enable
+
+
+/**
+	TODO: figure out how to use multiple sources for shader and how and where to specify #version
+	
+	Compilation error in shader "main shader":
+	0(48) : error C0204: version directive must be first statement and may not be repeated
+	0(52) : error C7621: #extension directive must occur before any non-preprocessor token
+	0(53) : error C7621: #extension directive must occur before any non-preprocessor token
+**/
 
 //#if DEBUG
 //#extension GL_ARB_shader_group_vote : enable
@@ -44,6 +54,7 @@ ivec3 calcDirSign(const vec3 dir) {
 
 in vec4 gl_FragCoord;
 layout(location = 0) out vec4 color;
+layout(location = 1) out vec4 brightColor;
 
 
 uniform uvec2 windowSize;
@@ -1331,7 +1342,7 @@ void findIntersections(const int iteration, const int lowestNotUpdated) {
 vec3 background(const vec3 dir) {
 	const float t = 0.5 * (dir.y + 1.0);
 	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.02) + t * vec3(0.5, 0.7, 1.0);
-	return pow(res*2, vec3(2.2));
+	return pow(res*2.3, vec3(2.2));
 }
 
 vec3 fade(const vec3 color, const float depth) {
@@ -1875,16 +1886,6 @@ vec3 trace(const Ray startRay) {
 }
 
 
-vec3 colorMapping(vec3 col) {
-	const float x = 10;
-	const vec3 c = rgb2hsv(col);
-	return hsv2rgb(vec3(
-		c.x,
-		(c.y+0.07) / pow(log(c.z + x) + 0.3, 1.0 / 15),
-		pow(log(c.z + 1.0) / log(c.z + x), 1.55) * 1.6
-	));
-}
-
 void main() {
 	const vec2 uv = gl_FragCoord.xy / windowSize.xy;
     const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
@@ -1895,15 +1896,15 @@ void main() {
 	
 	const Ray ray = Ray(startCoord, rayDir);
 
-	const vec3 col = trace(ray);
+	const vec4 col = vec4(trace(ray), 1);
+	
+	const float brightness = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));	
+    if(brightness > 2.0) brightColor = vec4(col.rgb, 1.0);
+    else brightColor = vec4(0.0, 0.0, 0.0, 1.0);
+	
+	color = col;
 	
 	#if DEBUG
 	if(anyInvocationARB(exit_)) { color = vec4(exitVec3, 1.0); return; }
 	#endif
-	const vec3 c2 = colorMapping(col);
-	
-	if(length(gl_FragCoord.xy - windowSize / 2) < 3) 
-		color = vec4(vec3(0.98), 1);
-	else 
-		color = vec4(c2, 1);
 }	

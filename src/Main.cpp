@@ -181,6 +181,9 @@ enum Textures : GLuint {
 	font_it,
 	noise_it,
 	screenshotColor_it,
+	render_it,
+	pp1_it,
+	pp2_it,
 	
 	texturesCount
 };
@@ -188,7 +191,10 @@ static GLuint textures[texturesCount];
 static GLuint const		&atlas_t           = textures[atlas_it], 
 						&font_t            = textures[font_it], 
 						&noise_t           = textures[noise_it],
-						&screenshotColor_t = textures[screenshotColor_it];
+						&screenshotColor_t = textures[screenshotColor_it],
+						&render_t          = textures[render_it],
+						&pp1_t             = textures[pp1_it],
+						&pp2_t             = textures[pp2_it];
 
 enum SSBOs : GLuint {
 	chunksIndices_b = 0,
@@ -233,9 +239,6 @@ static GLuint mainProgram = 0;
   //static GLuint playerChunk_u, playerInChunk_u;
 
 static GLuint fontProgram;
-
-static GLuint testProgram;
-	static GLuint tt_projection_u, tt_toLocal_u;
 	
 static GLuint currentBlockProgram;
   static GLuint cb_blockIndex_u;
@@ -246,6 +249,16 @@ static GLuint blockHitbox_p;
 static GLuint screenshot_fb;
 static vec2i screenshotSize{ windowSize };
 bool takeScreenshot;
+
+static GLuint render_fb;
+
+static GLuint pp1_fb, pp2_fb;
+
+static GLuint blur_p;
+  static GLuint sampler_u;
+
+static GLuint toLDR_p;
+  static GLuint ldr_sampler_u, ldr_blurSampler_u;
 
 static chunk::Chunks chunks{};
 
@@ -622,6 +635,60 @@ static void reloadShaders() {
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}*/
 	
+	{ //redner framebuffer
+		glActiveTexture(GL_TEXTURE0 + pp1_it);
+		glBindTexture(GL_TEXTURE_2D, pp1_t);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, windowSize.x, windowSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
+		
+		glActiveTexture(GL_TEXTURE0 + pp2_it);
+		glBindTexture(GL_TEXTURE_2D, pp2_t);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, windowSize.x, windowSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
+		
+		glActiveTexture(GL_TEXTURE0 + render_it);
+		glBindTexture(GL_TEXTURE_2D, render_t);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, windowSize.x, windowSize.y, 0, GL_RGB, GL_FLOAT, NULL);		
+		
+		
+		glDeleteFramebuffers(1, &render_fb);
+		glGenFramebuffers(1, &render_fb);
+		glBindFramebuffer(GL_FRAMEBUFFER, render_fb);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_t, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, pp1_t   , 0);
+		if (GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER); status != GL_FRAMEBUFFER_COMPLETE) {
+			fprintf(stderr, "render framebuffer: error %u", status);
+		}
+			
+		glDeleteFramebuffers(1, &pp1_fb);
+		glGenFramebuffers(1, &pp1_fb);
+		glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pp1_t, 0);
+		if(GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER); status != GL_FRAMEBUFFER_COMPLETE) {
+			fprintf(stderr, "pp1_fb: error %u\n", status);
+		}
+		
+		glDeleteFramebuffers(1, &pp2_fb);
+		glGenFramebuffers(1, &pp2_fb);
+		glBindFramebuffer(GL_FRAMEBUFFER, pp2_fb);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pp2_t, 0);
+		if(GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER); status != GL_FRAMEBUFFER_COMPLETE) {
+			fprintf(stderr, "pp2_fb: error %u\n", status);
+		}
+		
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}	
+	
 	{ //screenshot framebuffer
 		glActiveTexture(GL_TEXTURE0 + screenshotColor_it);
 		glBindTexture(GL_TEXTURE_2D, screenshotColor_t);
@@ -870,59 +937,6 @@ static void reloadShaders() {
 		glUniform2f(glGetUniformLocation(fontProgram, "screenSize"), windowSize_d.x, windowSize_d.y);
 	}
 	
-	{ //test program
-		glDeleteProgram(testProgram);
-		testProgram = glCreateProgram();
-		ShaderLoader sl{};
-		
-		sl.addShaderFromCode(
-		R"(#version 420
-			precision mediump float;
-			uniform mat4 projection;
-			uniform mat4 toLocal;
-			
-			layout(location = 0) in vec3 relativePos;
-			layout(location = 1) in vec3 color_;
-			
-			out vec3 col;
-			void main(void){
-				//const mat4 translation = {
-				//	vec4(1,0,0,0),
-				//	vec4(0,1,0,0),
-				//	vec4(0,0,1,0),
-				//	vec4(relativePos, 1)
-				//};			
-		
-				const mat4 model_matrix = toLocal;// * translation;
-				
-				gl_Position = projection * (model_matrix * vec4(relativePos, 1.0));
-				col = color_;
-			}
-		)", GL_VERTEX_SHADER,"test vertex");
-		
-		sl.addShaderFromCode(
-		R"(#version 420			
-			out vec4 color;
-			
-			in vec3 col;
-			void main() {
-				color = vec4(col, 1);
-			}
-		)",
-		GL_FRAGMENT_SHADER,
-		"test shader");
-		
-		sl.attachShaders(testProgram);
-	
-		glLinkProgram(testProgram);
-		glValidateProgram(testProgram);
-	
-		sl.deleteShaders();
-		
-		tt_toLocal_u = glGetUniformLocation(testProgram, "toLocal");
-		tt_projection_u = glGetUniformLocation(testProgram, "projection");
-	}
-	
 	{ //block hitbox program
 		glDeleteProgram(blockHitbox_p);
 		blockHitbox_p = glCreateProgram();
@@ -1132,6 +1146,80 @@ static void reloadShaders() {
 		glUniform2f(glGetUniformLocation(currentBlockProgram, "screenSize"), windowSize_d.x, windowSize_d.y);
 		
 		glShaderStorageBlockBinding(currentBlockProgram, glGetProgramResourceIndex(currentBlockProgram, GL_SHADER_STORAGE_BLOCK, "AtlasDescription"), atlasDescription_b);
+	}
+
+	{ //blur program
+		glDeleteProgram(blur_p);
+		blur_p = glCreateProgram();
+		ShaderLoader sl{};
+
+		sl.addShaderFromCode(
+			R"(#version 460				
+
+				void main() {
+					const vec2 verts[] = {
+						vec2(-1, -1),
+						vec2(+3, -1),
+						vec2(-1, +3)
+					};
+					gl_Position = vec4(verts[gl_VertexID], 0, 1);
+				}
+			)", 
+			GL_VERTEX_SHADER,
+			"blur vertex"
+		);
+		
+		sl.addShaderFromProjectFileName("shaders/blur.frag", GL_FRAGMENT_SHADER, "blur shader");
+	
+		sl.attachShaders(blur_p);
+	
+		glLinkProgram(blur_p);
+		printLinkErrors(blur_p, "blur program");
+		glValidateProgram(blur_p);
+	
+		sl.deleteShaders();
+		
+		glUseProgram(blur_p);
+		
+		sampler_u = glGetUniformLocation(blur_p, "sampler");
+		ce
+	}
+	
+	{ //toLDR program
+		glDeleteProgram(toLDR_p);
+		toLDR_p = glCreateProgram();
+		ShaderLoader sl{};
+
+		sl.addShaderFromCode(
+			R"(#version 460				
+
+				void main() {
+					const vec2 verts[] = {
+						vec2(-1, -1),
+						vec2(+3, -1),
+						vec2(-1, +3)
+					};
+					gl_Position = vec4(verts[gl_VertexID], 0, 1);
+				}
+			)", 
+			GL_VERTEX_SHADER,
+			"to LDR vertex"
+		);
+		sl.addShaderFromProjectFileName("shaders/toLDR.frag", GL_FRAGMENT_SHADER, "to LDR shader");
+	
+		sl.attachShaders(toLDR_p);
+	
+		glLinkProgram(toLDR_p);
+		printLinkErrors(toLDR_p, "to LDR program");
+		glValidateProgram(toLDR_p);
+	
+		sl.deleteShaders();
+		
+		glUseProgram(toLDR_p);
+		
+		ldr_sampler_u = glGetUniformLocation(toLDR_p, "sampler");
+		ldr_blurSampler_u = glGetUniformLocation(toLDR_p, "blurSampler");
+		ce
 	}
 }
 
@@ -1848,8 +1936,6 @@ int main(void) {
 		glUseProgram(mainProgram);
 		glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
 		
-		glUseProgram(testProgram);
-		glUniformMatrix4fv(tt_projection_u, 1, GL_TRUE, &projection[0][0]);
 		
 		glProgramUniformMatrix4fv(blockHitbox_p, blockHitboxProjection_u, 1, GL_TRUE, &projection[0][0]);
 		
@@ -1948,7 +2034,50 @@ int main(void) {
 
 			if(numpad[3]) glFinish();
 			auto const startTraceTime{ std::chrono::steady_clock::now() };
+			
+			glBindFramebuffer(GL_FRAMEBUFFER, render_fb);
+			GLenum buffers1[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+			glDrawBuffers(2, buffers1);		
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+			GLenum buffers2[] = { GL_COLOR_ATTACHMENT0 };
+			glDrawBuffers(1, buffers2);
+			
+			if(!numpad[5]) {
+				glUseProgram(blur_p);
+				GLint const h_u{ glGetUniformLocation(blur_p, "h") };
+				
+				glBindFramebuffer(GL_FRAMEBUFFER, pp2_fb);
+				glUniform1i(sampler_u, pp1_it);
+				glUniform1ui(h_u, 0);
+				glDrawArrays(GL_TRIANGLES, 0, 3);	
+				
+				glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
+				glUniform1i(sampler_u, pp2_it);
+				glUniform1ui(h_u, 1);
+				glDrawArrays(GL_TRIANGLES, 0, 3);	
+				
+				glBindFramebuffer(GL_FRAMEBUFFER, pp2_fb);
+				glUniform1i(sampler_u, pp1_it);
+				glUniform1ui(h_u, 0);
+				glDrawArrays(GL_TRIANGLES, 0, 3);	
+				
+				glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
+				glUniform1i(sampler_u, pp2_it);
+				glUniform1ui(h_u, 1);
+				glDrawArrays(GL_TRIANGLES, 0, 3);
+			}
+			else {
+				glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
+				glClear(GL_COLOR_BUFFER_BIT);
+			}
+			
+			glUseProgram(toLDR_p);
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			glUniform1i(ldr_sampler_u, render_it);
+			glUniform1i(ldr_blurSampler_u, pp1_it);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+			
+			
 			if(numpad[3]) glFinish();
 			auto const endTraceTime{ std::chrono::steady_clock::now() };
 			
