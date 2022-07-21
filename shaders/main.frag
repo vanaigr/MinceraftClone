@@ -61,6 +61,7 @@ uniform float far;
 
 uniform sampler2D noise;
 
+uniform ivec3 chunksOffset;
 uniform vec3 playerRelativePosition;
 uniform bool drawPlayer;
 uniform float playerWidth;
@@ -670,14 +671,41 @@ uint stack[size];
 //result | result | 0 | 0 | params | params;
 //   putResultPos ^   ^ putParamsPos
 
+const int sizeofParams = 8;
+const int sizeofResult = 4;
+
 int curParamsPos() { return putParamsPos - 1; }
+void setCurParamsPos(const int pos) { putParamsPos = pos + 1; }
+
 int curResultPos() { return putResultPos - 1; }
 void setCurResultPos(const int pos) { putResultPos = pos + 1; }
 
-int paramsPosOffset(const int pos) { return size - (pos+1) * 8; }
-int resultPosOffset(const int pos) { return pos * 4; }
+int paramsPosOffset(const int pos) { return size - (pos+1) * sizeofParams; }
+int resultPosOffset(const int pos) { return pos * sizeofResult; }
 
-void writeParams(const Params it, const int position) {
+
+restrict buffer TraceTest {
+	uint data[];
+} traceB;
+const int maxParams = 20;
+
+//only one or none can be 1 at the same time
+#define TEST_RESOLVE_COMBINE 0
+#define TEST_FIND 0
+//only one or none can be 1 at the same time
+#define WRITE_TRACE 0
+#define READ_TRACE 0
+
+const ivec3 fragCoord = ivec3(floor(gl_FragCoord));
+const int maxPosOffset = int((fragCoord.x + fragCoord.y * windowSize.x) * (maxParams * sizeofParams + 1) + maxParams * sizeofParams);
+uint getMaxGetPos() { return traceB.data[maxPosOffset]; }
+int paramsPosOffsetTrace(const int pos) { return int((fragCoord.x + fragCoord.y * windowSize.x) * (maxParams * sizeofParams + 1) + pos * sizeofParams); }
+
+int setParamsPos = 0;
+int getParamsPos = 0;
+
+
+void writeParamsStack(const Params it, const int position) {
 	const int offset = paramsPosOffset(position);
 	
 	stack[offset+0] = floatBitsToUint(it.ray.orig.x);
@@ -697,7 +725,36 @@ void writeParams(const Params it, const int position) {
 		
 	stack[offset+7] = (it.id & 0xffffu) | (((it.bias - minBias) & 0xfu) << 16) | (it.data << 24);
 }
-Params readParams(const int position) {
+
+void writeParamsTrace(const Params it, const int position) {
+	if(setParamsPos < 0 || setParamsPos >= maxParams) discard;
+	
+	const int offset = paramsPosOffsetTrace(setParamsPos);
+	
+	if(offset < 0 || offset >= traceB.data.length()) discard;
+
+	traceB.data[offset+0] = floatBitsToUint(it.ray.orig.x);
+	traceB.data[offset+1] = floatBitsToUint(it.ray.orig.y);
+	traceB.data[offset+2] = floatBitsToUint(it.ray.orig.z);
+	
+	traceB.data[offset+3] = floatBitsToUint(it.ray.dir.x);
+	traceB.data[offset+4] = floatBitsToUint(it.ray.dir.y);
+	traceB.data[offset+5] = floatBitsToUint(it.ray.dir.z);
+	
+	traceB.data[offset+6] = 
+		(packHalf2x16(vec2(it.distance, 0)) & 0xffffu)
+		| ((it.rayIndex & 7u) << 16)
+		| ((it.rayType & 7u) << 19)
+		| ((uint(it.parent) & 0xffu) << 22)
+		| (uint(it.last) << 30);
+		
+	traceB.data[offset+7] = (it.id & 0xffffu) | (((it.bias - minBias) & 0xfu) << 16) | (it.data << 24);
+
+	setParamsPos++;
+	traceB.data[maxPosOffset] = setParamsPos;
+}
+
+Params readParamsStack(const int position) {
 	const int offset = paramsPosOffset(position);
 	
 	return Params(
@@ -723,6 +780,115 @@ Params readParams(const int position) {
 		bool((stack[offset+6] >> 30) & 1u)
 	);
 }
+
+Params readParamsTrace(const int position) {
+	if(getParamsPos < 0 || getParamsPos >= getMaxGetPos()) discard;
+	
+	const int offset = paramsPosOffsetTrace(getParamsPos);
+	
+	if(offset < 0 || offset >= traceB.data.length()) discard;
+
+	getParamsPos++;
+	return Params(
+		Ray(
+			vec3(
+				uintBitsToFloat(traceB.data[offset+0]),
+				uintBitsToFloat(traceB.data[offset+1]),
+				uintBitsToFloat(traceB.data[offset+2])
+			),
+			vec3(
+				uintBitsToFloat(traceB.data[offset+3]),
+				uintBitsToFloat(traceB.data[offset+4]),
+				uintBitsToFloat(traceB.data[offset+5])
+			)
+		),
+		unpackHalf2x16(traceB.data[offset+6]).x,
+		int((traceB.data[offset+7] >> 16) & 0xfu) + minBias,
+		(traceB.data[offset+7]) & 0xffffu,
+		(traceB.data[offset+7] >> 24),
+		(traceB.data[offset+6] >> 16) & 7u,
+		(traceB.data[offset+6] >> 19) & 7u,
+		(int(traceB.data[offset+6] << 2) >> (22+2)), //sign extended shift
+		bool((traceB.data[offset+6] >> 30) & 1u)
+	);
+}
+
+
+void writeStartParams(const Params it, const int position);
+void writeEndParams(const Params it, const int position);
+
+Params readStartParams(const int position);
+Params readEndParams(const int position);
+
+#if TEST_RESOLVE_COMBINE
+	void writeStartParams(const Params it, const int position) {
+		writeParamsStack(it, position);
+	}
+	
+	void writeEndParams(const Params it, const int position) {
+		writeParamsStack(it, position);
+	}
+
+	Params readStartParams(const int position) {
+		return readParamsStack(position);
+	}
+
+	Params readEndParams(const int position) {
+		#if READ_TRACE
+		  const Params it = readParamsTrace(position);
+		#else
+		  const Params it = readParamsStack(position);
+		#endif
+		
+		#if WRITE_TRACE
+		  writeParamsTrace(it, position);
+		#endif
+		
+		return it;
+	}
+#elif TEST_FIND
+	void writeStartParams(const Params it, const int position) {
+		writeParamsStack(it, position);
+		#if WRITE_TRACE
+		  writeParamsTrace(it, position);
+		#endif
+	}
+	
+	void writeEndParams(const Params it, const int position) {
+		#if !(READ_TRACE) //we can read more Params than fits in stack[], so when they are written back position may be out of bounds
+		writeParamsStack(it, position);
+		#endif
+	}
+
+	Params readStartParams(const int position) {
+		#if READ_TRACE
+		  getParamsPos = position;
+		  return readParamsTrace(position);
+		#else
+		  return readParamsStack(position);
+		#endif
+	}
+
+	Params readEndParams(const int position) {
+		return readParamsStack(position);	
+	}
+#else
+	void writeStartParams(const Params it, const int position) {
+		writeParamsStack(it, position);
+	}
+	
+	void writeEndParams(const Params it, const int position) {
+		writeParamsStack(it, position);
+	}
+	
+	Params readStartParams(const int position) {
+		return readParamsStack(position);
+	}
+	
+	Params readEndParams(const int position) {
+		return readParamsStack(position);
+	}
+#endif
 
 void writeResult(const Result it, const int position) {
 	const int offset = resultPosOffset(position);
@@ -754,8 +920,9 @@ Result readResult(const int position) {
 	);
 }
 
-Params popParams()  { return readParams(--putParamsPos); }
-void pushParams(const Params it) { writeParams(it, putParamsPos++); }
+
+Params popEndParams()  { return readEndParams(--putParamsPos); }
+void pushStartParams(const Params it) { writeStartParams(it, putParamsPos++); }
 void pushResult(const Result it) { writeResult(it, putResultPos++); }
 
 bool canPopParams() { return putParamsPos > 0; }
@@ -825,10 +992,11 @@ BlocksIntersection blocksIntersection(
 		);
 		
 		if(tBlockId == 16) {
+			const ivec3 toBlockAbsoluteCoord = chunksOffset * blocksInChunkDim + toBlockCoord;
 			const vec3 normals[] = { normalize(vec3(1,(sin(time*0.71)+sin(time))*0.1,1)), normalize(vec3(-1,(sin(time*0.71)+sin(time))*0.1,1)) };
 			
 			for(int index = 0; index < 2; index++) {
-				const vec3 rand_ = vec3(rand(vec2(toBlockCoord.xy)), rand(vec2(toBlockCoord.yz)), rand(vec2(toBlockCoord.xz)));
+				const vec3 rand_ = vec3(rand(vec2(toBlockAbsoluteCoord.xy)), rand(vec2(toBlockAbsoluteCoord.yz)), rand(vec2(toBlockAbsoluteCoord.xz)));
 				
 				const vec3 normal = normals[index];//vec3(1, 0, 0);
 				const vec3 dir1 = normal;
@@ -885,7 +1053,8 @@ BlocksIntersection blocksIntersection(
 		{
 			const float yLevelDist = yLevelDiff * (dirPositive.y ? 1 : -1);
 			
-			if(intersectionSide == bvec3(false) && bias <= 0 && yLevelDiff > 0) {
+			if(intersectionSide == bvec3(false) && bias <= 0 && yLevelDiff > 0) { 
+				//bug: if camera position is between two liquid cubes' boundaries, it will be rendered incorrectly 
 				return BlocksIntersection(ray.orig, liquidId, 1u, 0);
 			}
 			else if(liquidLevel == 255u) /*skip*/;
@@ -971,7 +1140,7 @@ void findIntersections(const int iteration, const int lowestNotUpdated) {
 				paramsPos = curParamsPos();
 			}
 			else {
-				const Params p = readParams(paramsPos);
+				const Params p = readStartParams(paramsPos);
 				
 				const vec3 startP = playerRelativePosition - vec2(playerWidth/2.0, 0           ).xyx;
 				const vec3 endP   = playerRelativePosition + vec2(playerWidth/2.0, playerHeight).xyx;
@@ -989,13 +1158,13 @@ void findIntersections(const int iteration, const int lowestNotUpdated) {
 				
 				if(playerFrist) {
 					const uint data = uint(playerI.side);
-					writeParams(Params(
+					writeEndParams(Params(
 						Ray(playerI.at, p.ray.dir), distance(p.ray.orig, playerI.at), playerI.bias, 1 | (1u << 15), data, 
 						p.rayIndex, p.rayType, p.parent, p.last), paramsPos
 					);
 				}
 				else {
-					writeParams(Params(
+					writeEndParams(Params(
 						Ray(curCoord, p.ray.dir), distance(p.ray.orig, curCoord), bias, dataAndId & 0xffu, dataAndId >> 16, 
 						p.rayIndex, p.rayType, p.parent, p.last), paramsPos
 					);
@@ -1006,7 +1175,7 @@ void findIntersections(const int iteration, const int lowestNotUpdated) {
 			if(paramsPos < lowestNotUpdated) return;
 			
 						
-			const Params p = readParams(paramsPos);
+			const Params p = readStartParams(paramsPos);
 			
 			ray = p.ray;
 			stepLength = 1.0 / ray.dir;
@@ -1315,7 +1484,7 @@ void pushShadowEndEmmitter(
 		const vec3 newDir = normalize(rotated);
 		const int newBias = params.bias * ((dot(params.ray.dir, normalDir) > 0) == (dot(newDir, normalDir) > 0) ? 1 : -1);
 		
-		pushParams(Params(Ray(position, newDir), 0.0, newBias, 0u, 0u, 0u, rayTypeShadowBlock, curFrame, !pushed));
+		pushStartParams(Params(Ray(position, newDir), 0.0, newBias, 0u, 0u, 0u, rayTypeShadowBlock, curFrame, !pushed));
 		pushed = true;
 	}
 	
@@ -1354,7 +1523,7 @@ void pushShadowEndEmmitter(
 			const int newBias = params.bias * ((dot(params.ray.dir, normalDir) > 0) == (dot(newDir, normalDir) > 0) ? 1 : -1);
 			
 			if((abs(dot(newDir, newDir) - 1) < 0.01)) {
-				pushParams(Params(Ray(position, newDir), 0.0, newBias, 0u, 0u, 0u, rayTypeLightingBlock, curFrame, !pushed));
+				pushStartParams(Params(Ray(position, newDir), 0.0, newBias, 0u, 0u, 0u, rayTypeLightingBlock, curFrame, !pushed));
 				pushed = true;
 			}
 		}
@@ -1366,7 +1535,7 @@ RayResult resolveIntersection(const int iteration) {
 	
 	const int curFrame = putResultPos;
 	
-	const Params p = popParams();
+	const Params p = popEndParams();
 	//if(!canPushResult()) ???; //this check is not needed because sizeof(Result) < sizeof(Params), so we would have space for at least 1 Result
 	const Ray ray = p.ray;
 	const ivec3 dirSign = calcDirSign(ray.dir);
@@ -1414,10 +1583,11 @@ RayResult resolveIntersection(const int iteration) {
 		vec2 uv = mod(uvAbs, 1);
 		
 		if(blockId == 16) {
+			const ivec3 blockAbsolutePos = chunksOffset * blocksInChunkDim + blockCoord;
 			const vec3 normals[] = { normalize(vec3(1,(sin(time*0.71)+sin(time))*0.1,1)), normalize(vec3(-1,(sin(time*0.71)+sin(time))*0.1,1)) };
 			
 			const int index = int(data);
-			const vec3 rand_ = vec3(rand(vec2(blockCoord.xy)), rand(vec2(blockCoord.yz)), rand(vec2(blockCoord.xz)));
+			const vec3 rand_ = vec3(rand(vec2(blockAbsolutePos.xy)), rand(vec2(blockAbsolutePos.yz)), rand(vec2(blockAbsolutePos.xz)));
 			
 			const vec3 normal = normals[index];
 			const vec3 dir1 = normal;
@@ -1543,7 +1713,7 @@ RayResult resolveIntersection(const int iteration) {
 				const vec3 newDir = refracted;
 				const int newBias = bias + 1;
 				
-				pushParams(Params(Ray(offsetedCoord, newDir), 0.0, newBias, 0u, 0u, 0u, type, curFrame, !pushed));
+				pushStartParams(Params(Ray(offsetedCoord, newDir), 0.0, newBias, 0u, 0u, 0u, type, curFrame, !pushed));
 				pushed = true;
 			}	
 			
@@ -1551,7 +1721,7 @@ RayResult resolveIntersection(const int iteration) {
 				const vec3 newDir = reflect(incoming, normalDir);
 				const int newBias = -bias;
 				
-				pushParams(Params(Ray(offsetedCoord, newDir), 0.0, newBias, 0u, 0u, 1u, type, curFrame, !pushed));
+				pushStartParams(Params(Ray(offsetedCoord, newDir), 0.0, newBias, 0u, 0u, 1u, type, curFrame, !pushed));
 				pushed = true;
 			}
 		}
@@ -1570,7 +1740,7 @@ RayResult resolveIntersection(const int iteration) {
 				const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
 				const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
 			
-				pushParams(Params( Ray(coord, reflected), 0.0, -bias, 0u, 0u, 0u, type, curFrame, !pushed));
+				pushStartParams(Params( Ray(coord, reflected), 0.0, -bias, 0u, 0u, 0u, type, curFrame, !pushed));
 				pushed = true;
 			}
 		}
@@ -1590,16 +1760,17 @@ RayResult resolveIntersection(const int iteration) {
 			pushResult(Result( color, t, 0u, blockId, rayIndex, (isBlockEmitter && type == rayTypeLightingBlock) ? rayTypeLightingEmitter : type, parent, last));
 			
 			if((blockId == 5 || blockId == 16) && shadow && canPushParams()) {
-				pushParams(Params( Ray(coord, ray.dir), 0.0, bias+1, 0u, 0u, 1u, type, curFrame, !pushed));
+				pushStartParams(Params( Ray(coord, ray.dir), 0.0, bias+1, 0u, 0u, 1u, type, curFrame, !pushed));
 				pushed = true;
 			}
 			if(!shadow && !isBlockEmitter) {
 				vec3 position;
 				if(blockId == 16) {
+					const ivec3 blockAbsolutePos = chunksOffset * blocksInChunkDim + blockCoord;
 					const vec3 normals[] = { normalize(vec3(1,(sin(time*0.71)+sin(time))*0.1,1)), normalize(vec3(-1,(sin(time*0.71)+sin(time))*0.1,1)) };
 			
 					const int index = int(data);
-					const vec3 rand_ = vec3(rand(vec2(blockCoord.xy)), rand(vec2(blockCoord.yz)), rand(vec2(blockCoord.xz)));
+					const vec3 rand_ = vec3(rand(vec2(blockAbsolutePos.xy)), rand(vec2(blockAbsolutePos.yz)), rand(vec2(blockAbsolutePos.xz)));
 					
 					const vec3 normal = normals[index];
 					const vec3 dir1 = normal;
@@ -1633,18 +1804,39 @@ RayResult resolveIntersection(const int iteration) {
 }
 
 
-vec3 trace(const Ray startRay) {
+vec3 trace(const Ray startRay) {  
+  #if TEST_FIND && READ_TRACE
+	setCurParamsPos(int(getMaxGetPos()) - 1);
+	int iteration = 0;
+	int lowestNotUpdated = 0;
+
+	findIntersections(iteration, lowestNotUpdated);
+	
+	//const int testResult = 0;
+	//if(testResult < getMaxGetPos()) {
+	//	setCurParamsPos(testResult);
+	//	const RayResult result = resolveIntersection(iteration);
+	//	return readResult(0).color;
+	//}
+	
+	return vec3(0.0, 1.8, 1.9);
+  #else
 	if(canPushParams()) {
-		pushParams(Params(startRay, 0.0, 0, 0u, 0u, 0u, rayTypeStandard, curResultPos(), true));
+		pushStartParams(Params(startRay, 0.0, 0, 0u, 0u, 0u, rayTypeStandard, curResultPos(), true));
 	}
 	
 	int iteration = 0;
 	int lowestNotUpdated = curParamsPos();
-
+	
 	while(true) {
 		const bool lastRay = !canPopParams();
 		if(!lastRay) {
-			findIntersections(iteration, lowestNotUpdated);
+			#if TEST_RESOLVE_COMBINE && READ_TRACE
+				//endParams are saved in trace buffer
+			#else
+				findIntersections(iteration, lowestNotUpdated);
+			#endif
+			
 			#if DEBUG
 			if(exit_) return vec3(0);
 			#endif
@@ -1659,15 +1851,16 @@ vec3 trace(const Ray startRay) {
 			}
 		}
 
-		bool stop = false;
+		bool stop = true;
 		int curFrame = curResultPos();
 		for(;curFrame >= 0;) {
 			const Result currentResult = readResult(curFrame);
 			const bool last = currentResult.last;
 			const int currentParent = currentResult.parent;
 			if(currentParent < 0) { stop = true; break; }
+			
+			stop = false;
 			if(!last && !lastRay) break;
-		
 			combineSteps(currentParent, curFrame);
 			curFrame = currentParent;
 		}
@@ -1678,6 +1871,7 @@ vec3 trace(const Ray startRay) {
 	if(curResultPos() < 0) return vec3(1, 0, 1);
 		
 	return readResult(0).color;
+  #endif
 }
 
 

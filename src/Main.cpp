@@ -204,6 +204,9 @@ enum SSBOs : GLuint {
 	ssbosCount
 };
 
+static constexpr GLuint traceTest_b = 10;
+static GLuint traceTest_ssbo;
+
 static GLuint ssbos[ssbosCount];
 static GLuint const	
 	&chunksIndices_ssbo       = ssbos[chunksIndices_b],
@@ -226,6 +229,7 @@ static GLuint mainProgram = 0;
   static GLuint time_u;
   static GLuint projection_u, toLocal_matrix_u;
   static GLuint startCoord_u;
+  static GLuint chunksOffset_u;
   //static GLuint playerChunk_u, playerInChunk_u;
 
 static GLuint fontProgram;
@@ -253,6 +257,7 @@ static Key keys[GLFW_KEY_LAST+1];
 
 static void reloadConfig();
 static void reloadShaders();
+static void useTraceBuffer();
 
 void handleKey(int const key) {
 	auto const action{ misc::to_underlying(keys[key]) };
@@ -305,6 +310,8 @@ void handleKey(int const key) {
 		reloadShaders();	
 	else if(key == GLFW_KEY_F6 && action == GLFW_PRESS)
 		reloadConfig();	
+	else if(key == GLFW_KEY_F7 && action == GLFW_PRESS)
+		useTraceBuffer();
 	else if(key == GLFW_KEY_F4 && action == GLFW_PRESS)
 		takeScreenshot = true;
 	else if(key == GLFW_KEY_F3 && action == GLFW_RELEASE) { 
@@ -503,6 +510,33 @@ void gpuBuffersReseted() {
 		
 }
 
+static bool is = false;
+static void useTraceBuffer() {
+	
+	if(!is) {
+		glDeleteBuffers(1, &traceTest_ssbo);
+		glGenBuffers   (1, &traceTest_ssbo);
+		const size_t size{ windowSize.x*windowSize.y * (20 * 8*sizeof(uint32_t) + sizeof(uint32_t)) };
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, traceTest_ssbo);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL, GL_STATIC_COPY);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, traceTest_b, traceTest_ssbo);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+		
+		
+		if(GLenum errorCode = glGetError(); errorCode == GL_OUT_OF_MEMORY) {
+			std::cout << "unable to allocate " << float(double(size) / 1024 / 1024) << " Mb\n";
+		}
+		else {
+			is = true;
+			std::cout << "trace buffer (" << float(double(size) / 1024 / 1024) << " Mb) enabled\n";
+		}
+	}
+	else {
+		glDeleteBuffers(1, &traceTest_ssbo);
+		is = false;
+		std::cout << "trace buffer disabled\n";
+	}
+}
 
 static void reloadConfig() {
 	Config cfg{};
@@ -691,6 +725,7 @@ static void reloadShaders() {
 		//playerInChunk_u = glGetUniformLocation(mainProgram, "playerInChunk");
 		//startChunkIndex_u = glGetUniformLocation(mainProgram, "startChunkIndex");
 		startCoord_u = glGetUniformLocation(mainProgram, "startCoord");
+		chunksOffset_u = glGetUniformLocation(mainProgram, "chunksOffset");
 		
 		playerRelativePosition_u = glGetUniformLocation(mainProgram, "playerRelativePosition");
 		drawPlayer_u = glGetUniformLocation(mainProgram, "drawPlayer");
@@ -717,6 +752,8 @@ static void reloadShaders() {
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksAO"), chunksAO_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksLighting"), chunksLighting_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksNeighbourngEmitters"), chunksEmittersGPU_b);
+		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "TraceTest"), traceTest_b);
+		
 		
 		gpuBuffersReseted();
 	}
@@ -1123,11 +1160,6 @@ static bool updateChunk(chunk::Chunk chunk, vec3i const cameraChunkCoord, bool c
 	static constexpr bool updateChunkDebug = false;
 	
 	auto &status{ chunk.status() };
-			
-	if(numpad[4]) {
-		updateBlocksDataInArea(chunk, pBlock{0}, pBlock{units::blocksInChunkDim-1});
-		status.setBlocksUpdated(true);
-	}
 	auto const &chunkCoord{ chunk.position() };
 	auto const chunkIndex{ chunk.chunkIndex() };
 	
@@ -1257,6 +1289,7 @@ static void updateChunks(chunk::Chunks &chunks) {
 	auto const viewWidth = (viewDistance*2+1);
 	chunksPresent.clear();
 	chunksPresent.resize(viewWidth*viewWidth);
+	size_t notPresentCount{};
 	
 	vec3i const currentChunk{ currentCoord().valAs<pos::Chunk>() };
 	chunks.filterUsed([&](int chunkIndex) -> bool { //should keep
@@ -1268,7 +1301,10 @@ static void updateChunks(chunk::Chunks &chunks) {
 				chunksPresent[index] = true;	
 				return true;
 			} 
-			return false;
+			else {
+				notPresentCount++;
+				return false;
+			}
 		}, 
 		[&](int const chunkIndex) -> void { //free the chunk
 			auto chunk{ chunks[chunkIndex] };
@@ -1296,16 +1332,15 @@ static void updateChunks(chunk::Chunks &chunks) {
 		}
 	);
 
+	for(int k = 0; k < viewWidth; k ++) 
 	for(int i = 0; i < viewWidth; i ++) {
-		for(int k = 0; k < viewWidth; k ++) {
-			auto const index{ chunksPresent[i+k*viewWidth] };
-			if(index == false) {//generate chunk
-				auto const relativeChunksPos{ vec2i{i, k} - vec2i{viewDistance} };
-				auto const chunksPos{ currentChunk.xz() + relativeChunksPos };
+		auto const index{ chunksPresent[i+k*viewWidth] };
+		if(index == false) { //generate chunk
+			auto const relativeChunksPos{ vec2i{i, k} - vec2i{viewDistance} };
+			auto const chunksPos{ currentChunk.xz() + relativeChunksPos };
 			
-				genChunksColumnAt(chunks, chunksPos, worldName, loadChunks);
-			}
-		}	
+			genChunksColumnAt(chunks, chunksPos, worldName, loadChunks);
+		}		
 	}
 }
 
@@ -1754,14 +1789,23 @@ int main(void) {
 	glBindVertexArray(0); 
 	
 	
-	while ((err = glGetError()) != GL_NO_ERROR)
-    {
+	while ((err = glGetError()) != GL_NO_ERROR) {
         std::cout << err << std::endl;
     }
+	
+	//useTraceBuffer();
 
+	auto const a1{ std::chrono::steady_clock::now() };
 	reloadConfig();
+	auto const a2{ std::chrono::steady_clock::now() };
 	updateChunks(chunks);
+	auto const a3{ std::chrono::steady_clock::now() };
 	reloadShaders();
+	auto const a4{ std::chrono::steady_clock::now() };
+	
+	#define b(ARG) ( double(std::chrono::duration_cast<std::chrono::microseconds>(ARG).count()) / 1000.0 )
+	std::cout << "reload config: " << b(a2 - a1) << ", update chunks: " << b(a3 - a2) << ", reload shaders " << b(a4 - a3) << '\n';
+	#undef b
 	
     auto const completionTime = std::chrono::steady_clock::now();
 	std::cout << "Time to start (ms): " << ( double(std::chrono::duration_cast<std::chrono::microseconds>(completionTime - startupTime).count()) / 1000.0 ) << '\n';
@@ -1843,8 +1887,10 @@ int main(void) {
 			lastCameraChunkCoord = pChunk{cameraChunk};
 		}
 		auto const startCoord{ pos::fracToPos(cameraCoord - lastCameraChunkCoord + pChunk{viewDistance}) };
+		auto const chunksOffset{ lastCameraChunkCoord - pChunk{viewDistance} };
 		
 		glUniform3f(startCoord_u, startCoord.x, startCoord.y, startCoord.z);
+		glUniform3i(chunksOffset_u, chunksOffset->x, chunksOffset->y, chunksOffset->z);
 		
 		{			
 			auto const playerChunkCand{ chunk::Move_to_neighbour_Chunk(chunks, lastCameraChunkCoord.val()).optChunk().get() };
