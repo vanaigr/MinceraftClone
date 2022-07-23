@@ -1004,37 +1004,35 @@ BlocksIntersection blocksIntersection(
 		
 		if(tBlockId == 16) {
 			const ivec3 toBlockAbsoluteCoord = chunksOffset * blocksInChunkDim + toBlockCoord;
-			const vec3 normals[] = { normalize(vec3(1,(sin(time*0.71)+sin(time))*0.1,1)), normalize(vec3(-1,(sin(time*0.71)+sin(time))*0.1,1)) };
+			const vec3 normals[] = { 
+				normalize(vec3(+1,  0.6 + (sin( time*0.71)+sin(time))*0.1, 1)), 
+				normalize(vec3(-1,  0.6 + (sin(-time*0.71)+sin(time))*0.1, 1)),
+				normalize(vec3(+0, -0.6 - (sin(time*0.71)+sin(-time))*0.1, 1))
+			};
 			
-			for(int index = 0; index < 2; index++) {
-				const vec3 rand_ = vec3(rand(vec2(toBlockAbsoluteCoord.xy)), rand(vec2(toBlockAbsoluteCoord.yz)), rand(vec2(toBlockAbsoluteCoord.xz)));
-				
-				const vec3 normal = normals[index];//vec3(1, 0, 0);
+			const vec3 rand_ = vec3(rand(vec2(toBlockAbsoluteCoord.xy)), rand(vec2(toBlockAbsoluteCoord.yz)), rand(vec2(toBlockAbsoluteCoord.xz)));
+			for(int index = 0; index < 3; index++) {
+				const vec3 normal = normals[index];
 				const vec3 dir1 = normal;
-				const vec3 dir2 = cross(vec3(0, 1, 0), dir1);
+				const vec3 dir2 = normalize(cross(vec3(0, 1, 0), dir1));
 				const vec3 dir3 = cross(dir1, dir2);
 				
-				
-				const vec3 center = vec3(toBlockCoord) + vec3(0.5, 0, 0.5) + dir2 * (rand_ - 0.5) * 0.2;
+				const vec3 center = vec3(toBlockCoord) + vec3(0.5, 0, 0.5) + vec3(1, 0, 1) * (rand_ - 0.5) * 0.3;
 				
 				const float t = intersectPlane(ray, center, normal);
-				if(t >= -0.0001) {
+				if(t >= -0.001) {
 					const vec3 intersectionCoord = at(ray, t);
 					
 					const int newBias = dot(ray.dir, normal) > 0 ? -1 : 0;
-					
-					const bool isBias = (dot(ray.orig-intersectionCoord, ray.orig-intersectionCoord) > 0.001 || bias <= newBias);
+					const bool isBias = (dot(ray.orig-intersectionCoord, ray.orig-intersectionCoord) > 0.0001 || bias <= newBias);
 					
 					const vec3 cubeCoordF = toCubeCoord;
 					if(isBias && intersectionCoord == clamp(intersectionCoord, cubeCoordF / cubesInBlockDim, (cubeCoordF+1) / cubesInBlockDim)
 							&& shouldWriteInterrsection(intersectionCoord)) {												
 						const vec3 localInters = intersectionCoord - center;
 						
-						const vec2 uv_ = vec2(dot(localInters, dir2), dot(localInters, dir3));
-						const vec2 uvFrac = mod(uv_, 1) * mix(vec2(1.0/0.7, 2.1), vec2(1.0/0.95,1.1), rand_.xy);
-						const vec2 uv = floor(uv_) + uvFrac;
-						
-						const bool alpha = uvFrac.y > 1 ? false : (sampleAtlas(alphaAt(tBlockId), mod(uvFrac, 1)).x > 0.5);
+						const vec2 uv = vec2(dot(localInters, dir2), dot(localInters, dir3)) * mix(vec2(1.0/0.7, 2.1), vec2(1.2,1.5), rand_.xy) + vec2(0.5, 0);
+						const bool alpha = uv.y == clamp(uv.y, 0, 1) && (sampleAtlas(alphaAt(tBlockId), mod(uv, 1)).x > 0.5);
 						
 						if(alpha) bc = BlocksIntersection(intersectionCoord, tBlockId, index, newBias);							
 					}
@@ -1090,7 +1088,7 @@ BlocksIntersection blocksIntersection(
 	
 	#undef shouldWriteInterrsection
 	
-
+	
 	const uint/*uint16_t[4]*/ blocks[2] = { fLiquidId | (fBlockId << 16), tBlockId | (tLiquidId << 16)  };
 	const ivec3 blocksCoord[2] = { cubeBlock(fromCubeCoord), cubeBlock(toCubeCoord) };
 	
@@ -1341,8 +1339,8 @@ void findIntersections(const int iteration, const int lowestNotUpdated) {
 
 vec3 background(const vec3 dir) {
 	const float t = 0.5 * (dir.y + 1.0);
-	const vec3 res = (1.0 - t) * vec3(1.0, 1.0, 1.02) + t * vec3(0.5, 0.7, 1.0);
-	return pow(res*2.3, vec3(2.2));
+	const vec3 res = mix(vec3(0.6, 0.7, 0.9), vec3(0.43, 0.7, 1.15), t);
+	return pow(res*1.7, vec3(2.2));
 }
 
 vec3 fade(const vec3 color, const float depth) {
@@ -1436,11 +1434,11 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 			if(inner.rayIndex == 1) {
 				if(inner.rayType == rayTypeShadowSky) {
 					result.rayType = rayTypeShadowSky;
-					result.color += mix(current.color, inner.color, 0.3);
+					result.color += mix(current.color, inner.color, 0.2);
 				}
 				else if(inner.rayType == rayTypeLightingEmitter) {
 					result.rayType = rayTypeLightingEmitter;
-					result.color += mix(current.color, inner.color * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0), 0.3);
+					result.color += mix(current.color, inner.color * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0), 0.2);
 				}
 				else if(inner.rayType == rayTypeLightingBlock || inner.rayType == rayTypeShadowBlock) /*do nothing*/;
 				else result.color += mix(current.color, inner.color, 0.03);
@@ -1595,27 +1593,28 @@ RayResult resolveIntersection(const int iteration) {
 		
 		if(blockId == 16) {
 			const ivec3 blockAbsolutePos = chunksOffset * blocksInChunkDim + blockCoord;
-			const vec3 normals[] = { normalize(vec3(1,(sin(time*0.71)+sin(time))*0.1,1)), normalize(vec3(-1,(sin(time*0.71)+sin(time))*0.1,1)) };
+			const vec3 normals[] = { 
+				normalize(vec3(+1,  0.6 + (sin( time*0.71)+sin(time))*0.1, 1)), 
+				normalize(vec3(-1,  0.6 + (sin(-time*0.71)+sin(time))*0.1, 1)),
+				normalize(vec3(+0, -0.6 - (sin(time*0.71)+sin(-time))*0.1, 1))
+			};
 			
 			const int index = int(data);
 			const vec3 rand_ = vec3(rand(vec2(blockAbsolutePos.xy)), rand(vec2(blockAbsolutePos.yz)), rand(vec2(blockAbsolutePos.xz)));
 			
 			const vec3 normal = normals[index];
 			const vec3 dir1 = normal;
-			const vec3 dir2 = cross(vec3(0, 1, 0), dir1);
+			const vec3 dir2 = normalize(cross(vec3(0, 1, 0), dir1));
 			const vec3 dir3 = cross(dir1, dir2);
 			
-			const vec3 center = vec3(blockCoord) + vec3(0.5, 0, 0.5) + dir2 * (rand_ - 0.5) * 0.2;								
+			const vec3 center = vec3(blockCoord) + vec3(0.5, 0, 0.5) + vec3(1, 0, 1) * (rand_ - 0.5) * 0.3;			
 			const vec3 localInters = ray.orig - center;
 			
-			const vec2 uv_ = vec2(dot(localInters, dir2), dot(localInters, dir3));
-			const vec2 uvFrac = mod(uv_, 1) * mix(vec2(1.0/0.7, 2.1), vec2(1.0/0.95,1.1), rand_.xy);
+			uvAbs = vec2(dot(localInters, dir2), dot(localInters, dir3)) * mix(vec2(1.0/0.7, 2.1), vec2(1.2,1.5), rand_.xy) + vec2(0.5, 0);
 
 			normalDir = normal;
-			uvAbs = floor(uv_) + uvFrac;
-			uv = mod(uvFrac, 1);
+			uv = mod(uvAbs, 1);
 		}
-		normalDir = normalDir * (dot(ray.dir, normalDir) > 0 ? -1 : 1);
 		
 		const bvec3 intersectionSide = intersectionSide_;
 		
@@ -1758,8 +1757,8 @@ RayResult resolveIntersection(const int iteration) {
 		else {
 			const bool isBlockEmitter = blockId == 13 || blockId == 14;
 			float brightness;
-			if(blockId == 13) brightness = 5;
-			else if(blockId == 14) brightness = 5 + (sin(time*2)+sin(time*17.3)+sin(time*7.51))*0.2;
+			if(blockId == 13) brightness = 2.5;
+			else if(blockId == 14) brightness = 2.5 + (sin(time*2)+sin(time*17.3)+sin(time*7.51))*0.2;
 			else brightness = 1;
 			
 			const ivec3 relativeToChunk = chunkPosition;
@@ -1778,19 +1777,12 @@ RayResult resolveIntersection(const int iteration) {
 				vec3 position;
 				if(blockId == 16) {
 					const ivec3 blockAbsolutePos = chunksOffset * blocksInChunkDim + blockCoord;
-					const vec3 normals[] = { normalize(vec3(1,(sin(time*0.71)+sin(time))*0.1,1)), normalize(vec3(-1,(sin(time*0.71)+sin(time))*0.1,1)) };
-			
-					const int index = int(data);
 					const vec3 rand_ = vec3(rand(vec2(blockAbsolutePos.xy)), rand(vec2(blockAbsolutePos.yz)), rand(vec2(blockAbsolutePos.xz)));
-					
-					const vec3 normal = normals[index];
-					const vec3 dir1 = normal;
-					const vec3 dir2 = cross(vec3(0, 1, 0), dir1);
+					const vec3 dir1 = normalDir;
+					const vec3 dir2 = normalize(cross(vec3(0, 1, 0), dir1));
 					const vec3 dir3 = cross(dir1, dir2);
 					
-					const vec3 center = vec3(blockCoord) + vec3(0.5, 0, 0.5) + dir2 * (rand_ - 0.5) * 0.2;
-					
-					const vec2 diffUV = (uv - (floor(uv * shadowSubdiv) + vec2(0.501)) / shadowSubdiv) / mix(vec2(1.0/0.7, 2.1), vec2(1.0/0.95,1.1), rand_.xy);
+					const vec2 diffUV = (uvAbs - (floor(uvAbs * shadowSubdiv) + vec2(0.501)) / shadowSubdiv) / mix(vec2(1.0/0.7, 2.1), vec2(1.2,1.5), rand_.xy);
 					
 					position = coord - (dir2 * diffUV.x + dir3 * diffUV.y);
 				}
@@ -1808,7 +1800,7 @@ RayResult resolveIntersection(const int iteration) {
 		}
 	}
 	else { //sky
-		pushResult(Result(shadow ? vec3(2) : background(ray.dir), far, bias, 0u, rayIndex, type == rayTypeShadowBlock ? rayTypeShadowSky : type, parent, last));
+		pushResult(Result(shadow ? vec3(1) : background(ray.dir), far, bias, 0u, rayIndex, type == rayTypeShadowBlock ? rayTypeShadowSky : type, parent, last));
 	}
 	
 	return RayResult(pushed);
@@ -1886,6 +1878,23 @@ vec3 trace(const Ray startRay) {
 }
 
 
+coherent buffer Luminance {
+	uint data[256];
+} luminance;
+
+const vec3 rgbToLum = vec3(0.2126, 0.7152, 0.0722);
+
+uniform float minLogLum;
+uniform float rangeLogLum;
+const float x = (255.0 / rangeLogLum);
+
+//https://bruop.github.io/exposure/
+uint colorToBin(const vec3 hdrColor) {
+	const float lum = dot(hdrColor, rgbToLum);
+	if (lum < 0.0001) return 0;
+	return clamp(int((log2(lum) - minLogLum) * x), 0, 255);
+}
+
 void main() {
 	const vec2 uv = gl_FragCoord.xy / windowSize.xy;
     const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
@@ -1896,13 +1905,20 @@ void main() {
 	
 	const Ray ray = Ray(startCoord, rayDir);
 
-	const vec4 col = vec4(trace(ray), 1);
+	const vec3 col = trace(ray);
 	
-	const float brightness = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));	
-    if(brightness > 2.0) brightColor = vec4(col.rgb, 1.0);
-    else brightColor = vec4(0.0, 0.0, 0.0, 1.0);
+	const float brightness = dot(col, rgbToLum) - 1.2;
+	const float offset = 1.0 / 6;
+	const float b = 11;
+	const float x = (brightness - offset) * b;
 	
-	color = col;
+    if(x >= 0) brightColor = vec4(col * (log(x+1)*offset + offset), 1.0);
+	else brightColor = vec4(col * exp(x) * offset, 1.0);
+	
+	atomicAdd(luminance.data[colorToBin(col)], 1);
+	
+	color = vec4(col, 1);
+	
 	
 	#if DEBUG
 	if(anyInvocationARB(exit_)) { color = vec4(exitVec3, 1.0); return; }

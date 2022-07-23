@@ -207,6 +207,8 @@ enum SSBOs : GLuint {
 	chunksEmittersGPU_b,
 	atlasDescription_b,
 	
+	luminance_b,
+	
 	ssbosCount
 };
 
@@ -223,28 +225,29 @@ static GLuint const
 	&chunksAO_ssbo            = ssbos[chunksAO_b],
 	&chunksLighting_ssbo      = ssbos[chunksLighting_b],
 	&chunksEmittersGPU_ssbo   = ssbos[chunksEmittersGPU_b],
-	&atlasDescription_ssbo    = ssbos[atlasDescription_b];
+	&atlasDescription_ssbo    = ssbos[atlasDescription_b],
+	&luminance_ssbo           = ssbos[luminance_b];
 
 static GLuint mainProgram = 0;
-  static GLuint windowSize_u;
-  static GLuint rightDir_u;
-  static GLuint topDir_u;
-  static GLuint near_u, far_u;
-  static GLuint playerRelativePosition_u, drawPlayer_u;
-  static GLuint startChunkIndex_u;
-  static GLuint time_u;
-  static GLuint projection_u, toLocal_matrix_u;
-  static GLuint startCoord_u;
-  static GLuint chunksOffset_u;
-  //static GLuint playerChunk_u, playerInChunk_u;
+  static GLint windowSize_u;
+  static GLint rightDir_u;
+  static GLint topDir_u;
+  static GLint near_u, far_u;
+  static GLint playerRelativePosition_u, drawPlayer_u;
+  static GLint startChunkIndex_u;
+  static GLint time_u;
+  static GLint projection_u, toLocal_matrix_u;
+  static GLint startCoord_u;
+  static GLint chunksOffset_u;
+  static GLint minLogLum_u, rangeLogLum_u;
 
 static GLuint fontProgram;
 	
 static GLuint currentBlockProgram;
-  static GLuint cb_blockIndex_u;
+  static GLint cb_blockIndex_u;
 
 static GLuint blockHitbox_p;
-  static GLuint blockHitboxProjection_u, blockHitboxModelMatrix_u;
+  static GLint blockHitboxProjection_u, blockHitboxModelMatrix_u;
 
 static GLuint screenshot_fb;
 static vec2i screenshotSize{ windowSize };
@@ -255,10 +258,10 @@ static GLuint render_fb;
 static GLuint pp1_fb, pp2_fb;
 
 static GLuint blur_p;
-  static GLuint sampler_u;
+  static GLint sampler_u;
 
 static GLuint toLDR_p;
-  static GLuint ldr_sampler_u, ldr_blurSampler_u;
+  static GLint ldr_sampler_u, ldr_blurSampler_u, ldr_exposure_u;
 
 static chunk::Chunks chunks{};
 
@@ -794,6 +797,9 @@ static void reloadShaders() {
 		startCoord_u = glGetUniformLocation(mainProgram, "startCoord");
 		chunksOffset_u = glGetUniformLocation(mainProgram, "chunksOffset");
 		
+		minLogLum_u = glGetUniformLocation(mainProgram, "minLogLum");
+		rangeLogLum_u = glGetUniformLocation(mainProgram, "rangeLogLum");
+		
 		playerRelativePosition_u = glGetUniformLocation(mainProgram, "playerRelativePosition");
 		drawPlayer_u = glGetUniformLocation(mainProgram, "drawPlayer");
 	
@@ -820,7 +826,12 @@ static void reloadShaders() {
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksLighting"), chunksLighting_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksNeighbourngEmitters"), chunksEmittersGPU_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "TraceTest"), traceTest_b);
+		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "Luminance"), luminance_b);
 		
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, luminance_ssbo);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, 256 * sizeof(uint32_t), NULL, GL_DYNAMIC_DRAW);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, luminance_b, luminance_ssbo);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 		
 		gpuBuffersReseted();
 	}
@@ -1219,6 +1230,7 @@ static void reloadShaders() {
 		
 		ldr_sampler_u = glGetUniformLocation(toLDR_p, "sampler");
 		ldr_blurSampler_u = glGetUniformLocation(toLDR_p, "blurSampler");
+		ldr_exposure_u = glGetUniformLocation(toLDR_p, "exposure");
 		ce
 	}
 }
@@ -1941,7 +1953,6 @@ int main(void) {
 		
 		//glClear(GL_COLOR_BUFFER_BIT);
 		
-		glEnable(GL_FRAMEBUFFER_SRGB); 
 		glDisable(GL_DEPTH_TEST); 
 		glDisable(GL_CULL_FACE); 
 		
@@ -2035,12 +2046,79 @@ int main(void) {
 			if(numpad[3]) glFinish();
 			auto const startTraceTime{ std::chrono::steady_clock::now() };
 			
+			
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, luminance_ssbo);
+			glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R8, 0, 256 * sizeof(uint32_t), GL_RED_INTEGER, GL_UNSIGNED_BYTE, nullptr);
+			
+			auto const minExp{ 0.1f };
+			auto const maxExp{ 5.0f };
+			auto const minLogLum{ std::log2(minExp) };
+			auto const maxLogLum{ std::log2(maxExp) };
+			auto const rangeLogLum{ maxLogLum - minLogLum };
+			const float x = (255.0 / rangeLogLum);
+			
+			glUniform1f(minLogLum_u, minLogLum);
+			glUniform1f(rangeLogLum_u, rangeLogLum);
+			
+			
 			glBindFramebuffer(GL_FRAMEBUFFER, render_fb);
 			GLenum buffers1[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 			glDrawBuffers(2, buffers1);		
+			
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+			
 			GLenum buffers2[] = { GL_COLOR_ATTACHMENT0 };
 			glDrawBuffers(1, buffers2);
+			
+			
+			uint32_t luminanceHistogram[256];
+			glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 256 * sizeof(uint32_t), (void*) &luminanceHistogram);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+			
+			//https://knarkowicz.wordpress.com/2016/01/09/automatic-exposure/
+			/*auto const curLum{ [&]() { //median
+				auto const total{ windowSize.x * windowSize.y };
+				
+				auto curCount{ 0 };
+				for(int n{0}; n < 256; n++) {
+					auto const count{ luminanceHistogram[n] };
+					curCount += count;
+					
+					auto const diff{ curCount - (total*3) / 4 };
+					if(diff >= 0) return misc::lerp( powf(2, (n)/x), powf(2, (n - 1)/x), float(diff) / count) * minExp;
+				}
+				
+				assert(false && "unreachable");
+				return 1.0f;
+			}() };*/
+			auto const curLum{ [&]() { //geometric mean
+				auto const total{ windowSize.x * windowSize.y };
+				
+				float result{ 0.0 };
+				for(int n{0}; n < 256; n++) {
+					auto const count{ luminanceHistogram[n] };
+					
+					result += count * (float(n)/x + minLogLum) * log(2);
+				}
+				
+				return expf(result / total * 1);
+			}() };
+			/*auto const curLum{ [&]() { //arithmetic mean
+				auto const total{ windowSize.x * windowSize.y };
+				
+				double result{ 0.0 };
+				for(int n{0}; n < 256; n++) {
+					auto const count{ luminanceHistogram[n] };
+					
+					result += count * pow(2.0, double(n)/x);
+				}
+				
+				return float(result / total * minExp);
+			}() };*/
+			
+			static float prevLum{ curLum };
+			prevLum = prevLum + (curLum - prevLum) * (1 - exp(-deltaTime * 1.25));
+			auto const exposure{ 0.23 / (misc::clamp(prevLum, 0.1f, 5.0f) + 0.2) };
 			
 			if(!numpad[5]) {
 				glUseProgram(blur_p);
@@ -2069,14 +2147,15 @@ int main(void) {
 			else {
 				glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
 				glClear(GL_COLOR_BUFFER_BIT);
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
 			}
 			
 			glUseProgram(toLDR_p);
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			glUniform1f(ldr_exposure_u, exposure);
 			glUniform1i(ldr_sampler_u, render_it);
 			glUniform1i(ldr_blurSampler_u, pp1_it);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
-			
 			
 			if(numpad[3]) glFinish();
 			auto const endTraceTime{ std::chrono::steady_clock::now() };
@@ -2108,7 +2187,7 @@ int main(void) {
 			auto const diffMs{ std::chrono::duration_cast<std::chrono::microseconds>(endTraceTime - startTraceTime).count() / 1000.0 };
 			timeToTrace.add(diffMs);
 		}
-
+		
 		{
 			PosDir const pd{ PosDir(cameraCoord, pos::posToFracTrunk(forwardDir * 7).value()) };
 			auto const optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id){ return id != 0; }) };
@@ -2122,17 +2201,20 @@ int main(void) {
 				)) };
 				float const size{ breakFullBlock ? 1.0f : (1.0f / units::cubesInBlockDim) };
 
+				glEnable(GL_FRAMEBUFFER_SRGB);
 				drawBlockHitbox(blockRelativePos, size, toLoc4);
+				glDisable(GL_FRAMEBUFFER_SRGB); 
 			}
 		}
 		
 		{
 			glUseProgram(currentBlockProgram);
 			glUniform1ui(cb_blockIndex_u, blockPlaceId);
+			glEnable(GL_FRAMEBUFFER_SRGB); 
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			glDisable(GL_FRAMEBUFFER_SRGB); 
 		}
 		
-		glDisable(GL_FRAMEBUFFER_SRGB); 
 
 		{ //font
 			glEnable(GL_BLEND);
