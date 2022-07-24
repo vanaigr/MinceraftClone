@@ -15,8 +15,8 @@ static bool checkCanPlaceCollider(chunk::Chunks &chunks, pos::Fractional const c
 		auto const chunkIndex{ mtnChunk.move(cubePos.valAs<pos::Chunk>()).get() };
 		if(chunkIndex == -1) return false;
 		
-		auto cube{ chunks[chunkIndex].data().cubeAt(cubePos.valIn<pos::Chunk>()) };
-		if(cube.isSolid) return false;
+		auto cube{ chunks[chunkIndex].data().cubeAt2(cubePos.valIn<pos::Chunk>()) };
+		if(useInCollision(cube)) return false;
 	}
 	
 	return true;
@@ -66,7 +66,7 @@ void updateCollision(chunk::Chunks &chunks,pos::Fractional &origin, pFrac const 
 		bool continueMovement;
 	};
 	
-	auto const moveAlong = [&](vec3b const axis, int64_t const axisPlayerOffset, vec3b const otherAxis1, vec3b const otherAxis2, bool const upStep) -> MovementResult {	
+	auto const moveAlong = [&](vec3b const axis, int64_t const axisPlayerOffset, vec3b const otherAxis1, vec3b const otherAxis2, bool const isUpStep) -> MovementResult {	
 		assert((otherAxis1 || otherAxis2).equal(!axis).all());
 		
 		auto const otherAxis{ otherAxis1 || otherAxis2 };
@@ -90,15 +90,15 @@ void updateCollision(chunk::Chunks &chunks,pos::Fractional &origin, pFrac const 
 			auto const axisCurCubeCoord{ start + a * axisDir };
 			
 			auto const axisNewCoord{ units::Cube{axisCurCubeCoord + axisNegative}.valAs<units::Fractional>() - axisPlayerOffset }; 
-			pos::Fractional const newPos{ vec3l(axisNewCoord) * vec3l(axis) + vec3l(position) * vec3l(otherAxis) };
-				
-			vec3l const upStepOffset{ vec3l{0, units::fracInCubeDim, 0} + vec3l(axis) * vec3l(axisDir) };
-			pos::Fractional const upStepCoord{newPos + pos::Fractional{upStepOffset}};
+			pFrac const newPos{ vec3l(axisNewCoord) * vec3l(axis) + vec3l(position) * vec3l(otherAxis) };
+			auto const upStep{ isOnGround ? units::fracInCubeDim : (units::fracInCubeDim / 4) };
+			pFrac const upStepOffset{ vec3l{0, upStep, 0} + vec3l(axis) * vec3l(axisDir) };
+			auto const upStepCoord{ newPos + upStepOffset };
 			
 			auto const upStepMin{ upStepCoord.val() + offsetMin     };
 			auto const upStepMax{ upStepCoord.val() + offsetMax - 1 };
 			
-			auto const upStepPossible{ upStep && checkCanPlaceCollider(chunks, upStepMin, upStepMax)};
+			auto const upStepPossible{ isUpStep && checkCanPlaceCollider(chunks, upStepMin, upStepMax)};
 			
 			auto const newCoordBigger{
 				axisPositive ? (axisNewCoord >= axisPlayerPos) : (axisNewCoord <= axisPlayerPos)
@@ -170,7 +170,7 @@ void updateCollision(chunk::Chunks &chunks,pos::Fractional &origin, pFrac const 
 	if(dir.x != 0) {
 		MovementResult result;
 		do { 
-			result = moveAlong(vec3b{1,0,0}, offset().x, vec3b{0,0,1},vec3b{0,1,0}, isOnGround);
+			result = moveAlong(vec3b{1,0,0}, offset().x, vec3b{0,0,1},vec3b{0,1,0}, true);
 			
 			if(result.continueMovement) {
 				force -= (result.coord.value() - position) * vec3l{1,0,0};
@@ -185,7 +185,7 @@ void updateCollision(chunk::Chunks &chunks,pos::Fractional &origin, pFrac const 
 	if(dir.z != 0) {
 		MovementResult result;
 		do { 
-			result = moveAlong(vec3b{0,0,1}, offset().z, vec3b{0,1,0},vec3b{1,0,0}, isOnGround);
+			result = moveAlong(vec3b{0,0,1}, offset().z, vec3b{0,1,0},vec3b{1,0,0}, true);
 			
 			if(result.continueMovement) {
 				force -= (result.coord.value() - position) * vec3l{0,0,1};
