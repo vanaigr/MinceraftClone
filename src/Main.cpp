@@ -1761,19 +1761,6 @@ void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id, GLenum 
 	//std::cout << message << '\n';
 }
 
-template<typename T>
-void printBinary(std::ostream &o, T const it_) {
-	static constexpr auto bits = sizeof(T) * 8;
-	
-	typename std::make_unsigned<T>::type it{ it_ };
-	o << "0b";
-	for(int i{bits-1}; i >= 0; i--) {
-		auto const bit{ (it / (1 << i)) % 2 };
-		o << (bit ? '1' : '0');
-        if((i % 8) == 0 && i != 0 && i != bits-1) o << '\'';
-	}
-}
-
 void drawBlockHitbox(vec3f const blockRelativePos, float const size, float const (&toLoc4)[4][4]) {
 	float const translation4[4][4] = {
 			{ size, 0, 0, blockRelativePos.x },
@@ -2279,9 +2266,9 @@ int main(void) {
 							<< " block lighting: " << int(chunk.blockLighting()[cubeInChunkPos.val()]) << '\n';
 							ss << "block id=" << int{block.id()} << "; liquid id=" << int{liquid.id} << " liquid level=" << int{liquid.level} << '\n';
 							ss << "solid cubes=";
-							printBinary(ss, blockData.solidCubes); ss << ' ';
+							misc::printBinary(ss, blockData.solidCubes); ss << ' ';
 							ss << "liquid cubes=";
-							printBinary(ss, blockData.liquidCubes); ss << '\n';
+							misc::printBinary(ss, blockData.liquidCubes); ss << '\n';
 						}
 					}
 				};

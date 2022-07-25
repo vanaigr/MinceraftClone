@@ -7,6 +7,19 @@
 
 namespace misc {
     constexpr double pi = 3.141592653589793238462643383279502884;
+	
+	template<typename T>
+	void printBinary(std::ostream &o, T const it_) {
+		static constexpr auto bits = sizeof(T) * 8;
+		
+		typename std::make_unsigned<T>::type it{ it_ };
+		o << "0b";
+		for(int i{bits-1}; i >= 0; i--) {
+			auto const bit{ (it / (1 << i)) % 2 };
+			o << (bit ? '1' : '0');
+			if((i % 8) == 0 && i != 0 && i != bits-1) o << '\'';
+		}
+	}
 
     template<class T>
     constexpr T lerp(T a, T b, T f) noexcept {

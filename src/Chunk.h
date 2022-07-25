@@ -25,41 +25,41 @@ namespace chunk {
 	
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
-	static constexpr bool checkBlockCoordInChunkValid(vec3i const coord) {
+	inline constexpr bool checkBlockCoordInChunkValid(vec3i const coord) {
 		return coord.inMMX(vec3i{0}, vec3i{units::blocksInChunkDim}).all();
 	}
-	static constexpr bool checkBlockCoordInChunkValid(pBlock const coord) {
+	inline constexpr bool checkBlockCoordInChunkValid(pBlock const coord) {
 		return checkBlockCoordInChunkValid(coord.val());
 	}
-	static constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
+	inline constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
 		return index >= 0 && index < pos::blocksInChunkCount;
 	}
 	
-	static constexpr bool checkCubeCoordInChunkValid(vec3i const coord) {
+	inline constexpr bool checkCubeCoordInChunkValid(vec3i const coord) {
 		return coord.inMMX(vec3i{0}, vec3i{units::cubesInChunkDim}).all();
 	}
-	static constexpr bool checkCubeCoordInChunkValid(pCube const coord) {
+	inline constexpr bool checkCubeCoordInChunkValid(pCube const coord) {
 		return checkCubeCoordInChunkValid(coord.val());
 	}
-	static constexpr bool checkCubeIndexInChunkValid(uint16_t const index) {
+	inline constexpr bool checkCubeIndexInChunkValid(uint16_t const index) {
 		return index >= 0 && index < pos::cubesInChunkCount;
 	}
 	
-	static constexpr bool checkCubeCoordInBlockValid(pCube const coord) {
+	inline constexpr bool checkCubeCoordInBlockValid(pCube const coord) {
 		return coord.val().inMMX(vec3i{0}, vec3i{units::cubesInBlockDim}).all();
 	}
 	
-	static constexpr bool checkCubeIndexInBlockValid(uint8_t const index) {
+	inline constexpr bool checkCubeIndexInBlockValid(uint8_t const index) {
 		return index < pos::cubesInBlockCount;
 	}
   #pragma clang diagnostic pop
 	  
 	//used in main.shader
-	  inline static constexpr int16_t blockIndex(vec3i const coord) {
+	  inline constexpr int16_t blockIndex(vec3i const coord) {
 		  assert(checkBlockCoordInChunkValid(coord));
 		  return coord.x + coord.y*units::blocksInChunkDim + coord.z*units::blocksInChunkDim*units::blocksInChunkDim;
 	  }
-	  inline static constexpr vec3i indexBlock(uint16_t index) {
+	  inline constexpr vec3i indexBlock(uint16_t index) {
 		  assert(checkBlockIndexInChunkValid(index));
 		  return vec3i{ 
 		 	 index % units::blocksInChunkDim, 
@@ -68,7 +68,7 @@ namespace chunk {
 		  };
 	  }
 	  
-	  static vec3i cubeCoordInChunk(uint16_t const index) {
+	  inline constexpr vec3i cubeCoordInChunk(uint16_t const index) {
 		  assert(checkCubeIndexInChunkValid(index));
 		  return vec3i{
 		  	  index % units::cubesInChunkDim, 
@@ -76,7 +76,7 @@ namespace chunk {
 		  	  (index / units::cubesInChunkDim / units::cubesInChunkDim) 
 		  };
 	  }
-	  static uint32_t cubeIndexInChunk(vec3i const coord) {
+	  inline constexpr uint32_t cubeIndexInChunk(vec3i const coord) {
 		  assert(checkCubeCoordInChunkValid(coord));
 		  return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim;
 	  }
@@ -468,7 +468,6 @@ namespace chunk {
 		
 		Block::id_t id;
 		level_t level;
-		uint8_t padding;
 		
 		LiquidCube() = default;
 		//LiquidCube(Block::id_t const id_, level_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }	
@@ -479,6 +478,11 @@ namespace chunk {
 		} 
 		
 		bool isEmpty() const { return id == 0; }
+		
+		friend bool operator==(LiquidCube const f, LiquidCube const s) {
+			return f.id == s.id && f.level == s.level;
+		}
+		friend bool operator!=(LiquidCube const f, LiquidCube const s) { return !(f == s); }
 	};
 	static_assert(sizeof(LiquidCube) == 4);
 	

@@ -5,6 +5,7 @@
 #include"AO.h"
 #include"Counter.h"
 #include"Units.h"
+#include"Counter.h"
 
 #include"PerlinNoise.h"
 
@@ -16,6 +17,7 @@
 #include<type_traits>
 #include<string_view>
 #include<filesystem>
+#include<chrono>
 
 
 static std::string chunkFilename(chunk::Chunk const chunk) {
@@ -444,6 +446,8 @@ static void fillChunksData(
 	}
 }
 
+extern long long diff__;
+
 void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::string_view const worldName, bool const loadChunks) {
 	constexpr int neighbourDirsCount = 8; //horizontal neighbours only
 	vec3i const neighbourDirs[] = { 
@@ -480,6 +484,8 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 	};
 	ChunkIndexAndNeighbours chunkIndicesWithNeighbours[chunksCoumnChunksCount];
 	
+	//auto const start{ std::chrono::steady_clock::now() };
+	
 	//setup chunks
 	for(auto y { chunkColumnChunkYMax }; y >= chunkColumnChunkYMin; y--) {
 		auto const usedIndex{ chunks.reserve() };
@@ -514,7 +520,11 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		
 	}
 	
+	//auto const setup{ std::chrono::steady_clock::now() };
+	
 	fillChunksData(chunks, chunkIndices, columnPosition, worldName, loadChunks);
+	
+	//auto const fill{ std::chrono::steady_clock::now() };
 	
 	//setup neighbours and update data inside chunks
 	for(int i {chunksCoumnChunksCount-1}; i >= 0; i--) {
@@ -553,8 +563,7 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 			return neighbours;
 		}();
 		
-		
-		updateBlocksDataWithoutNeighboursInArea(chunk, pBlock{0}, pBlock{units::blocksInChunkDim-1});		
+		updateBlocksDataWithoutNeighboursInArea(chunk, pBlock{0}, pBlock{units::blocksInChunkDim-1});
 		
 		if(emptyBefore && chunk.aabb().isEmpty()) {
 			chunk.skyLighting().fill(chunk::ChunkLighting::maxValue);
@@ -578,6 +587,8 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		}
 		topNeighbourIndex = chunk::OptionalChunkIndex{ chunkIndex };
 	}
+	
+	//auto const data{ std::chrono::steady_clock::now() };
 	
 	//update AO and blocks neighbours info 
 	for(auto const &[chunkIndex, neighbours] : chunkIndicesWithNeighbours) {		
@@ -634,5 +645,26 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		}
 	}
 	
+	
+	//auto const ao{ std::chrono::steady_clock::now() };
+	
 	calculateLighting(chunks, chunkIndices, columnPosition, lowestEmptyY);
+	
+	//auto const lighting{ std::chrono::steady_clock::now() };
+	
+	//Counter<256> setup_{}, fill_{}, data_{}, ao_{}, lighting_{};
+	//
+	//#define a(PREV_COUNTER, COUNTER) COUNTER##_.add( std::chrono::duration_cast<std::chrono::microseconds>(COUNTER - PREV_COUNTER).count() );
+	//
+	//a(start, setup)
+	//a(setup, fill)
+	//a(fill, data)
+	//a(data, ao)
+	//a(ao, lighting)
+	//
+	//#undef a
+	//#define b(COUNTER) (COUNTER##_.mean()/1000.0) << ' ' <<
+	//
+	//std::cout << b(setup) b(fill) b(data) b(ao) b(lighting) '\n';
+	//#undef b
 }

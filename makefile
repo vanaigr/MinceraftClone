@@ -3,7 +3,7 @@ SOURCE_DIR=src
 OBJECT_DIR=obj
 CPP_EXCLUDES=
 WS= -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-label -Wno-unused-private-field
-CFLAGS= -O3 -std=c++17 -pedantic -c $(WS)
+CFLAGS= -O3 -std=c++17 -pedantic -c $(WS) -mssse3
 PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU -D _CRT_SECURE_NO_WARNINGS
 
 LIBS_PATH=-L .\dependencies
