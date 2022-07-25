@@ -1,11 +1,21 @@
 #version 430
 in vec4 gl_FragCoord;
 
-uniform vec2 startPos;
-uniform vec2 endPos;
-
 uniform sampler2D font;
-uniform vec2 screenSize;
+
+layout(std140) uniform Properties {
+	ivec2 windowSize;
+	float time;
+	mat4 projection; //from local space to screen space
+};
+
+const float aspect = float(windowSize.y) / windowSize.x;
+const vec2 size = vec2(aspect, 1) * 0.06;
+const vec2 end_ = vec2(1 - 0.02 * aspect, 1-0.02);
+const vec2 start_ = vec2( end_ - size );
+
+const vec2 startPos = floor(start_ * windowSize) / windowSize * 2 - 1;
+const vec2 endPos   = floor(end_   * windowSize) / windowSize * 2 - 1;
 
 out vec4 color;
 
@@ -34,7 +44,7 @@ vec2 atlasAt(const uint id, const ivec3 side) { //copied from main.frag
 }
 
 vec3 col(vec2 coord) {
-	const vec2 pos = (coord / screenSize) * 2 - 1;
+	const vec2 pos = (coord / windowSize) * 2 - 1;
 	const vec2 uv = (pos - startPos) / (endPos - startPos);
 	
 	const vec2 offset = atlasAt(block, ivec3(1,0,0));

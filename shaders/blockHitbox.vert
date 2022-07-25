@@ -1,6 +1,11 @@
 #version 420
 
-uniform mat4 projection;
+layout(std140) uniform Properties {
+	ivec2 windowSize;
+	float time;
+	mat4 projection; //from local space to screen space
+};
+
 uniform mat4 modelMatrix;
 
 out vec2 uv;

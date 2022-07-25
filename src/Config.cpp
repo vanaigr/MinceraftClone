@@ -1,4 +1,5 @@
 #include"Config.h"
+#include"Misc.h"
 
 #include<variant>
 #include<fstream>
@@ -10,13 +11,12 @@ struct NoValue{}; //for default constructor of variant
 using Field = std::variant<NoValue, int, double, bool, std::string>;
 enum class FT { NO_VALUE, INT, REAL, BOOL, STRING };
 
-
 //cofig fields
 enum class CF {
 	viewDistance,
 	loadChunks,
 	saveChunks,
-	playerCameraFovDeg,
+	playerCameraFov,
 	mouseSensitivityX,
 	mouseSensitivityY,
 	chunkUpdatesPerFrame,
@@ -127,7 +127,7 @@ void parseConfigFromFile(Config &dst) {
 				break; case CF::viewDistance         : dst.viewDistance         = result(CF::viewDistance);
 				break; case CF::loadChunks           : dst.loadChunks           = result(CF::loadChunks);
 				break; case CF::saveChunks           : dst.saveChunks           = result(CF::saveChunks);
-				break; case CF::playerCameraFovDeg   : dst.playerCameraFovDeg   = result(CF::playerCameraFovDeg);
+				break; case CF::playerCameraFov      : dst.playerCameraFOV      = result(CF::playerCameraFov) / 180.0 * misc::pi;
 				break; case CF::mouseSensitivityX    : dst.mouseSensitivity.x   = result(CF::mouseSensitivityX);
 				break; case CF::mouseSensitivityY    : dst.mouseSensitivity.y   = result(CF::mouseSensitivityY);
 				break; case CF::chunkUpdatesPerFrame : dst.chunkUpdatesPerFrame = result(CF::chunkUpdatesPerFrame);

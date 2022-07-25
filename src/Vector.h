@@ -175,9 +175,8 @@ constexpr inline std::ostream& operator<<(std::ostream& stream, vec2<C>const& v)
 template<typename C>
 struct vec3 {	
 	using value_type = C;
-
+	
 	C x, y, z;
-
 public:
 	inline constexpr vec3() : x(0), y(0), z(0) {};
 	inline constexpr vec3(C value) : x(value), y(value), z(value) {};

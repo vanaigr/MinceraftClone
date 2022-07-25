@@ -11,10 +11,15 @@ in vec2 endUV;
 out vec4 color;
 
 uniform sampler2D font;
-uniform vec2 screenSize;
+
+layout(std140) uniform Properties {
+	ivec2 windowSize;
+	float time;
+	mat4 projection; //from local space to screen space
+};
 
 float col(vec2 coord) {
-	const vec2 pos = (coord / screenSize) * 2 - 1;
+	const vec2 pos = (coord / windowSize) * 2 - 1;
 	const vec2 uv = startUV + (pos - startPos) / (endPos - startPos) * (endUV - startUV);
 	
 	return texture2D(font, clamp(uv, startUV, endUV)).r;

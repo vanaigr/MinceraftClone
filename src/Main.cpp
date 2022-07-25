@@ -61,11 +61,13 @@ GLenum glCheckError_(const char *file, int line)
 //#define FULLSCREEN
 
 #ifdef FULLSCREEN
-static const vec2i windowSize{ 1920, 1080 };
+static vec2i windowSize_{ 1920, 1080 };
 #else
-static const vec2i windowSize{ 1280, 720 };
+static vec2i windowSize_{ 1280, 720 };
 #endif // FULLSCREEN
-static const vec2d windowSize_d{ windowSize.convertedTo<double>() };
+
+static vec2i const windowSize { windowSize_ };
+static vec2d const windowSize_d { windowSize.convertedTo<double>() };
 static double const aspect{ windowSize_d.y / windowSize_d.x };
 
 static bool lockFramerate = false;
@@ -231,16 +233,18 @@ static GLuint const
 	&chunksEmittersGPU_ssbo   = ssbos[chunksEmittersGPU_b],
 	&atlasDescription_ssbo    = ssbos[atlasDescription_b],
 	&luminance_ssbo           = ssbos[luminance_b];
+	
+static GLuint properties_ub;
+static int const ubosCount{ 1 };
+static GLuint ubos[ubosCount];
+static GLuint &properties_ubo = ubos[properties_ub];
 
 static GLuint mainProgram;
-  static GLint windowSize_u;
   static GLint rightDir_u;
   static GLint topDir_u;
   static GLint near_u, far_u;
   static GLint playerRelativePosition_u, drawPlayer_u;
   static GLint startChunkIndex_u;
-  static GLint time_u;
-  static GLint projection_u, toLocal_matrix_u;
   static GLint startCoord_u;
   static GLint chunksOffset_u;
   static GLint minLogLum_u, rangeLogLum_u;
@@ -251,7 +255,7 @@ static GLuint currentBlockProgram;
   static GLint cb_blockIndex_u;
 
 static GLuint blockHitbox_p;
-  static GLint blockHitboxProjection_u, blockHitboxModelMatrix_u;
+  static GLint blockHitboxModelMatrix_u;
 
 static GLuint screenshot_fb;
 bool takeScreenshot;
@@ -412,7 +416,7 @@ void handleKey(int const key) {
 	}
 }
 
-static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) noexcept {
 	if(key == GLFW_KEY_UNKNOWN) return;
 	if(action == GLFW_REPEAT) return;
 	
@@ -426,7 +430,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     ctrl = (mods & GLFW_MOD_CONTROL) != 0;
 }
 
-static void cursor_position_callback(GLFWwindow* window, double mousex, double mousey) {
+static void cursor_position_callback(GLFWwindow* window, double mousex, double mousey) noexcept {
     static vec2<double> relativeTo{ 0, 0 };
 	static vec2d pmousePos_{0};
     vec2<double> mousePos_{ mousex,  mousey };
@@ -452,7 +456,7 @@ static void cursor_position_callback(GLFWwindow* window, double mousex, double m
 	pmousePos = mousePos;
 }
 
-static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) noexcept {
     if(button == GLFW_MOUSE_BUTTON_LEFT) {
 		if(mouseCentered) blockAction = action == GLFW_PRESS ? BlockAction::BREAK : BlockAction::NONE;
 	}
@@ -468,10 +472,9 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 }
 
 static int blockPlaceId = 1;
-static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) noexcept {
 	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 16);
 }
-
 
 static bool checkChunkInView(vec3i const coord) {
 	return coord.clamp(-viewDistance, +viewDistance) == coord;
@@ -607,7 +610,7 @@ static Reload::Flags reloadConfig() {
 		cfg.viewDistance =  viewDistance;
 		cfg.loadChunks = saveChunks;
 		cfg.saveChunks = saveChunks;
-		cfg.playerCameraFovDeg = playerCamera.fov / misc::pi * 180.0;
+		cfg.playerCameraFOV = desiredPlayerCamera.fov;
 		cfg.mouseSensitivity = mouseSensitivity;
 		cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
 		cfg.lockFramerate = lockFramerate;
@@ -620,9 +623,8 @@ static Reload::Flags reloadConfig() {
 	viewDistance = cfg.viewDistance;
 	loadChunks = cfg.loadChunks;
 	saveChunks = cfg.saveChunks;
-	desiredPlayerCamera.fov = cfg.playerCameraFovDeg / 180.0 * misc::pi;
+	playerCamera.fov = desiredPlayerCamera.fov = cfg.playerCameraFOV;
 	mouseSensitivity = cfg.mouseSensitivity;
-	playerCamera = desiredPlayerCamera;
 	chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
 	lockFramerate = cfg.lockFramerate;
 	worldName = cfg.worldName;
@@ -791,6 +793,16 @@ static void reloadShaderStorageBuffers() {
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 	}
 	
+	{ //reload the only UBO as well
+		glDeleteBuffers(ubosCount, &ubos[0]);
+		glGenBuffers   (ubosCount, &ubos[0]);
+		
+		glBindBuffer(GL_UNIFORM_BUFFER, properties_ubo);
+		glBufferData(GL_UNIFORM_BUFFER, 8 + 4 + 4 + 4*4*4, NULL, GL_DYNAMIC_DRAW);
+		glBindBufferBase(GL_UNIFORM_BUFFER, properties_ub, properties_ubo); 
+		glBindBuffer(GL_UNIFORM_BUFFER, 0);
+	}
+	
 	gpuBuffersReseted();
 }
 
@@ -829,6 +841,11 @@ static void reloadShaders() {
 		std::cout << "Program \"" << name << "\" error:\n" << msg;
 	};
 	
+	auto const bindProperties = [](GLuint const prog) {
+		auto const index{ glGetUniformBlockIndex(prog, "Properties") };
+		glUniformBlockBinding(prog, index, properties_ub);
+	};
+	
 	{ //main program
 		glDeleteProgram(mainProgram);
 		mainProgram = glCreateProgram();
@@ -845,26 +862,17 @@ static void reloadShaders() {
 	
 		sl.deleteShaders();
 	
-		glUseProgram(mainProgram);
-		
-		windowSize_u = glGetUniformLocation(mainProgram, "windowSize");
-		glUniform2ui(windowSize_u, windowSize.x, windowSize.y);
+		glUseProgram(mainProgram);		
+		bindProperties(mainProgram);
 		
 		glUniform1f(glGetUniformLocation(mainProgram, "playerWidth" ), playerWidth );
 		glUniform1f(glGetUniformLocation(mainProgram, "playerHeight"), playerHeight);
-		
-		time_u   = glGetUniformLocation(mainProgram, "time");
 
 		rightDir_u = glGetUniformLocation(mainProgram, "rightDir");
 		topDir_u = glGetUniformLocation(mainProgram, "topDir");
 		near_u = glGetUniformLocation(mainProgram, "near");
 		far_u = glGetUniformLocation(mainProgram, "far");
-		projection_u = glGetUniformLocation(mainProgram, "projection");
-		toLocal_matrix_u = glGetUniformLocation(mainProgram, "toLocal");
 	
-		//playerChunk_u = glGetUniformLocation(mainProgram, "playerChunk");
-		//playerInChunk_u = glGetUniformLocation(mainProgram, "playerInChunk");
-		//startChunkIndex_u = glGetUniformLocation(mainProgram, "startChunkIndex");
 		startCoord_u = glGetUniformLocation(mainProgram, "startCoord");
 		chunksOffset_u = glGetUniformLocation(mainProgram, "chunksOffset");
 		
@@ -914,7 +922,7 @@ static void reloadShaders() {
 		GLuint const fontTex_u = glGetUniformLocation(fontProgram, "font");
 		glUniform1i(fontTex_u, font_it);
 		
-		glUniform2f(glGetUniformLocation(fontProgram, "screenSize"), windowSize_d.x, windowSize_d.y);
+		bindProperties(fontProgram);
 		ce
 	}
 	
@@ -940,7 +948,7 @@ static void reloadShaders() {
 		glUniform1f(glGetUniformLocation(blockHitbox_p, "atlasTileSize"),  16); //from main prgram
 		
 		blockHitboxModelMatrix_u = glGetUniformLocation(blockHitbox_p, "modelMatrix");
-		blockHitboxProjection_u  = glGetUniformLocation(blockHitbox_p, "projection");
+		bindProperties(blockHitbox_p);
 		ce
 	}
 	
@@ -964,18 +972,8 @@ static void reloadShaders() {
 		
 		glUniform1i(glGetUniformLocation(currentBlockProgram, "atlas"), atlas_it);
 		cb_blockIndex_u = glGetUniformLocation(currentBlockProgram, "block");
-		
-		vec2d const size{ vec2d{aspect,1} * 0.06 };
-		vec2d const end_ { 1 - 0.02*aspect, 1-0.02 };
-		vec2d const start_{ end_ - size };
-		
-		vec2d const end  { (end_   * windowSize_d).floor() / windowSize_d * 2 - 1 };
-		vec2d const start{ (start_ * windowSize_d).floor() / windowSize_d * 2 - 1 };
-
-		glUniform2f(glGetUniformLocation(currentBlockProgram, "startPos"), start.x, start.y);
-		glUniform2f(glGetUniformLocation(currentBlockProgram, "endPos"), end.x, end.y);
 		glUniform1f(glGetUniformLocation(currentBlockProgram, "atlasTileSize"), 16); //from main program
-		glUniform2f(glGetUniformLocation(currentBlockProgram, "screenSize"), windowSize_d.x, windowSize_d.y);
+		bindProperties(currentBlockProgram);
 		
 		glShaderStorageBlockBinding(currentBlockProgram, glGetProgramResourceIndex(currentBlockProgram, GL_SHADER_STORAGE_BLOCK, "AtlasDescription"), atlasDescription_b);
 		ce
@@ -1027,7 +1025,6 @@ static void reloadShaders() {
 		ce
 	}
 }
-
 
 bool checkCanPlaceBlock(pBlock const blockPos) {
 	auto const relativeBlockPos{ blockPos - playerCoord };
@@ -1533,7 +1530,9 @@ static void update(chunk::Chunks &chunks) {
 		viewportCurrent.rotation = viewportDesired.rotation;
 	}
 	
-	playerCamera.fov = misc::lerp( playerCamera.fov, desiredPlayerCamera.fov / curZoom, 0.1 );
+	auto newCamera{ desiredPlayerCamera };
+	newCamera.fov = misc::lerp( playerCamera.fov, desiredPlayerCamera.fov / curZoom, 0.1 );
+	playerCamera = newCamera;
 	
 	updateChunks(chunks);
 	if(!numpad[0]) chunks.liquidCubes.update();
@@ -1707,64 +1706,65 @@ int main(void) {
         auto const topDir{ viewportCurrent.topDir() };
         auto const forwardDir{ viewportCurrent.forwardDir() };
 		
-		float toLoc[3][3];
-		float toGlob[3][3];
-		viewportCurrent.localToGlobalSpace(&toGlob);
-		viewportCurrent.globalToLocalSpace(&toLoc);
 		auto const cameraCoord{ currentCameraPos() };
 		auto const cameraChunk{ cameraCoord.valAs<pos::Chunk>() };
 		auto const cameraPosInChunk{ pos::fracToPos(cameraCoord.in<pos::Chunk>()) };
 		
-		float const toLoc4[4][4] = {
-			{ toLoc[0][0], toLoc[0][1], toLoc[0][2], 0 },
-			{ toLoc[1][0], toLoc[1][1], toLoc[1][2], 0 },
-			{ toLoc[2][0], toLoc[2][1], toLoc[2][2], 0 },
-			{ 0          , 0          , 0          , 1 },
-		};
+		{ //set properties
+			//screen size
+			GLint screenSize[2] = { windowSize.x, windowSize.y };
+			
+			//projection
+			float projection[4][4];
+			currentCamera().projectionMatrix(&projection);
 		
-		float projection[4][4];
-		currentCamera().projectionMatrix(&projection);
+			GLfloat projectionT[4][4];
+			
+			for(int i{}; i < 4; i++)
+			for(int j{}; j < 4; j++) 
+				projectionT[i][j] = projection[j][i];
+			
+			//time
+			static double lastTime{};
+			double curTime{ std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - completionTime).count() / 1000.0 };
 		
-		glUseProgram(mainProgram);
-		glUniformMatrix4fv(projection_u, 1, GL_TRUE, &projection[0][0]);
-		
-		
-		glProgramUniformMatrix4fv(blockHitbox_p, blockHitboxProjection_u, 1, GL_TRUE, &projection[0][0]);
-		
-		//glClear(GL_COLOR_BUFFER_BIT);
-		
-		glDisable(GL_DEPTH_TEST); 
-		glDisable(GL_CULL_FACE); 
-		
-		glUseProgram(mainProgram);
-		
-        glUniform3f(rightDir_u, rightDir.x, rightDir.y, rightDir.z);
-        glUniform3f(topDir_u, topDir.x, topDir.y, topDir.z);
-		
-		auto const &currentCam{ currentCamera() };
-		glUniform1f(near_u, currentCam.near);
-        glUniform1f(far_u , currentCam.far );
-
-		static double lastTime{};
-		double curTime{ std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - completionTime).count() / 1000.0 };
-		
-		static double offset{};
-		if(numpad[2]) offset += curTime - lastTime;
-		lastTime = curTime;
-		glUniform1f(time_u, offset / 1000.0);
-		
-		static pChunk lastCameraChunkCoord{};
-		
-		if(!numpad[1]) {
-			lastCameraChunkCoord = pChunk{cameraChunk};
+			static double offset{};
+			if(!numpad[2]) offset += curTime - lastTime;
+			lastTime = curTime;
+			GLfloat const time( offset / 1000.0 );
+			
+			//
+			glBindBuffer(GL_UNIFORM_BUFFER, properties_ubo);
+			glBufferSubData(GL_UNIFORM_BUFFER, 0, 8, &screenSize);
+			glBufferSubData(GL_UNIFORM_BUFFER, 8, 4, &time);
+			glBufferSubData(GL_UNIFORM_BUFFER, 16, 4 * 4*4, &projectionT[0][0]);
+			glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		}
-		auto const startCoord{ pos::fracToPos(cameraCoord - lastCameraChunkCoord + pChunk{viewDistance}) };
-		auto const chunksOffset{ lastCameraChunkCoord - pChunk{viewDistance} };
 		
-		glUniform3f(startCoord_u, startCoord.x, startCoord.y, startCoord.z);
-		glUniform3i(chunksOffset_u, chunksOffset->x, chunksOffset->y, chunksOffset->z);
 		
-		{			
+		{ //draw world
+			//glClear(GL_COLOR_BUFFER_BIT);
+			glDisable(GL_DEPTH_TEST); 
+			glDisable(GL_CULL_FACE); 
+			
+			glUseProgram(mainProgram);
+			
+			glUniform3f(rightDir_u, rightDir.x, rightDir.y, rightDir.z);
+			glUniform3f(topDir_u, topDir.x, topDir.y, topDir.z);
+			
+			auto const &currentCam{ currentCamera() };
+			glUniform1f(near_u, currentCam.near);
+			glUniform1f(far_u , currentCam.far );
+			
+			static pChunk lastCameraChunkCoord{};
+			
+			if(!numpad[1]) lastCameraChunkCoord = pChunk{cameraChunk};
+			auto const startCoord{ pos::fracToPos(cameraCoord - lastCameraChunkCoord + pChunk{viewDistance}) };
+			auto const chunksOffset{ lastCameraChunkCoord - pChunk{viewDistance} };
+			
+			glUniform3f(startCoord_u, startCoord.x, startCoord.y, startCoord.z);
+			glUniform3i(chunksOffset_u, chunksOffset->x, chunksOffset->y, chunksOffset->z);
+		
 			auto const playerChunkCand{ chunk::Move_to_neighbour_Chunk(chunks, lastCameraChunkCoord.val()).optChunk().get() };
 			vec3f const playerRelativePos( pos::fracToPos(playerCoord - lastCameraChunkCoord + pChunk{viewDistance}) );
 			glUniform3f(playerRelativePosition_u, playerRelativePos.x, playerRelativePos.y, playerRelativePos.z);
@@ -1813,13 +1813,14 @@ int main(void) {
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksIndices_ssbo);
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, gpuChunksCount * sizeof(chunk::Chunks::index_t), &indices[0]);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
-
-			if(numpad[3]) glFinish();
-			auto const startTraceTime{ std::chrono::steady_clock::now() };
 			
-			
+			//clear luminance histogram
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, luminance_ssbo);
 			glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R8, 0, 256 * sizeof(uint32_t), GL_RED_INTEGER, GL_UNSIGNED_BYTE, nullptr);
+			
+			
+			if(numpad[3]) glFinish();
+			auto const startTraceTime{ std::chrono::steady_clock::now() };
 			
 			auto const minExp{ 0.1f };
 			auto const maxExp{ 5.0f };
@@ -1831,12 +1832,12 @@ int main(void) {
 			glUniform1f(minLogLum_u, minLogLum);
 			glUniform1f(rangeLogLum_u, rangeLogLum);
 			
-			
 			glBindFramebuffer(GL_FRAMEBUFFER, render_fb);
 			GLenum buffers1[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 			glDrawBuffers(2, buffers1);		
 			
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 			
 			GLenum buffers2[] = { GL_COLOR_ATTACHMENT0 };
 			glDrawBuffers(1, buffers2);
@@ -1935,18 +1936,21 @@ int main(void) {
 			if(numpad[3]) glFinish();
 			auto const endTraceTime{ std::chrono::steady_clock::now() };
 			
-			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-			
 			if(takeScreenshot) {
 				takeScreenshot = false;
 				glFinish();
 				
-				std::unique_ptr<uint8_t[]> data{ new uint8_t[3 * windowSize.x * windowSize.y] };
+				static uint8_t *data{ 0 };
+				static int size{ 0 };
+				if(size < 3 * windowSize.x * windowSize.y) {
+					delete[] data;
+					data = new uint8_t[3 * windowSize.x * windowSize.y];
+				}
 				
 				glActiveTexture(GL_TEXTURE0 + screenshotColor_it);
-				glGetTexImage(GL_TEXTURE_2D, 0, GL_BGR, GL_UNSIGNED_BYTE, data.get());
+				glGetTexImage(GL_TEXTURE_2D, 0, GL_BGR, GL_UNSIGNED_BYTE, data);
 				
-				generateBitmapImage(data.get(), windowSize.y, windowSize.x, "screenshot.bmp");
+				generateBitmapImage(data, windowSize.y, windowSize.x, "screenshot.bmp");
 				
 				glBindFramebuffer(GL_READ_FRAMEBUFFER, screenshot_fb);
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -1962,7 +1966,7 @@ int main(void) {
 			timeToTrace.add(diffMs);
 		}
 		
-		{
+		{ //draw block hitbox
 			PosDir const pd{ PosDir(cameraCoord, pos::posToFracTrunk(forwardDir * 7).value()) };
 			auto const optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id){ return id != 0; }) };
 				
@@ -1974,6 +1978,18 @@ int main(void) {
 					(breakFullBlock ? result.cubePos.as<pBlock>().as<pCube>() : result.cubePos) - cameraCoord
 				)) };
 				float const size{ breakFullBlock ? 1.0f : (1.0f / units::cubesInBlockDim) };
+				
+				float toLoc[3][3];
+				float toGlob[3][3];
+				viewportCurrent.localToGlobalSpace(&toGlob);
+				viewportCurrent.globalToLocalSpace(&toLoc);
+				
+				float const toLoc4[4][4] = {
+					{ toLoc[0][0], toLoc[0][1], toLoc[0][2], 0 },
+					{ toLoc[1][0], toLoc[1][1], toLoc[1][2], 0 },
+					{ toLoc[2][0], toLoc[2][1], toLoc[2][2], 0 },
+					{ 0          , 0          , 0          , 1 },
+				};
 
 				glEnable(GL_FRAMEBUFFER_SRGB);
 				drawBlockHitbox(blockRelativePos, size, toLoc4);
@@ -1981,7 +1997,7 @@ int main(void) {
 			}
 		}
 		
-		{
+		{ //draw current block
 			glUseProgram(currentBlockProgram);
 			glUniform1ui(cb_blockIndex_u, blockPlaceId);
 			glEnable(GL_FRAMEBUFFER_SRGB); 
@@ -1989,8 +2005,7 @@ int main(void) {
 			glDisable(GL_FRAMEBUFFER_SRGB); 
 		}
 		
-
-		{ //font
+		{ //draw text
 			glEnable(GL_BLEND);
 			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			
@@ -2121,6 +2136,7 @@ int main(void) {
 			
 			glDisable(GL_BLEND);
 		}
+		
 		
 		glfwSwapBuffers(window);
 		glfwPollEvents();

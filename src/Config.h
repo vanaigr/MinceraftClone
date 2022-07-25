@@ -11,7 +11,7 @@ struct Config {
 	bool saveChunks;
 	std::string worldName;
 	
-	double playerCameraFovDeg;
+	double playerCameraFOV;
 	vec2d mouseSensitivity;
 	int chunkUpdatesPerFrame;
 	

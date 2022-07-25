@@ -1,10 +1,6 @@
 #version 460
 
-#define DEBUG 1
-
-#extension GL_ARB_shader_group_vote : enable
-#extension GL_ARB_shader_ballot : enable
-
+#define DEBUG 0
 
 /**
 	TODO: figure out how to use multiple sources for shader and how and where to specify #version
@@ -15,10 +11,10 @@
 	0(53) : error C7621: #extension directive must occur before any non-preprocessor token
 **/
 
-//#if DEBUG
-//#extension GL_ARB_shader_group_vote : enable
-//#extension GL_ARB_shader_ballot : enable
-//#endif
+#if DEBUG
+#extension GL_ARB_shader_group_vote : enable
+#extension GL_ARB_shader_ballot : enable
+#endif
 
 //the sign(0) == 0 causes too many problems in this shader, so using it again is probably an error
 #define sign0_(TYPE) TYPE sign0(const TYPE it) { return sign(it); }
@@ -56,16 +52,16 @@ in vec4 gl_FragCoord;
 layout(location = 0) out vec4 color;
 layout(location = 1) out vec4 brightColor;
 
+layout(std140) uniform Properties {
+	ivec2 windowSize;
+	float time;
+	mat4 projection; //from local space to screen space
+};
 
-uniform uvec2 windowSize;
 uniform vec3 rightDir, topDir;
-
-uniform float time;
 
 uniform sampler2D atlas;
 uniform float atlasTileSize;
-
-uniform mat4 projection; //from local space to screen
 
 uniform float near;
 uniform float far;
