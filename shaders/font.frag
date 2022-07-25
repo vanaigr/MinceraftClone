@@ -22,7 +22,7 @@ float col(vec2 coord) {
 	const vec2 pos = (coord / windowSize) * 2 - 1;
 	const vec2 uv = startUV + (pos - startPos) / (endPos - startPos) * (endUV - startUV);
 	
-	return texture2D(font, clamp(uv, startUV, endUV)).r;
+	return texture(font, clamp(uv, startUV, endUV)).r;
 }
 
 float rand(const vec2 co) {

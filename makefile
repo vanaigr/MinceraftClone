@@ -1,5 +1,6 @@
 INCLUDES=-I .\dependencies\include
 SOURCE_DIR=src
+SHADERS_DIR=shaders
 OBJECT_DIR=obj
 CPP_EXCLUDES=
 WS= -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-label -Wno-unused-private-field
@@ -52,3 +53,17 @@ clear-obj:
 	
 clear: clear-obj
 	@if exist "$(OBJECT_DIR)" rmdir $(EXECUTABLE)
+
+
+SHADERS_0=$(shell dir $(SHADERS_DIR)\*.vert /s /b)
+SHADERS_1=$(shell dir $(SHADERS_DIR)\*.frag /s /b)
+SHADERS_2=$(SHADERS_0) $(SHADERS_1)
+SHADERS_10=$(abspath $(SHADERS_2))
+SHADERS_20=$(SHADERS_10:$(CUR_PATH)/$(SHADERS_DIR)/%=%)
+SHADERS=$(addprefix $(SHADERS_DIR)/,$(SHADERS_20))
+
+.FORCE:
+$(SHADERS_DIR)/%: .FORCE
+	glslangValidator.exe "$@"
+
+glslValidate: $(SHADERS)

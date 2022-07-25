@@ -180,7 +180,6 @@ int dot3i(const ivec3 a, const ivec3 b) {
 
 bvec3 and3b/*seems that glsl has no && for bvec_*/(const bvec3 a, const bvec3 b) { return bvec3(a.x && b.x, a.y && b.y, a.z && b.z); }
 
-
 struct Ray {
     vec3 orig;
     vec3 dir;
@@ -703,8 +702,9 @@ const int maxParams = 20;
 #define WRITE_TRACE 0
 #define READ_TRACE 0
 
-const ivec3 fragCoord = ivec3(floor(gl_FragCoord));
-const int maxPosOffset = int((fragCoord.x + fragCoord.y * windowSize.x) * (maxParams * sizeofParams + 1) + maxParams * sizeofParams);
+//ERROR: global const initializers must be constant
+/*const*/ ivec3 fragCoord = ivec3(floor(gl_FragCoord));
+/*const*/ int maxPosOffset = int((fragCoord.x + fragCoord.y * windowSize.x) * (maxParams * sizeofParams + 1) + maxParams * sizeofParams);
 uint getMaxGetPos() { return traceB.data[maxPosOffset]; }
 int paramsPosOffsetTrace(const int pos) { return int((fragCoord.x + fragCoord.y * windowSize.x) * (maxParams * sizeofParams + 1) + pos * sizeofParams); }
 
@@ -1678,7 +1678,7 @@ RayResult resolveIntersection(const int iteration) {
 			const vec3 offset_ = (glass ? glassOffset : waterOffset);
 			const vec3 offset = offset_ * offsetMag;
 			
-			const vec3 newBlockCoord = localSpaceCoord + offset * vec3(!intersectionSide);
+			const vec3 newBlockCoord = localSpaceCoord + offset * vec3(not(intersectionSide));
 			
 			const vec3 coordInCube = mod(coord, 1.0 / cubesInBlockDim);
 			const vec3 offsetedCoordInCube = 1.0 / cubesInBlockDim - abs(1.0 / cubesInBlockDim - mod(coordInCube + offset, 2.0 / cubesInBlockDim));/*
@@ -1697,7 +1697,7 @@ RayResult resolveIntersection(const int iteration) {
 			vec3 incoming = any(intersectionSide) ? ray.dir : (ray.dir * (1 + offset_));
 			if(any(isnan(incoming))) incoming = ray.dir;
 			
-			const vec3 normalDir = any(intersectionSide) ? normalize(vec3(normal) + offset * vec3(!intersectionSide)) : -incoming;
+			const vec3 normalDir = any(intersectionSide) ? normalize(vec3(normal) + offset * vec3(not(intersectionSide))) : -incoming;
 			const float ior = glass ? 1.0 : 1.00;
 			
 			const float n1 = backside ? ior : 1;
@@ -1785,7 +1785,7 @@ RayResult resolveIntersection(const int iteration) {
 				else if(blockId == (1u | (1u << 15))) {			
 					position = mix((floor(ray.orig * shadowSubdiv) + vec3(0.501, 0.501, 0.501)) / shadowSubdiv, ray.orig, intersectionSide);
 				}
-				else position = ( floor(coord * shadowSubdiv) + vec3(!intersectionSide) * vec3(0.501, 0.501, 0.501) )/shadowSubdiv;
+				else position = ( floor(coord * shadowSubdiv) + vec3(not(intersectionSide)) * vec3(0.501, 0.501, 0.501) ) / shadowSubdiv;
 
 				pushShadowEndEmmitter(
 					pushed,
@@ -1882,7 +1882,8 @@ const vec3 rgbToLum = vec3(0.2126, 0.7152, 0.0722);
 
 uniform float minLogLum;
 uniform float rangeLogLum;
-const float x = (255.0 / rangeLogLum);
+//ERROR: global const initializers must be constant
+/*const*/ float x = (255.0 / rangeLogLum);
 
 //https://bruop.github.io/exposure/
 uint colorToBin(const vec3 hdrColor) {

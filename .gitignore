@@ -1,11 +1,11 @@
-dependencies
-obj
-*.exe
-config.makefile
-Test
-assets/atlas.psd
+/dependencies
+/obj
+/*.exe
+/config.makefile
+/Test
 /save
 /save0
 /save2
 /screenshot.bmp
 /game.cfg
+/glslangVaidator.exe
