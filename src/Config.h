@@ -16,8 +16,6 @@ struct Config {
 	int chunkUpdatesPerFrame;
 	
 	bool lockFramerate;
-	
-	vec2i screenshotSize;
 };
 
 void parseConfigFromFile(Config &dst);

@@ -1919,8 +1919,7 @@ void main() {
 	
 	color = vec4(col, 1);
 	
-	
 	#if DEBUG
 	if(anyInvocationARB(exit_)) { color = vec4(exitVec3, 1.0); return; }
 	#endif
-}	
+}

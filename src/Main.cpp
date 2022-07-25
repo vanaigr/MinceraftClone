@@ -158,10 +158,8 @@ Input &currentInput() {
 }
 
 
-static bool testInfo = false, debugInfo = false;
-static bool numpad[10]; //[0] - turn off physics. [1] - load new chunks. [2] - update time uniform in main prog
-static bool debug{ false };
-
+static bool debugInfo{ false };
+static bool numpad[10];
 
 bool mouseCentered = true;
 
@@ -176,18 +174,25 @@ static bool breakFullBlock{ false };
 
 static const Font font{ "./assets/font.txt" };
 
-enum Textures : GLuint {
-	atlas_it = 0,
+enum BitmapTextures : GLuint {
+	firstBitmapTexture = 0,
+	atlas_it = firstBitmapTexture,
 	font_it,
 	noise_it,
-	screenshotColor_it,
+	
+	bitmapTexturesCount
+};
+enum FramebufferTextures : GLuint {
+	firstFramebufferTexture = bitmapTexturesCount,
+	screenshotColor_it = firstFramebufferTexture,
 	render_it,
 	pp1_it,
 	pp2_it,
 	
-	texturesCount
+	bitmapAndFramebufferTexturesCount
 };
-static GLuint textures[texturesCount];
+static constexpr GLint framebufferTextureCount = bitmapAndFramebufferTexturesCount - firstFramebufferTexture;
+static GLuint textures[bitmapAndFramebufferTexturesCount];
 static GLuint const		&atlas_t           = textures[atlas_it], 
 						&font_t            = textures[font_it], 
 						&noise_t           = textures[noise_it],
@@ -206,7 +211,6 @@ enum SSBOs : GLuint {
 	chunksLighting_b,
 	chunksEmittersGPU_b,
 	atlasDescription_b,
-	
 	luminance_b,
 	
 	ssbosCount
@@ -228,7 +232,7 @@ static GLuint const
 	&atlasDescription_ssbo    = ssbos[atlasDescription_b],
 	&luminance_ssbo           = ssbos[luminance_b];
 
-static GLuint mainProgram = 0;
+static GLuint mainProgram;
   static GLint windowSize_u;
   static GLint rightDir_u;
   static GLint topDir_u;
@@ -250,7 +254,6 @@ static GLuint blockHitbox_p;
   static GLint blockHitboxProjection_u, blockHitboxModelMatrix_u;
 
 static GLuint screenshot_fb;
-static vec2i screenshotSize{ windowSize };
 bool takeScreenshot;
 
 static GLuint render_fb;
@@ -265,16 +268,70 @@ static GLuint toLDR_p;
 
 static chunk::Chunks chunks{};
 
+
+namespace Reload {
+	using Flags = uint8_t;
+	static constexpr Flags nothing     =       0u;
+	static constexpr Flags config      =     0b1u;
+	static constexpr Flags texture     =    0b10u;
+	static constexpr Flags ssbo        =   0b100u;
+	static constexpr Flags framebuffer =  0b1000u;
+	static constexpr Flags shader      = 0b10000u;
+	static constexpr Flags everything  = 0b11111u;
+	
+	static bool is(Flags const flags, Flags const value) {
+		return (value & flags) == (~nothing & flags);
+	}
+}
+
+static Reload::Flags reloadConfig();
+static void reloadFramebuffers();
+static void reloadTextures();
+static void reloadShaderStorageBuffers();
+static void reloadShaders();
+
+static void reload(Reload::Flags flags) {
+	if(Reload::is(Reload::config, flags)) flags |= reloadConfig();
+	if(Reload::is(Reload::texture, flags)) reloadTextures();
+	if(Reload::is(Reload::ssbo, flags)) reloadShaderStorageBuffers();
+	if(Reload::is(Reload::framebuffer, flags)) reloadFramebuffers();
+	if(Reload::is(Reload::shader, flags)) reloadShaders();
+}
+
+static void useTraceBuffer() {
+	static bool is = false;
+	
+	if(!is) {
+		glDeleteBuffers(1, &traceTest_ssbo);
+		glGenBuffers   (1, &traceTest_ssbo);
+		const size_t size{ windowSize.x*windowSize.y * (20 * 8*sizeof(uint32_t) + sizeof(uint32_t)) };
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, traceTest_ssbo);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL, GL_STATIC_COPY);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, traceTest_b, traceTest_ssbo);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+		
+		
+		if(GLenum errorCode = glGetError(); errorCode == GL_OUT_OF_MEMORY) {
+			std::cout << "unable to allocate " << float(double(size) / 1024 / 1024) << " Mb\n";
+		}
+		else {
+			is = true;
+			std::cout << "trace buffer (" << float(double(size) / 1024 / 1024) << " Mb) enabled\n";
+		}
+	}
+	else {
+		glDeleteBuffers(1, &traceTest_ssbo);
+		is = false;
+		std::cout << "trace buffer disabled\n";
+	}
+}
+
+
 enum class Key : uint8_t { RELEASE = GLFW_RELEASE, PRESS = GLFW_PRESS, REPEAT = GLFW_REPEAT, NOT_PRESSED };
 static_assert(GLFW_RELEASE >= 0 && GLFW_RELEASE < 256 && GLFW_PRESS >= 0 && GLFW_PRESS < 256 && GLFW_REPEAT >= 0 && GLFW_REPEAT < 256);
 
-static bool shift{ false }, ctrl{ false };
+static bool alt{false}, shift{ false }, ctrl{ false };
 static Key keys[GLFW_KEY_LAST+1];
-
-static void reloadConfig();
-static void reloadShaders();
-static void useTraceBuffer();
-
 void handleKey(int const key) {
 	auto const action{ misc::to_underlying(keys[key]) };
 	
@@ -295,6 +352,10 @@ void handleKey(int const key) {
 		currentInput().movement.z = 1 * isPress;
 	else if(key == GLFW_KEY_S)
 		currentInput().movement.z = -1 * isPress;
+	else if(key == GLFW_KEY_D)
+		currentInput().movement.x = 1 * isPress;
+	else if(key == GLFW_KEY_A)
+		currentInput().movement.x = -1 * isPress;
 	
 	if(isSpectator) {
 		if (key == GLFW_KEY_Q)
@@ -312,31 +373,43 @@ void handleKey(int const key) {
 	
 	if(key == GLFW_KEY_MINUS && isPress) zoom = 1 + (zoom - 1) * 0.95;
 	else if(key == GLFW_KEY_EQUAL/*+*/ && isPress) zoom = 1 + (zoom - 1) * (1/0.95);
-		
-	if(key == GLFW_KEY_F2 && !isPress) debugInfo = !debugInfo;
 	
 	if(GLFW_KEY_KP_0 <= key && key <= GLFW_KEY_KP_9  &&  !isPress) numpad[key - GLFW_KEY_KP_0] = !numpad[key - GLFW_KEY_KP_0];
-
-	if(key == GLFW_KEY_D)
-		currentInput().movement.x = 1 * isPress;
-	else if(key == GLFW_KEY_A)
-		currentInput().movement.x = -1 * isPress;
 	
-	if(key == GLFW_KEY_F5 && action == GLFW_PRESS)
-		reloadShaders();	
-	else if(key == GLFW_KEY_F6 && action == GLFW_PRESS)
-		reloadConfig();	
-	else if(key == GLFW_KEY_F7 && action == GLFW_PRESS)
-		useTraceBuffer();
-	else if(key == GLFW_KEY_F4 && action == GLFW_PRESS)
-		takeScreenshot = true;
-	else if(key == GLFW_KEY_F3 && action == GLFW_RELEASE) { 
-		if(!isSpectator) {
-			spectatorCoord = currentCameraPos();
+	if(action == GLFW_RELEASE) {
+		if(ctrl) {
+			if(key == GLFW_KEY_F1) {
+				reload(reloadConfig());
+			}
+			else if(key == GLFW_KEY_F2) {
+				reloadTextures();
+			}
+			else if(key == GLFW_KEY_F3) {
+				reloadShaderStorageBuffers();
+			}
+			else if(key == GLFW_KEY_F4) {
+				reloadFramebuffers();
+			}
+			else if(key == GLFW_KEY_F5) {
+				reloadShaders();
+			}
+			else if(key == GLFW_KEY_F6) {
+				reload(Reload::everything);
+			}
 		}
-		isSpectator = !isSpectator;
+		else {
+			if(key == GLFW_KEY_F2)
+				debugInfo = !debugInfo;	
+			else if(key == GLFW_KEY_F3) { 
+				if(!isSpectator) spectatorCoord = currentCameraPos();
+				isSpectator = !isSpectator;
+			}		
+			else if(key == GLFW_KEY_F4)
+				takeScreenshot = true;
+			else if(key == GLFW_KEY_F5)
+				useTraceBuffer();
+		}
 	}
-	else if(key == GLFW_KEY_TAB && action == GLFW_PRESS) testInfo = true;
 }
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -348,6 +421,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 	
 	handleKey(key);
 	
+	alt = (mods & GLFW_MOD_ALT) != 0;
 	shift = (mods & GLFW_MOD_SHIFT) != 0;
     ctrl = (mods & GLFW_MOD_CONTROL) != 0;
 }
@@ -526,35 +600,9 @@ void gpuBuffersReseted() {
 		
 }
 
-static bool is = false;
-static void useTraceBuffer() {
+static Reload::Flags reloadConfig() {
+	Reload::Flags flags{};
 	
-	if(!is) {
-		glDeleteBuffers(1, &traceTest_ssbo);
-		glGenBuffers   (1, &traceTest_ssbo);
-		const size_t size{ windowSize.x*windowSize.y * (20 * 8*sizeof(uint32_t) + sizeof(uint32_t)) };
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, traceTest_ssbo);
-		glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL, GL_STATIC_COPY);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, traceTest_b, traceTest_ssbo);
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
-		
-		
-		if(GLenum errorCode = glGetError(); errorCode == GL_OUT_OF_MEMORY) {
-			std::cout << "unable to allocate " << float(double(size) / 1024 / 1024) << " Mb\n";
-		}
-		else {
-			is = true;
-			std::cout << "trace buffer (" << float(double(size) / 1024 / 1024) << " Mb) enabled\n";
-		}
-	}
-	else {
-		glDeleteBuffers(1, &traceTest_ssbo);
-		is = false;
-		std::cout << "trace buffer disabled\n";
-	}
-}
-
-static void reloadConfig() {
 	Config cfg{};
 		cfg.viewDistance =  viewDistance;
 		cfg.loadChunks = saveChunks;
@@ -563,12 +611,11 @@ static void reloadConfig() {
 		cfg.mouseSensitivity = mouseSensitivity;
 		cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
 		cfg.lockFramerate = lockFramerate;
-		cfg.screenshotSize = screenshotSize;
 		cfg.worldName = worldName;
 		
 	parseConfigFromFile(cfg);
 	
-	bool shouldReloadShaders = viewDistance != cfg.viewDistance || !(screenshotSize == cfg.screenshotSize);
+	if(viewDistance != cfg.viewDistance) flags |= Reload::ssbo;
 	
 	viewDistance = cfg.viewDistance;
 	loadChunks = cfg.loadChunks;
@@ -578,65 +625,14 @@ static void reloadConfig() {
 	playerCamera = desiredPlayerCamera;
 	chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
 	lockFramerate = cfg.lockFramerate;
-	screenshotSize = cfg.screenshotSize;
 	worldName = cfg.worldName;
 	
-	if(shouldReloadShaders) reloadShaders();
+	return flags;
 }
 
-void printLinkErrors(GLuint const prog, char const *const name) {
-	GLint progErrorStatus;
-	glGetProgramiv(prog, GL_LINK_STATUS, &progErrorStatus);
-	if(progErrorStatus) return;
-	
-	std::cout << "Program status: " << progErrorStatus << '\n';
-	int length;
-	glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &length);
-	GLchar *msg = new GLchar[length + 1];
-	glGetProgramInfoLog(prog, length, &length, msg);
-	std::cout << "Program error:\n" << msg;
-	delete[] msg;
-} 
-
-static void reloadShaders() {
-	glDeleteTextures(texturesCount, &textures[0]);
-	glGenTextures   (texturesCount, &textures[0]);
-	
-	glDeleteBuffers(ssbosCount, &ssbos[0]);
-	glGenBuffers   (ssbosCount, &ssbos[0]);
-	
-	/*{
-		//color
-		glActiveTexture(GL_TEXTURE0 + framebufferColor_it);
-		glBindTexture(GL_TEXTURE_2D, framebufferColor_t);
-		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, windowSize.x, windowSize.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-
-		//depth
-		glActiveTexture(GL_TEXTURE0 + framebufferDepth_it);
-		glBindTexture(GL_TEXTURE_2D, framebufferDepth_t);
-		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		  glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, windowSize.x, windowSize.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-		
-		glDeleteFramebuffers(1, &framebuffer);
-		glGenFramebuffers(1, &framebuffer);
-		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-		  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, framebufferColor_t, 0);
-		  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, framebufferDepth_t, 0);
-		  
-		  GLenum status;
-		  if ((status = glCheckFramebufferStatus(GL_FRAMEBUFFER)) != GL_FRAMEBUFFER_COMPLETE) {
-		  	fprintf(stderr, "framebuffer: error %u", status);
-		  }
-		
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	}*/
+static void reloadFramebuffers() {
+	glDeleteTextures(framebufferTextureCount, &textures[firstFramebufferTexture]);
+	glGenTextures   (framebufferTextureCount, &textures[firstFramebufferTexture]);
 	
 	{ //redner framebuffer
 		glActiveTexture(GL_TEXTURE0 + pp1_it);
@@ -661,7 +657,7 @@ static void reloadShaders() {
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, windowSize.x, windowSize.y, 0, GL_RGB, GL_FLOAT, NULL);		
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, windowSize.x, windowSize.y, 0, GL_RGB, GL_FLOAT, NULL);	
 		
 		
 		glDeleteFramebuffers(1, &render_fb);
@@ -699,7 +695,7 @@ static void reloadShaders() {
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		  glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, screenshotSize.x, screenshotSize.y, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+		  glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, windowSize.x, windowSize.y, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
 		  
 		glDeleteFramebuffers(1, &screenshot_fb);
 		glGenFramebuffers(1, &screenshot_fb);
@@ -713,38 +709,11 @@ static void reloadShaders() {
 		
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
-	
-	{
-		{ //atlas desctiption
-			auto const c = [](int16_t const x, int16_t const y) -> int32_t {
-				return int32_t( uint32_t(uint16_t(x)) | (uint32_t(uint16_t(y)) << 16) );
-			}; //pack coord
-			int32_t const sides[] = { //side, top, bottom, alpha. Texture offset in tiles from top-left corner of the atlas
-				c(0, 0), c(0, 0), c(0, 0), c(0, 1), //0
-				c(1, 0), c(2, 0), c(3, 0), c(0, 1), //grass
-				c(3, 0), c(3, 0), c(3, 0), c(0, 1), //dirt
-				c(4, 0), c(4, 0), c(4, 0), c(0, 1), //planks
-				c(5, 0), c(6, 0), c(6, 0), c(0, 1), //wood
-				c(7, 0), c(7, 0), c(7, 0), c(7, 1), //leaves
-				c(8, 0), c(8, 0), c(8, 0), c(0, 1), //stone
-				c(9, 0), c(9, 0), c(9, 0), c(0, 1), //glass
-				c(11, 0), c(11, 0), c(11, 0), c(0, 1), //diamond
-				c(12, 0), c(12, 0), c(12, 0), c(0, 1), //obsidian
-				c(13, 0), c(13, 0), c(13, 0), c(0, 1), //rainbow?
-				c(14, 0), c(14, 0), c(14, 0), c(0, 1), //brick
-				c(15, 0), c(15, 0), c(15, 0), c(0, 1), //stone brick
-				c(16, 0), c(16, 0), c(16, 0), c(0, 1), //lamp 1
-				c(17, 0), c(17, 0), c(17, 0), c(0, 1), //lamp 2
-				c(18, 0), c(18, 0), c(18, 0), c(0, 1), //water
-				c(19, 0), c(19, 0), c(19, 0), c(19, 1), //grass
-			};
-			
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, atlasDescription_ssbo);
-			glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(sides), &sides, GL_STATIC_DRAW);
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, atlasDescription_b, atlasDescription_ssbo);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-		}
-	}
+}
+
+static void reloadTextures() {
+	glDeleteTextures(bitmapTexturesCount, &textures[firstBitmapTexture]);
+	glGenTextures   (bitmapTexturesCount, &textures[firstBitmapTexture]);
 	
 	{//noise texture
 		Image image{};
@@ -758,18 +727,120 @@ static void reloadShaders() {
 		  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data.get());
 	}
 	
+	{ //atlas texture
+		Image image;
+		ImageLoad("assets/atlas.bmp", &image);
+	
+		glActiveTexture(GL_TEXTURE0 + atlas_it);
+		glBindTexture(GL_TEXTURE_2D, atlas_t);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data.get());
+	}
+	
+	{ //font texture
+		Image image;
+		ImageLoad("assets/font.bmp", &image);
+		
+		glActiveTexture(GL_TEXTURE0 + font_it);
+		glBindTexture(GL_TEXTURE_2D, font_t);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data.get());
+	}
+}
+
+static void reloadShaderStorageBuffers() {
+	glDeleteBuffers(ssbosCount, &ssbos[0]);
+	glGenBuffers   (ssbosCount, &ssbos[0]);
+	
+	{ //atlas desctiption
+		auto const c = [](int16_t const x, int16_t const y) -> int32_t {
+			return int32_t( uint32_t(uint16_t(x)) | (uint32_t(uint16_t(y)) << 16) );
+		}; //pack coord
+		int32_t const sides[] = { //side, top, bottom, alpha. Texture offset in tiles from top-left corner of the atlas
+			c(0, 0), c(0, 0), c(0, 0), c(0, 1), //0
+			c(1, 0), c(2, 0), c(3, 0), c(0, 1), //grass
+			c(3, 0), c(3, 0), c(3, 0), c(0, 1), //dirt
+			c(4, 0), c(4, 0), c(4, 0), c(0, 1), //planks
+			c(5, 0), c(6, 0), c(6, 0), c(0, 1), //wood
+			c(7, 0), c(7, 0), c(7, 0), c(7, 1), //leaves
+			c(8, 0), c(8, 0), c(8, 0), c(0, 1), //stone
+			c(9, 0), c(9, 0), c(9, 0), c(0, 1), //glass
+			c(11, 0), c(11, 0), c(11, 0), c(0, 1), //diamond
+			c(12, 0), c(12, 0), c(12, 0), c(0, 1), //obsidian
+			c(13, 0), c(13, 0), c(13, 0), c(0, 1), //rainbow?
+			c(14, 0), c(14, 0), c(14, 0), c(0, 1), //brick
+			c(15, 0), c(15, 0), c(15, 0), c(0, 1), //stone brick
+			c(16, 0), c(16, 0), c(16, 0), c(0, 1), //lamp 1
+			c(17, 0), c(17, 0), c(17, 0), c(0, 1), //lamp 2
+			c(18, 0), c(18, 0), c(18, 0), c(0, 1), //water
+			c(19, 0), c(19, 0), c(19, 0), c(19, 1), //grass
+		};
+		
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, atlasDescription_ssbo);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(sides), &sides, GL_STATIC_DRAW);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, atlasDescription_b, atlasDescription_ssbo);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	}
+	
+	{ //luminance histogram
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, luminance_ssbo);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, 256 * sizeof(uint32_t), NULL, GL_DYNAMIC_DRAW);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, luminance_b, luminance_ssbo);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+	}
+	
+	gpuBuffersReseted();
+}
+
+static void reloadShaders() {
+	char const *const triangleVertex{ R"(
+		#version 460				
+
+		void main() {
+			const vec2 verts[] = {
+				vec2(-1, -1),
+				vec2(+3, -1),
+				vec2(-1, +3)
+			};
+			gl_Position = vec4(verts[gl_VertexID], 0, 1);
+		}
+	)" };
+	
+	auto const printLinkErrors = [](GLuint const prog, char const *const name) {
+		GLint progErrorStatus;
+		glGetProgramiv(prog, GL_LINK_STATUS, &progErrorStatus);
+		if(progErrorStatus == 1) return;
+		
+		std::cout << "Program status: " << progErrorStatus << '\n';
+		int length;
+		glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &length);
+		
+		static int maxLenght = 0;
+		static GLchar *msg = nullptr;
+		if(maxLenght < length) {
+			maxLenght = length;
+			delete[] msg;
+			msg = new GLchar[maxLenght];
+		}
+
+		glGetProgramInfoLog(prog, length, &length, msg);
+		std::cout << "Program \"" << name << "\" error:\n" << msg;
+	};
+	
 	{ //main program
 		glDeleteProgram(mainProgram);
 		mainProgram = glCreateProgram();
 		ShaderLoader sl{};
 
-		sl.addShaderFromProjectFileName("shaders/main.vert", GL_VERTEX_SHADER  , "main vertex");
+		sl.addShaderFromCode(triangleVertex, GL_VERTEX_SHADER  , "main vertex");
 		sl.addShaderFromProjectFileName("shaders/main.frag", GL_FRAGMENT_SHADER, "main shader");
 	
 		sl.attachShaders(mainProgram);
 	
 		glLinkProgram(mainProgram);
-		printLinkErrors(mainProgram, "main program");
+		printLinkErrors(mainProgram, "main");
 		glValidateProgram(mainProgram);
 	
 		sl.deleteShaders();
@@ -802,15 +873,7 @@ static void reloadShaders() {
 		
 		playerRelativePosition_u = glGetUniformLocation(mainProgram, "playerRelativePosition");
 		drawPlayer_u = glGetUniformLocation(mainProgram, "drawPlayer");
-	
-		Image image;
-		ImageLoad("assets/atlas.bmp", &image);
-	
-		glActiveTexture(GL_TEXTURE0 + atlas_it);
-		glBindTexture(GL_TEXTURE_2D, atlas_t);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data.get());
+		
 		glUniform1f(glGetUniformLocation(mainProgram, "atlasTileSize"), 16); //in current block program, in block hitbox program
 		glUniform1i(glGetUniformLocation(mainProgram, "atlas"), atlas_it);
 		glUniform1i(glGetUniformLocation(mainProgram, "noise"), noise_it);
@@ -827,13 +890,7 @@ static void reloadShaders() {
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksNeighbourngEmitters"), chunksEmittersGPU_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "TraceTest"), traceTest_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "Luminance"), luminance_b);
-		
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, luminance_ssbo);
-		glBufferData(GL_SHADER_STORAGE_BUFFER, 256 * sizeof(uint32_t), NULL, GL_DYNAMIC_DRAW);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, luminance_b, luminance_ssbo);
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
-		
-		gpuBuffersReseted();
+		ce
 	}
 	
 	{ //font program
@@ -841,111 +898,24 @@ static void reloadShaders() {
 		fontProgram = glCreateProgram();
 		ShaderLoader sl{};
 		
-		sl.addShaderFromCode(
-		R"(#version 420
-			precision mediump float;
-			
-			layout(location = 0) in vec2 pos_s;
-			layout(location = 1) in vec2 pos_e;
-			layout(location = 2) in vec2 uv_s;
-			layout(location = 3) in vec2 uv_e;
-			
-			//out vec2 uv;
-			
-			out vec2 startPos;
-			out vec2 endPos;
-			
-			out vec2 startUV;
-			out vec2 endUV;
-			void main(void){
-				vec2 interp = vec2(gl_VertexID % 2, gl_VertexID / 2);
-				gl_Position = vec4(mix(pos_s, pos_e, interp), 0, 1);
-				//uv = mix(uv_s, uv_e, interp);
-				startPos = pos_s;
-				endPos   = pos_e;
-				startUV  = uv_s ;
-				endUV    = uv_e ;
-			}
-		)", GL_VERTEX_SHADER,"font vertex");
-		
-		sl.addShaderFromCode(
-		R"(#version 420
-			in vec4 gl_FragCoord;
-			//in vec2 uv;
-			
-			in vec2 startPos;
-			in vec2 endPos;
-			
-			in vec2 startUV;
-			in vec2 endUV;
-			
-			uniform sampler2D font;
-			uniform vec2 screenSize;
-			
-			out vec4 color;
-			
-			float col(vec2 coord) {
-				const vec2 pos = (coord / screenSize) * 2 - 1;
-				const vec2 uv = startUV + (pos - startPos) / (endPos - startPos) * (endUV - startUV);
-				
-				return texture2D(font, clamp(uv, startUV, endUV)).r;
-			}
-			
-			float rand(const vec2 co) {
-				return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
-			}
-			
-			float sampleN(const vec2 coord, const uint n, const vec2 startRand) {
-				const vec2 pixelCoord = floor(coord);
-				const float fn = float(n);
-			
-				float result = 0;
-				for (uint i = 0; i < n; i++) {
-					for (uint j = 0; j < n; j++) {
-						const vec2 curCoord = pixelCoord + vec2(i / fn, j / fn);
-						const vec2 offset = vec2(rand(startRand + curCoord.xy), rand(startRand + curCoord.xy + i+1)) / fn;
-						const vec2 offsetedCoord = curCoord + offset;
-			
-						const float sampl = col(offsetedCoord);
-						result += sampl;
-					}
-				}
-			
-				return result / (fn * fn);
-			}
-
-			void main() {
-				const float col = sampleN(gl_FragCoord.xy, 4, startUV);
-				
-				color = vec4(vec3(0), 1-col);
-			}
-		)",
-		GL_FRAGMENT_SHADER,
-		"font shader");
+		sl.addShaderFromProjectFileName("shaders/font.vert", GL_VERTEX_SHADER,"font vertex");
+		sl.addShaderFromProjectFileName("shaders/font.frag", GL_FRAGMENT_SHADER, "font fragment");
 		
 		sl.attachShaders(fontProgram);
 	
 		glLinkProgram(fontProgram);
+		printLinkErrors(fontProgram, "font");
 		glValidateProgram(fontProgram);
 	
 		sl.deleteShaders();
 	
 		glUseProgram(fontProgram);
 		
-		Image image;
-		ImageLoad("assets/font.bmp", &image);
-	
-		glActiveTexture(GL_TEXTURE0 + font_it);
-		glBindTexture(GL_TEXTURE_2D, font_t);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.sizeX, image.sizeY, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data.get());
-        //glBindTexture(GL_TEXTURE_2D, 0);
-		
 		GLuint const fontTex_u = glGetUniformLocation(fontProgram, "font");
 		glUniform1i(fontTex_u, font_it);
 		
 		glUniform2f(glGetUniformLocation(fontProgram, "screenSize"), windowSize_d.x, windowSize_d.y);
+		ce
 	}
 	
 	{ //block hitbox program
@@ -953,72 +923,13 @@ static void reloadShaders() {
 		blockHitbox_p = glCreateProgram();
 		ShaderLoader sl{};
 
-		sl.addShaderFromCode(
-			R"(#version 420
-			uniform mat4 projection;
-			uniform mat4 modelMatrix;
-			
-			out vec2 uv;
-			void main()
-			{
-				int tri = gl_VertexID / 3;
-				int idx = gl_VertexID % 3;
-				int face = tri / 2;
-				int top = tri % 2;
-			
-				int dir = face % 3;
-				int pos = face / 3;
-			
-				int nz = dir >> 1;
-				int ny = dir & 1;
-				int nx = 1 ^ (ny | nz);
-			
-				vec3 d = vec3(nx, ny, nz);
-				float flip = 1 - 2 * pos;
-			
-				vec3 n = flip * d;
-				vec3 u = -d.yzx;
-				vec3 v = flip * d.zxy;
-			
-				float mirror = -1 + 2 * top;
-				vec3 xyz = n + mirror*(1-2*(idx&1))*u + mirror*(1-2*(idx>>1))*v;
-				xyz = (xyz + 1) / 2;
-			
-				gl_Position = projection * (modelMatrix * vec4(xyz, 1.0));
-				uv = (vec2(mirror*(1-2*(idx&1)), mirror*(1-2*(idx>>1)))+1) / 2;
-			}
-			)", GL_VERTEX_SHADER, "Block hitbox vertex"
-		);
-		
-		sl.addShaderFromCode(
-			R"(#version 420
-			in vec2 uv;
-			out vec4 color;
-			
-			uniform float atlasTileSize;
-			uniform sampler2D atlas;
-			
-			vec3 sampleAtlas(const vec2 offset, const vec2 coord) { //copied from main.frag
-				const ivec2 size = textureSize(atlas, 0);
-				const vec2 textureCoord = vec2(coord.x + offset.x, offset.y + 1-coord.y);
-				const vec2 uv_ = vec2(textureCoord * atlasTileSize / vec2(size));
-				const vec2 uv = vec2(uv_.x, 1 - uv_.y);
-				return pow(texture(atlas, uv).rgb, vec3(2.2));
-			}
-
-			void main() {
-				const vec3 value = sampleAtlas(vec2(31), uv);
-				if(dot(value, vec3(1)) / 3 > 0.9) discard;
-				color = vec4(value, 0.8);
-			}
-			)", 
-			GL_FRAGMENT_SHADER,  
-			"Block hitbox fragment"
-		);
+		sl.addShaderFromProjectFileName("shaders/blockHitbox.vert", GL_VERTEX_SHADER  , "Block hitbox vertex");
+		sl.addShaderFromProjectFileName("shaders/blockHitbox.frag", GL_FRAGMENT_SHADER, "Block hitbox fragment");
 	
 		sl.attachShaders(blockHitbox_p);
 	
 		glLinkProgram(blockHitbox_p);
+		printLinkErrors(blockHitbox_p, "block hitbox");
 		glValidateProgram(blockHitbox_p);
 	
 		sl.deleteShaders();
@@ -1030,6 +941,7 @@ static void reloadShaders() {
 		
 		blockHitboxModelMatrix_u = glGetUniformLocation(blockHitbox_p, "modelMatrix");
 		blockHitboxProjection_u  = glGetUniformLocation(blockHitbox_p, "projection");
+		ce
 	}
 	
 	{ //current block program
@@ -1037,104 +949,13 @@ static void reloadShaders() {
 		currentBlockProgram = glCreateProgram();
 		ShaderLoader sl{};
 		
-		sl.addShaderFromCode(
-		R"(#version 430
-			precision mediump float;
-			
-			uniform vec2 startPos;
-			uniform vec2 endPos;
-			
-			void main(void){
-				const vec2 verts[] = {
-					vec2(0),
-					vec2(1, 0),
-					vec2(0, 1),
-					vec2(1)
-				};
-				vec2 interp = verts[gl_VertexID];
-				gl_Position = vec4(mix(startPos, endPos, interp), 0, 1);
-			}
-		)", GL_VERTEX_SHADER,"cur block vertex");
-		
-		sl.addShaderFromCode(
-		R"(#version 430
-			in vec4 gl_FragCoord;
-
-			uniform vec2 startPos;
-			uniform vec2 endPos;
-			
-			uniform sampler2D font;
-			uniform vec2 screenSize;
-			
-			out vec4 color;
-			
-			uniform uint block;
-			uniform float atlasTileSize;
-			uniform sampler2D atlas;
-			
-			restrict readonly buffer AtlasDescription {
-				int positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot 
-			};
-			
-			vec3 sampleAtlas(const vec2 offset, const vec2 coord) { //copied from main.frag
-				const ivec2 size = textureSize(atlas, 0);
-				const vec2 textureCoord = vec2(coord.x + offset.x, offset.y + 1-coord.y);
-				const vec2 uv_ = vec2(textureCoord * atlasTileSize / vec2(size));
-				const vec2 uv = vec2(uv_.x, 1 - uv_.y);
-				return pow(texture(atlas, uv).rgb, vec3(2.2));
-			}
-			
-			vec2 atlasAt(const uint id, const ivec3 side) {
-				const int offset = int(side.y == 1) + int(side.y == -1) * 2;
-				const int index = (int(id) * 4 + offset);
-				const int pos = positions[index];
-				const int bit16 = 65535;
-				return vec2( pos&bit16, (pos>>16)&bit16 );
-			}
-			
-			vec3 col(vec2 coord) {
-				const vec2 pos = (coord / screenSize) * 2 - 1;
-				const vec2 uv = (pos - startPos) / (endPos - startPos);
-				
-				const vec2 offset = atlasAt(block, ivec3(1,0,0));
-				return sampleAtlas(offset, clamp(uv, 0.0001, 0.9999));
-			}
-			
-			float rand(const vec2 co) {
-				return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
-			}
-			
-			vec3 sampleN(const vec2 coord, const uint n, const vec2 startRand) {
-				const vec2 pixelCoord = floor(coord);
-				const float fn = float(n);
-			
-				vec3 result = vec3(0);
-				for (int i = 0; i < n; i++) {
-					for (int j = 0; j < n; j++) {
-						const vec2 curCoord = pixelCoord + vec2(i / fn, j / fn);
-						const vec2 offset = vec2(rand(startRand + curCoord.xy), rand(startRand + curCoord.xy + i+1)) / fn;
-						const vec2 offsetedCoord = curCoord + offset;
-			
-						const vec3 sampl = col(offsetedCoord);
-						result += sampl;
-					}
-				}
-			
-				return result / (fn * fn);
-			}
-
-			void main() {
-				const vec3 col = sampleN(gl_FragCoord.xy, 6, vec2(block));
-				
-				color = vec4(col, 1);
-			}
-		)",
-		GL_FRAGMENT_SHADER,
-		"current block fragment");
+		sl.addShaderFromProjectFileName("shaders/curBlock.vert", GL_VERTEX_SHADER,"cur block vertex");
+		sl.addShaderFromProjectFileName("shaders/curBlock.frag", GL_FRAGMENT_SHADER, "current block fragment");
 		
 		sl.attachShaders(currentBlockProgram);
 	
 		glLinkProgram(currentBlockProgram);
+		printLinkErrors(currentBlockProgram, "current block");
 		glValidateProgram(currentBlockProgram);
 	
 		sl.deleteShaders();
@@ -1157,6 +978,7 @@ static void reloadShaders() {
 		glUniform2f(glGetUniformLocation(currentBlockProgram, "screenSize"), windowSize_d.x, windowSize_d.y);
 		
 		glShaderStorageBlockBinding(currentBlockProgram, glGetProgramResourceIndex(currentBlockProgram, GL_SHADER_STORAGE_BLOCK, "AtlasDescription"), atlasDescription_b);
+		ce
 	}
 
 	{ //blur program
@@ -1164,28 +986,13 @@ static void reloadShaders() {
 		blur_p = glCreateProgram();
 		ShaderLoader sl{};
 
-		sl.addShaderFromCode(
-			R"(#version 460				
-
-				void main() {
-					const vec2 verts[] = {
-						vec2(-1, -1),
-						vec2(+3, -1),
-						vec2(-1, +3)
-					};
-					gl_Position = vec4(verts[gl_VertexID], 0, 1);
-				}
-			)", 
-			GL_VERTEX_SHADER,
-			"blur vertex"
-		);
-		
+		sl.addShaderFromCode(triangleVertex, GL_VERTEX_SHADER, "blur vertex");
 		sl.addShaderFromProjectFileName("shaders/blur.frag", GL_FRAGMENT_SHADER, "blur shader");
 	
 		sl.attachShaders(blur_p);
 	
 		glLinkProgram(blur_p);
-		printLinkErrors(blur_p, "blur program");
+		printLinkErrors(blur_p, "blur");
 		glValidateProgram(blur_p);
 	
 		sl.deleteShaders();
@@ -1201,27 +1008,13 @@ static void reloadShaders() {
 		toLDR_p = glCreateProgram();
 		ShaderLoader sl{};
 
-		sl.addShaderFromCode(
-			R"(#version 460				
-
-				void main() {
-					const vec2 verts[] = {
-						vec2(-1, -1),
-						vec2(+3, -1),
-						vec2(-1, +3)
-					};
-					gl_Position = vec4(verts[gl_VertexID], 0, 1);
-				}
-			)", 
-			GL_VERTEX_SHADER,
-			"to LDR vertex"
-		);
+		sl.addShaderFromCode(triangleVertex, GL_VERTEX_SHADER, "to LDR vertex");
 		sl.addShaderFromProjectFileName("shaders/toLDR.frag", GL_FRAGMENT_SHADER, "to LDR shader");
 	
 		sl.attachShaders(toLDR_p);
 	
 		glLinkProgram(toLDR_p);
-		printLinkErrors(toLDR_p, "to LDR program");
+		printLinkErrors(toLDR_p, "to LDR");
 		glValidateProgram(toLDR_p);
 	
 		sl.deleteShaders();
@@ -1891,7 +1684,7 @@ int main(void) {
 	auto const a2{ std::chrono::steady_clock::now() };
 	updateChunks(chunks);
 	auto const a3{ std::chrono::steady_clock::now() };
-	reloadShaders();
+	reload(Reload::everything);
 	auto const a4{ std::chrono::steady_clock::now() };
 	
 	#define b(ARG) ( double(std::chrono::duration_cast<std::chrono::microseconds>(ARG).count()) / 1000.0 )
@@ -1959,15 +1752,6 @@ int main(void) {
 		if(numpad[2]) offset += curTime - lastTime;
 		lastTime = curTime;
 		glUniform1f(time_u, offset / 1000.0);
-		
-		if(testInfo) {
-			std::cout.precision(17);
-			std::cout << pos::fracToPos(currentCoord().in<pos::Chunk>()) << '\n';
-			std::cout.precision(2);
-			std::cout << currentCoord().as<pos::Block>().valIn<pos::Chunk>() << '\n';
-			std::cout << currentCoord().valAs<pos::Chunk>() << '\n';
-			std::cout << "----------------------------\n";
-		}
 		
 		static pChunk lastCameraChunkCoord{};
 		
@@ -2138,10 +1922,14 @@ int main(void) {
 			}
 			
 			glUseProgram(toLDR_p);
-			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			
+			if(takeScreenshot) glBindFramebuffer(GL_FRAMEBUFFER, screenshot_fb);
+			else               glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			
 			glUniform1f(ldr_exposure_u, exposure);
 			glUniform1i(ldr_sampler_u, render_it);
 			glUniform1i(ldr_blurSampler_u, pp1_it);
+			
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 			
 			if(numpad[3]) glFinish();
@@ -2151,24 +1939,23 @@ int main(void) {
 			
 			if(takeScreenshot) {
 				takeScreenshot = false;
-				
-				glBindFramebuffer(GL_FRAMEBUFFER, screenshot_fb);
-				glUniform2ui(windowSize_u, screenshotSize.x, screenshotSize.y);
-				glViewport(0, 0, screenshotSize.x, screenshotSize.y);
-				
-				glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 				glFinish();
 				
-				glBindFramebuffer(GL_FRAMEBUFFER, 0);
-				glUniform2ui(windowSize_u, windowSize.x, windowSize.y);
-				glViewport(0, 0, windowSize.x, windowSize.y);
-				
-				std::unique_ptr<uint8_t[]> data{ new uint8_t[3 * screenshotSize.x * screenshotSize.y] };
+				std::unique_ptr<uint8_t[]> data{ new uint8_t[3 * windowSize.x * windowSize.y] };
 				
 				glActiveTexture(GL_TEXTURE0 + screenshotColor_it);
 				glGetTexImage(GL_TEXTURE_2D, 0, GL_BGR, GL_UNSIGNED_BYTE, data.get());
 				
-				generateBitmapImage(data.get(), screenshotSize.y, screenshotSize.x, "screenshot.bmp");
+				generateBitmapImage(data.get(), windowSize.y, windowSize.x, "screenshot.bmp");
+				
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, screenshot_fb);
+				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+				glBlitFramebuffer(	
+					0, 0, windowSize.x, windowSize.y,
+					0, 0, windowSize.x, windowSize.y,
+					GL_COLOR_BUFFER_BIT, GL_NEAREST 
+				);
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
 			}
 			
 			auto const diffMs{ std::chrono::duration_cast<std::chrono::microseconds>(endTraceTime - startTraceTime).count() / 1000.0 };
@@ -2335,20 +2122,10 @@ int main(void) {
 			glDisable(GL_BLEND);
 		}
 		
-		testInfo = false; 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 		
-		static GLenum lastError;
-        while ((err = glGetError()) != GL_NO_ERROR) {
-			if(lastError == err) {
-				
-			}
-            else { 
-				std::cout << "glError: " << err << std::endl;
-				lastError = err;
-			}
-		}
+		ce
 		
         update(chunks);
 		
@@ -2367,20 +2144,18 @@ int main(void) {
     }
     glfwTerminate();
 	
-	{
-		if(saveChunks) {
-			int count = 0;
-			
-			for(auto const chunkIndex : chunks.usedChunks()) {
-				auto chunk{ chunks[chunkIndex] };
-				if(chunk.modified()) {
-					writeChunk(chunk, worldName);
-					count++;
-				}
+	if(saveChunks) {
+		int count = 0;
+		
+		for(auto const chunkIndex : chunks.usedChunks()) {
+			auto chunk{ chunks[chunkIndex] };
+			if(chunk.modified()) {
+				writeChunk(chunk, worldName);
+				count++;
 			}
-			
-			std::cout << "saved chunks count: " << count;
 		}
+		
+		std::cout << "saved chunks count: " << count;
 	}
 	
     return 0;
