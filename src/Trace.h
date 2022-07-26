@@ -123,8 +123,7 @@ struct Intersection {
 	vec3b intersectionAxis;
 };
 
-template<typename StopAtBlock>
-inline std::optional<Intersection> trace(chunk::Chunks &chunks, PosDir const pd, StopAtBlock &&stopAtBlock) {
+inline std::optional<Intersection> trace(chunk::Chunks &chunks, PosDir const pd) {
 	DDA checkBlock{ pd };
 	
 	for(int i = 0;; i++) {
@@ -148,7 +147,7 @@ inline std::optional<Intersection> trace(chunk::Chunks &chunks, PosDir const pd,
 		
 		auto const chunk{ chunks[chunkIndex.get()] };
 		
-		if(stopAtBlock(chunk.data().cubeAt2(cubeCoordInChunk))) return { Intersection{ 
+		if(chunk.data().cubeAt2(cubeCoordInChunk) != 0) return { Intersection{ 
 			cubePos,
 			chunk, 
 			cubeCoordInChunk, 
@@ -166,60 +165,3 @@ inline std::optional<Intersection> trace(chunk::Chunks &chunks, PosDir const pd,
 
 	return {};
 }
-
-/*struct BlockIntersection {
-	chunk::Chunk chunk;
-	int16_t blockIndex;
-	uint8_t cubeIndex;
-	vec3i intersectionAxis;
-};
-
-static std::optional<BlockIntersection> trace(chunk::Chunks &chunks, PosDir const pd) {
-	DDA checkBlock{ pd };
-		
-	chunk::Move_to_neighbour_Chunk mtnChunk{ chunks, pd.chunk };
-		
-	vec3i intersectionAxis{0};
-	for(int i = 0;; i++) {
-		vec3l const intersection{ checkBlock.get_current() };
-		
-		pos::Cube const cubePos{
-			pos::Chunk{ pd.chunk }.valAs<pos::Cube>()
-			+ pos::Fractional(intersection).valAs<pos::Cube>()
-			+ pd.direction.min(0) * intersectionAxis
-		};
-		
-		auto const cubeLocalCoord{ 
-			cubePos.value().applied([](auto const coord, auto i) -> int32_t {
-				return int32_t(misc::mod<int64_t>(coord, units::cubesInBlockDim));
-			})
-		};
-		
-		auto const chunkIndex{ mtnChunk.move(cubePos.valAs<pos::Chunk>()).get() };
-		if(chunkIndex == -1) break;
-		
-		auto const blockInChunkCoord{ cubePos.as<pos::Block>().valIn<pos::Chunk>() };
-		auto const blockIndex{ chunk::blockIndex(blockInChunkCoord) };
-		
-		auto const chunk{ chunks[chunkIndex] };
-		if(chunk.data().cubeAt(cubePos.valIn<pos::Chunk>()).isSolid) return { BlockIntersection{ 
-			chunk, 
-			blockIndex, 
-			chunk::Block::cubePosIndex(cubeLocalCoord), 
-			intersectionAxis 
-		} };
-		
-		if(i >= 10000) {
-			std::cout << __FILE__ << ':' << __LINE__ << " error: to many iterations!" << pd << '\n'; 
-			break;
-		}
-		
-		if(checkBlock.get_end()) {
-			break;
-		}
-		
-		intersectionAxis = vec3i(checkBlock.next());
-	}
-
-	return {};
-}*/

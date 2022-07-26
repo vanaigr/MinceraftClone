@@ -1235,7 +1235,7 @@ bool performBlockAction() {
 	vec3i const dirSign{ pd.direction };
 	
 	if(blockAction == BlockAction::BREAK) {
-		auto optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id) { return id != 0; }) };
+		auto optionalResult{ trace(chunks, pd) };
 		
 		if(!optionalResult) return false;
 		
@@ -1326,7 +1326,7 @@ bool performBlockAction() {
 		});
 	}
 	else {
-		auto optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id) { if(ctrl) return id != 0; else return !placeThrough(id); }) };
+		auto optionalResult{ trace(chunks, pd) };
 		
 		if(!optionalResult) return false;
 		
@@ -1339,7 +1339,7 @@ bool performBlockAction() {
 			auto const startBlockId{ startChunk.blocks()[result.cubeInChunkCoord.as<pBlock>()].id() };
 			auto const canPlaceStartingBlock{ placeThrough(startBlockId) };
 			
-			if(ctrl && canPlaceStartingBlock) {
+			if(canPlaceStartingBlock && !ctrl) {
 				return std::make_tuple(startChunk, result.cubeInChunkCoord);
 			}
 			else {
@@ -1989,7 +1989,7 @@ int main() {
 		
 		{ //draw block hitbox
 			PosDir const pd{ PosDir(cameraCoord, pos::posToFracTrunk(forwardDir * 7).value()) };
-			auto const optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id){ return id != 0; }) };
+			auto const optionalResult{ trace(chunks, pd) };
 				
 			if(optionalResult) {
 				auto const result{ *optionalResult };
@@ -2045,7 +2045,7 @@ int main() {
 				#endif
 				
 				PosDir const pd{ PosDir(cameraCoord, pos::posToFracTrunk(viewportCurrent.forwardDir() * 7).value()) };
-				auto const optionalResult{ trace(chunks, pd, [](chunk::Block::id_t const id){ return id != 0; }) };
+				auto const optionalResult{ trace(chunks, pd) };
 				if(optionalResult) {
 					auto const result{ *optionalResult };
 					auto const chunk { result.chunk };
