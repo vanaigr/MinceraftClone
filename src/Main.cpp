@@ -163,7 +163,7 @@ Input &currentInput() {
 static bool debugInfo{ false };
 static bool numpad[10];
 
-bool mouseCentered = true;
+static bool mouseCentered{ true };
 
 enum class BlockAction {
 	NONE = 0,
@@ -434,30 +434,14 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     ctrl = (mods & GLFW_MOD_CONTROL) != 0;
 }
 
-static vec2d pmousePos_{0};
+static vec2<double> pmousePos(0, 0);
 static void cursor_position_callback(GLFWwindow* window, double mousex, double mousey) noexcept {
-    static vec2<double> relativeTo{ 0, 0 };
-    vec2<double> mousePos_{ mousex,  mousey };
-    
-	if(mouseCentered) { //TODO
-		relativeTo += mousePos_ - pmousePos_;
-	} 
-	else {
-		relativeTo += mousePos_;
-		mousePos_.x = misc::modf(mousePos_.x, windowSize_d().x);
-		mousePos_.y = misc::modf(mousePos_.y, windowSize_d().y);
-		relativeTo -= mousePos_;
-		glfwSetCursorPos(window, mousePos_.x, mousePos_.y);
-	}
-	pmousePos_ = mousePos_;
+	//https://github.com/glfw/glfw/issues/1523
 	
-	static vec2<double> pmousePos(0, 0);
-    vec2<double> const mousePos = vec2<double>(relativeTo.x + mousePos_.x, relativeTo.y + mousePos_.y);
-	
+    vec2<double> mousePos{ mousex, mousey };
 	if(mouseCentered) {
 		deltaRotation += (mousePos - pmousePos) / windowSize_d() * mouseSensitivity;
 	}
-	
 	pmousePos = mousePos;
 }
 
@@ -471,7 +455,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 	else if(button == GLFW_MOUSE_BUTTON_MIDDLE) {
 		isSmoothCamera = action != GLFW_RELEASE;
 		if(!isSmoothCamera) {
-			viewportDesired.rotation = viewportCurrent.rotation; //may reset changes from cursor_position_callback
+			viewportDesired.rotation = viewportCurrent.rotation;
 		}
 	}
 }
@@ -481,7 +465,7 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) 
 	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 16);
 }
 
-void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) noexcept {
 	newWindowSize = { width, height };
 }
 
@@ -1587,7 +1571,7 @@ void drawBlockHitbox(vec3f const blockRelativePos, float const size, float const
 	glDisable(GL_DEPTH_TEST);
 }
 
-int main(void) {
+int main() {
 	auto const startupTime{ std::chrono::steady_clock::now() };
     if (!glfwInit()) return -1;
 
@@ -1597,14 +1581,14 @@ int main(void) {
 #else
     monitor = NULL;
 #endif // !FULLSCREEN
-	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);  
+	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
     window = glfwCreateWindow(windowSize.x, windowSize.y, "Minceraft clone", monitor, NULL);
-
+	
     if (!window) {
         glfwTerminate();
         return -1;
     }
-
+	
     glfwMakeContextCurrent(window);
 	if(mouseCentered) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	
@@ -1625,16 +1609,16 @@ int main(void) {
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); 
 		glDebugMessageCallback(glDebugOutput, nullptr);
 		glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
-	} 
+	}
 
-    //callbacks
+	//callbacks
     glfwSetKeyCallback(window, key_callback);
     glfwSetCursorPosCallback(window, cursor_position_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
-    glfwSetScrollCallback(window, scroll_callback);
-	glfwSetCursorPos(window, 0, 0);
-	cursor_position_callback(window, 0, 0);
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+	
+	glfwGetCursorPos(window, &pmousePos.x, &pmousePos.y);
+    glfwSetScrollCallback(window, scroll_callback);
 	
 	
 	int constexpr charsCount{ 512*8 };
