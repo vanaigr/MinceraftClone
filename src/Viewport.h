@@ -76,12 +76,11 @@ struct Viewport {
 };
 
 struct Camera {
-	double aspectRatio;// height / width
 	double fov;
 	double near, far;
 	
 	template<typename O, typename = std::enable_if_t<std::is_convertible<double, O>::value>>
-	void projectionMatrix(O (*mat_out)[4][4]) const {		
+	void projectionMatrix(double const aspectRatio/*height / width*/, O (*mat_out)[4][4]) const {		
 		auto const htF{ tan(fov / 2.0) };
 		O const pm[4][4] = {
 			{ static_cast<O>(1/htF*aspectRatio), static_cast<O>(0.0), static_cast<O>(0), static_cast<O>(0.0) },

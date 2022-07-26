@@ -61,14 +61,15 @@ GLenum glCheckError_(const char *file, int line)
 //#define FULLSCREEN
 
 #ifdef FULLSCREEN
-static vec2i windowSize_{ 1920, 1080 };
+static vec2i windowSize{ 1920, 1080 };
 #else
-static vec2i windowSize_{ 1280, 720 };
+static vec2i windowSize{ 1280, 720 };
 #endif // FULLSCREEN
 
-static vec2i const windowSize { windowSize_ };
-static vec2d const windowSize_d { windowSize.convertedTo<double>() };
-static double const aspect{ windowSize_d.y / windowSize_d.x };
+static vec2i newWindowSize{ windowSize };
+
+static vec2d windowSize_d() { return windowSize.convertedTo<double>(); };
+static double aspect() { return windowSize_d().y / windowSize_d().x; };
 
 static bool lockFramerate = false;
 
@@ -88,10 +89,10 @@ static int chunkUpdatesPerFrame = 5;
 static double const playerHeight{ 1.95 };
 static double const playerWidth{ 0.6 };
 
-static int64_t const height_i{ units::posToFracRAway(playerHeight).value() };
 static int64_t const width_i{ units::posToFracRAway(playerWidth).value() };
-// /*static_*/assert(dimensions->x % 2 == 0);
-// /*static_*/assert(dimensions->z % 2 == 0);
+static int64_t const height_i{ units::posToFracRAway(playerHeight).value() };
+// /*static_*/assert(width_i % 2 == 0);
+// /*static_*/assert(height_i % 2 == 0);
 
 vec3l const playerOffsetMin{ -width_i/2, 0       , -width_i/2 };
 vec3l const playerOffsetMax{  width_i/2, height_i,  width_i/2 };
@@ -110,7 +111,6 @@ static pos::Fractional playerCamPos{playerCoord + playerCameraOffset}; //positio
 static pos::Fractional spectatorCoord{ playerCoord };
 
 static Camera desiredPlayerCamera{
-	aspect,
 	90.0 / 180.0 * misc::pi,
 	0.001,
 	800
@@ -302,32 +302,36 @@ static void reload(Reload::Flags flags) {
 	if(Reload::is(Reload::shader, flags)) reloadShaders();
 }
 
-static void useTraceBuffer() {
-	static bool is = false;
-	
+
+static bool reloadTraceBuffer(bool const is) {
 	if(!is) {
+		const size_t size{ windowSize.x * windowSize.y * (20 * 8*sizeof(uint32_t) + sizeof(uint32_t)) };
+		
 		glDeleteBuffers(1, &traceTest_ssbo);
 		glGenBuffers   (1, &traceTest_ssbo);
-		const size_t size{ windowSize.x*windowSize.y * (20 * 8*sizeof(uint32_t) + sizeof(uint32_t)) };
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, traceTest_ssbo);
 		glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL, GL_STATIC_COPY);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, traceTest_b, traceTest_ssbo);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
 		
-		
 		if(GLenum errorCode = glGetError(); errorCode == GL_OUT_OF_MEMORY) {
 			std::cout << "unable to allocate " << float(double(size) / 1024 / 1024) << " Mb\n";
+			return false;
 		}
 		else {
-			is = true;
 			std::cout << "trace buffer (" << float(double(size) / 1024 / 1024) << " Mb) enabled\n";
+			return true;
 		}
 	}
 	else {
 		glDeleteBuffers(1, &traceTest_ssbo);
-		is = false;
 		std::cout << "trace buffer disabled\n";
+		return false;
 	}
+}
+static bool is{ false };	
+static void useTraceBuffer() {
+	is = reloadTraceBuffer(is);
 }
 
 
@@ -430,17 +434,18 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     ctrl = (mods & GLFW_MOD_CONTROL) != 0;
 }
 
+static vec2d pmousePos_{0};
 static void cursor_position_callback(GLFWwindow* window, double mousex, double mousey) noexcept {
     static vec2<double> relativeTo{ 0, 0 };
-	static vec2d pmousePos_{0};
     vec2<double> mousePos_{ mousex,  mousey };
     
-	if(mouseCentered) {
+	if(mouseCentered) { //TODO
 		relativeTo += mousePos_ - pmousePos_;
-	} else {
+	} 
+	else {
 		relativeTo += mousePos_;
-		mousePos_.x = misc::modf(mousePos_.x, windowSize_d.x);
-		mousePos_.y = misc::modf(mousePos_.y, windowSize_d.y);
+		mousePos_.x = misc::modf(mousePos_.x, windowSize_d().x);
+		mousePos_.y = misc::modf(mousePos_.y, windowSize_d().y);
 		relativeTo -= mousePos_;
 		glfwSetCursorPos(window, mousePos_.x, mousePos_.y);
 	}
@@ -449,8 +454,8 @@ static void cursor_position_callback(GLFWwindow* window, double mousex, double m
 	static vec2<double> pmousePos(0, 0);
     vec2<double> const mousePos = vec2<double>(relativeTo.x + mousePos_.x, relativeTo.y + mousePos_.y);
 	
-	if( mouseCentered) {
-		deltaRotation += (mousePos - pmousePos) / windowSize_d * mouseSensitivity;
+	if(mouseCentered) {
+		deltaRotation += (mousePos - pmousePos) / windowSize_d() * mouseSensitivity;
 	}
 	
 	pmousePos = mousePos;
@@ -475,6 +480,11 @@ static int blockPlaceId = 1;
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) noexcept {
 	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 16);
 }
+
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+	newWindowSize = { width, height };
+}
+
 
 static bool checkChunkInView(vec3i const coord) {
 	return coord.clamp(-viewDistance, +viewDistance) == coord;
@@ -1588,10 +1598,9 @@ int main(void) {
     monitor = NULL;
 #endif // !FULLSCREEN
 	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);  
-    window = glfwCreateWindow(windowSize.x, windowSize.y, "VMC", monitor, NULL);
+    window = glfwCreateWindow(windowSize.x, windowSize.y, "Minceraft clone", monitor, NULL);
 
-    if (!window)
-    {
+    if (!window) {
         glfwTerminate();
         return -1;
     }
@@ -1625,6 +1634,8 @@ int main(void) {
     glfwSetScrollCallback(window, scroll_callback);
 	glfwSetCursorPos(window, 0, 0);
 	cursor_position_callback(window, 0, 0);
+	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+	
 	
 	int constexpr charsCount{ 512*8 };
 	GLuint fontVB;
@@ -1710,13 +1721,25 @@ int main(void) {
 		auto const cameraChunk{ cameraCoord.valAs<pos::Chunk>() };
 		auto const cameraPosInChunk{ pos::fracToPos(cameraCoord.in<pos::Chunk>()) };
 		
+		if(newWindowSize != windowSize) {
+			auto const resizeFB{ (newWindowSize > windowSize).any() };
+			windowSize = newWindowSize;
+			
+			if(resizeFB) {
+				reloadFramebuffers();
+				reloadTraceBuffer(is);
+			}
+			
+			glViewport(0, 0, windowSize.x, windowSize.y);
+		}
+		
 		{ //set properties
 			//screen size
 			GLint screenSize[2] = { windowSize.x, windowSize.y };
 			
 			//projection
 			float projection[4][4];
-			currentCamera().projectionMatrix(&projection);
+			currentCamera().projectionMatrix(aspect(), &projection);
 		
 			GLfloat projectionT[4][4];
 			
@@ -1727,7 +1750,7 @@ int main(void) {
 			//time
 			static double lastTime{};
 			double curTime{ std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - completionTime).count() / 1000.0 };
-		
+			
 			static double offset{};
 			if(!numpad[2]) offset += curTime - lastTime;
 			lastTime = curTime;
@@ -2096,11 +2119,12 @@ int main(void) {
 			
 			std::array<std::array<vec2f, 4>, charsCount> data;
 			
-			vec2f const startPoint(textPos.x / windowSize_d.x * 2 - 1, 1 - textPos.y / windowSize_d.y * 2);
+			vec2f const startPoint(textPos.x / windowSize_d().x * 2 - 1, 1 - textPos.y / windowSize_d().y * 2);
 			
 			auto const lineH = font.base();
 			auto const lineHeight = font.lineHeight();
 			float const scale = 5;
+			auto const aspectRatio{ aspect() };
 
 			vec2f currentPoint(startPoint);
 			for(uint64_t i{}; i != textCount; i++) {
@@ -2115,13 +2139,13 @@ int main(void) {
 				if(ch != ' ') data[i] = {
 					//pos
 					currentPoint + vec2f(0, -fc.height + lineH) / scale + charOffset,
-					currentPoint + vec2f(fc.width*aspect, 0 + lineH) / scale + charOffset, 
+					currentPoint + vec2f(fc.width*aspectRatio, 0 + lineH) / scale + charOffset, 
 					//uv
 					vec2f{fc.x, 1-fc.y-fc.height},
 					vec2f{fc.x+fc.width,1-fc.y},
 				};
 				
-				currentPoint += vec2f(fc.xAdvance*aspect, 0) / scale;
+				currentPoint += vec2f(fc.xAdvance*aspectRatio, 0) / scale;
 			}
 
 			glUseProgram(fontProgram);
