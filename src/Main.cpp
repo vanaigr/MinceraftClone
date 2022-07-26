@@ -1366,9 +1366,23 @@ bool performBlockAction() {
 			auto &block{ chunk.data()[blockInChunkCoord] };
 				
 			if(placeThrough(block.id())) {
-				liquid[cubeInChunkPos] = chunk::LiquidCube{ uint16_t(blockPlaceId), 255 };
+				liquid[cubeInChunkPos] = chunk::LiquidCube{ uint16_t(blockPlaceId), chunk::LiquidCube::maxLevel, false };
 				chunks.liquidCubes.add({chunk.chunkIndex(), chunk::cubeCoordToIndex(cubeInChunkPos)});
-				chunk.status().setBlocksUpdated(true);
+				
+				chunk.modified() = true;
+				auto &aabb{ chunk.aabb() };
+				aabb = aabb + Area{blockInChunkCoord, blockInChunkCoord};
+				
+				updateBlocksDataInArea(chunk, first.as<pBlock>() - pBlock{1}, last.as<pBlock>() + pBlock{1});
+				
+				iterate3by3Volume([&, chunk = chunk](vec3i const dir, int const index) {
+					auto const chunkOffset{ (blockInChunkPos + pBlock{dir}).valAs<pChunk>() };
+					auto const chunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(chunkOffset) };
+					if(!chunkIndex.is()) return;
+					auto &chunkStatus{ chunks[chunkIndex.get()].status() };
+					
+					chunkStatus.setBlocksUpdated(true);
+				});
 			}
 			else return false;
 		}
@@ -1378,16 +1392,16 @@ bool performBlockAction() {
 			if(checkCanPlaceBlock(chunkPos + blockInChunkPos) && placeThrough(block.id())) {
 				block = chunk::Block::fullBlock(blockPlaceId);
 				
-				for(int i{}; i < pos::cubesInBlockCount; i++) {
-					auto const curCubeCoord{ blockInChunkPos + pCube{chunk::Block::cubeIndexPos(i)} };	
-					liquid[curCubeCoord] = chunk::LiquidCube{};
+				if(!liquidThrough(blockPlaceId)) {
+					for(int i{}; i < pos::cubesInBlockCount; i++) {
+						auto const curCubeCoord{ blockInChunkPos + pCube{chunk::Block::cubeIndexPos(i)} };	
+						liquid[curCubeCoord] = chunk::LiquidCube{};
+					}
 				}
 				
-				auto const blockId{ block.id() };
-				auto const emitter{ isBlockEmitter(blockId) };
+				auto const emitter{ isBlockEmitter(blockPlaceId) };
 				
-				chunk.modified() = true;
-				
+				chunk.modified() = true;				
 				auto &aabb{ chunk.aabb() };
 				aabb = aabb + Area{blockInChunkCoord, blockInChunkCoord};
 				

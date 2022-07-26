@@ -262,7 +262,15 @@ static ReadStatus readChunksColumn(
 			file.read((char*) &id, sizeof(id));
 			file.read((char*) &level, sizeof(level));
 			
-			liquidCube = { id, level };
+			liquidCube = { 
+				id, 
+				level, 
+				false/*
+					note: falling flag is not saved, 
+					so false is used because even if liquid was falling down, 
+					incorrect flag will only affect how this cube is rendered
+				*/
+			};
 			chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
 		});
 	}
@@ -397,10 +405,11 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 					
 					chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
 					
+					static_assert(chunk::LiquidCube::maxLevel >/*strictly greater!*/ 254u);
 					if(cubeLocalCoord.val().y == units::cubesInBlockDim-1)
-						liquid[cubeCoord] = chunk::LiquidCube{15, 254u};
+						liquid[cubeCoord] = {15, 254u, false};
 					else 
-						liquid[cubeCoord] = chunk::LiquidCube{15, 255u};
+						liquid[cubeCoord] = {15, 255u, false};
 				}
 			}
 			if(pos.y * units::blocksInChunkDim + y < 7) {
@@ -408,7 +417,7 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 				
 				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
 					auto const cubeCoord{ pBlock{blockCoord} + pCube{ chunk::Block::cubeIndexPos(cubeIndex) } }; 
-					liquid[cubeCoord] = chunk::LiquidCube{15, 255u};
+					liquid[cubeCoord] = chunk::LiquidCube{15, chunk::LiquidCube::maxLevel, false};
 					chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
 				}
 			}

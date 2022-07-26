@@ -468,19 +468,20 @@ namespace chunk {
 		
 		Block::id_t id;
 		level_t level;
+		bool falling;
 		
 		LiquidCube() = default;
 		//LiquidCube(Block::id_t const id_, level_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }	
-		LiquidCube(Block::id_t const id_, int level_) //integer promotion
-		: id{id_}, level(level_) {  
+		LiquidCube(Block::id_t const id_, int const level_, bool const falling_) //integer promotion
+		: id{id_}, level(level_), falling{falling_} {  
 			assert(level_ >= minLevel && level <= maxLevel); 
-			if(level == 0) id = 0; 
-		} 
+			if(level == 0 || id == 0) { id = 0; level = 0; falling = false; }
+		}
 		
 		bool isEmpty() const { return id == 0; }
 		
 		friend bool operator==(LiquidCube const f, LiquidCube const s) {
-			return f.id == s.id && f.level == s.level;
+			return f.id == s.id && f.level == s.level && f.falling == s.falling;
 		}
 		friend bool operator!=(LiquidCube const f, LiquidCube const s) { return !(f == s); }
 	};

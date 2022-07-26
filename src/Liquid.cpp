@@ -19,7 +19,7 @@ struct ChunkAndCubeHash {
 	} 
 };
 
-static constexpr chunk::LiquidCube::level_t maxLiquidToNeighbour{8};
+static constexpr chunk::LiquidCube::level_t maxLiquidToNeighbour{255};
 
 template<typename T, int neighbours_>
 struct ChunkBlocksWithNeighbours {
@@ -64,7 +64,11 @@ public:
 	void reset() { data.fill(value_type()); }
 };
 
+static int nmoveDown = 4;
 void chunk::ChunksLiquidCubes::update() {
+	nmoveDown--;
+	if(nmoveDown == -1) nmoveDown = 4;
+	
 	auto &chunks{ this->chunks() };
 	auto &gen{ gens[genIndex] };
 	auto &genNext{ gens[(genIndex+1) % gensCount] };
@@ -178,12 +182,13 @@ void chunk::ChunksLiquidCubes::update() {
 		auto chunk{ chunks[chunkIndex] };
 		auto const cubeCoord{ chunk::cubeIndexToCoord(cubeIndex) };
 	
-		auto &liquidCube{ chunk.liquid()[cubeIndex] };
-		auto const id{ liquidCube.id }; //copy
-		auto level{ liquidCube.level }; //copy
+		auto &liquidCubeLoc{ chunk.liquid()[cubeIndex] };
+		auto const liquidCube{ liquidCubeLoc };
 		
-		auto modified{ false };
+		auto level{ liquidCube.level };
+		auto falling{ liquidCube.falling };
 		auto keepUpdating{ false };
+		auto moveSideways{ true };
 		
 		//move liquid downwards
 		if(level != 0) [&]() {
@@ -192,21 +197,27 @@ void chunk::ChunksLiquidCubes::update() {
 			auto const neighbourCubeInChunkCoord{ neighbourCubePos.in<pos::Chunk>() };
 			
 			auto const neighbourCubeChunkIndex{ chunk::Move_to_neighbour_Chunk{chunk}.offset(neighbourCubeChunkCoord.val()).get() };
-			if(neighbourCubeChunkIndex == -1) return;
+			if(neighbourCubeChunkIndex == -1) { falling = false; return; }
 			
 			auto neighbourCubeChunk{ chunks[neighbourCubeChunkIndex] };
-			if(!liquidThrough(neighbourCubeChunk.data().cubeAt2(neighbourCubeInChunkCoord))) return;
+			if(!liquidThrough(neighbourCubeChunk.data().cubeAt2(neighbourCubeInChunkCoord))) { falling = false; return; }
 			
 			auto &neighbourLiquidCube{ neighbourCubeChunk.liquid()[neighbourCubeInChunkCoord] };
 			auto const toMax( chunk::LiquidCube::maxLevel - neighbourLiquidCube.level );
 			
-			if(toMax > 0 && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
+			if(toMax > 0 && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == liquidCube.id)) {
+				moveSideways = false;
+				
+				if(nmoveDown) {
+					keepUpdating = true;
+					return;
+				}
+				
 				auto diff{ std::min<int>(level, toMax) };
 				//if(diff > maxLiquidToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; } //limit on downwards flow
 				
-				modified = true;
 				level -= diff;		
-				neighbourLiquidCube = { id, neighbourLiquidCube.level + diff };
+				neighbourLiquidCube = { liquidCube.id, neighbourLiquidCube.level + diff, true };
 				
 				genNext.push_back({ neighbourCubeChunkIndex, chunk::cubeCoordToIndex(neighbourCubeInChunkCoord) });
 				blocksUpdatedInPrevChunk[neighbourCubePos.as<pBlock>()] = true;
@@ -216,23 +227,26 @@ void chunk::ChunksLiquidCubes::update() {
 			return;
 		}();
 		
-		//move liquid sideways
-		if(level != 0) [&]() {
+		//move liquid sideways	
+		if(moveSideways && level != 0) [&]() {
+			struct LiquidCubeLevel {
+				chunk::LiquidCube::level_t level;
+				bool update;
+			};
 			struct LiquidCubeAndPos { 
-				chunk::LiquidCube liquidCube; //copy
 				chunk::LiquidCube *liquidCubeLoc; 
+				chunk::LiquidCube liquidCube; //copy
 				
 				chunk::ChunkAndCube posData;
 				pCube cubeCoord;
-				
-				bool modified; 
-				bool valid; 
+				bool valid;
 			};
 			
 			static constexpr int sideNeighboursCount = 4;
 			static constexpr vec3i dirs[sideNeighboursCount] = { {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1} };
 			
-			LiquidCubeAndPos cubes[sideNeighboursCount] = {};
+			LiquidCubeLevel liquidCubes[sideNeighboursCount] = {};
+			LiquidCubeAndPos cubesInfo[sideNeighboursCount] = {};
 			
 			//fill the neighbours
 			for(int i{}; i < sideNeighboursCount; i++) {
@@ -249,11 +263,15 @@ void chunk::ChunksLiquidCubes::update() {
 				if(!liquidThrough(cubeNeighbourChunk.data().cubeAt2(neighbourCubeInChunkCoord))) continue;
 				
 				auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[neighbourCubeInChunkCoord] };
-				if((level > neighbourLiquidCube.level) && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == id)) {
-					cubes[i] = { 
-						neighbourLiquidCube, &neighbourLiquidCube, 
+				if((level > neighbourLiquidCube.level) && (neighbourLiquidCube.id == 0 || neighbourLiquidCube.id == liquidCube.id)) {
+					liquidCubes[i] = {
+						neighbourLiquidCube.level,
+						true
+					};
+					cubesInfo[i] = { 
+						&neighbourLiquidCube, neighbourLiquidCube,
 						{ neighbourCubeChunkIndex, chunk::cubeCoordToIndex(neighbourCubeInChunkCoord) }, neighbourCubePos,
-						false, true
+						true
 					};
 				}
 			}
@@ -263,54 +281,56 @@ void chunk::ChunksLiquidCubes::update() {
 				int validCubesCount{};
 				int liquidTotal{ level };
 				for(int i{}; i < sideNeighboursCount; i++) {
-					auto &cube{ cubes[i] };
-					if(!cube.valid) continue;
+					auto const &neighbourCube{ liquidCubes[i] };
+					if(!neighbourCube.update) continue;
 					validCubesCount++;
-					liquidTotal += cube.liquidCube.level;
+					liquidTotal += neighbourCube.level;
 				}
-				
 				if(validCubesCount == 0) break;
 				
 				auto const avgLevel{ liquidTotal / (validCubesCount+1) }; //this variant leaves MORE liquid in current cube
-				
 				int movedToNeighbours{ 0 };
 				
 				for(int i{}; i < sideNeighboursCount; i++) {
-					auto &cube{ cubes[i] };
-					if(!cube.valid) continue;
+					auto &neighbourCube{ liquidCubes[i] };
+					if(!neighbourCube.update) continue;
 					
-					auto diff{ avgLevel - cube.liquidCube.level };
-					auto const maxToNeighbour{ diff > maxLiquidToNeighbour };
-					if(maxToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; }
+					auto diff{ avgLevel - neighbourCube.level };
+					auto const moreToNeighbour{ diff > maxLiquidToNeighbour };
+					if(moreToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; }
 					
 					if(diff > 0) {
 						movedToNeighbours += diff;
-						cube.liquidCube = { id, cube.liquidCube.level + diff };
-						cube.modified = true;
+						neighbourCube.level += diff;
 					}
 					
-					if(diff <= 0 || maxToNeighbour) cube.valid = false;
+					if(diff <= 0 || moreToNeighbour) neighbourCube.update = false;
 				}
 				
 				if(movedToNeighbours != 0) {
 					level -= movedToNeighbours;
-					modified = true;
 				}
 			}
 			
 			//write modified cubes
 			for(int i{}; i < sideNeighboursCount; i++) {
-				auto &cube{ cubes[i] };
-				if(cube.modified) {
-					*cube.liquidCubeLoc = cube.liquidCube;
-					genNext.push_back(cube.posData);
-					blocksUpdatedInPrevChunk[cube.cubeCoord.as<pBlock>()] = true;
+				auto &neighbourCube{ liquidCubes[i] };
+				auto &neighbourCubeInfo{ cubesInfo[i] };
+				if(!neighbourCubeInfo.valid) continue;
+				
+				chunk::LiquidCube const newCube{ liquidCube.id, neighbourCube.level, neighbourCubeInfo.liquidCube.falling };
+				if(neighbourCubeInfo.liquidCube != newCube) {
+					*neighbourCubeInfo.liquidCubeLoc = newCube;
+					genNext.push_back(neighbourCubeInfo.posData);
+					blocksUpdatedInPrevChunk[neighbourCubeInfo.cubeCoord.as<pBlock>()] = true;
 				}
 			}
 		}();
 		
-		if(modified) {
-			liquidCube = { id, level };
+		//write modified cube
+		chunk::LiquidCube const newLiquidCube{ liquidCube.id, level, falling };
+		if(liquidCube != newLiquidCube) {
+			liquidCubeLoc = newLiquidCube;
 			prevChunk = chunkIndex;
 			blocksUpdatedInPrevChunk[cubeCoord.as<pBlock>()] = true;
 		}
@@ -330,7 +350,7 @@ void chunk::ChunksLiquidCubes::update() {
 				if(!liquidThrough(cubeUpChunk.data().cubeAt2(cubeUpCoord))) return false ;
 				
 				auto &upLiquidCube{ cubeUpChunk.liquid()[cubeUpCubeIndex] };
-				if(upLiquidCube.id == id) {
+				if(upLiquidCube.id == liquidCube.id) {
 					genNext.push_back(neighbourCubePosData);
 					return true;
 				}
@@ -351,7 +371,7 @@ void chunk::ChunksLiquidCubes::update() {
 					if(!liquidThrough(cubeNeighbourChunk.data().cubeAt2(cubeNeighbourCoord))) continue;
 					
 					auto &neighbourLiquidCube{ cubeNeighbourChunk.liquid()[cubeNeighbourCubeIndex] };
-					if(neighbourLiquidCube.level > level && neighbourLiquidCube.id == id) {
+					if(neighbourLiquidCube.level > level && neighbourLiquidCube.id == liquidCube.id) {
 						genNext.push_back(neighbourCubePosData);
 					}
 				}

@@ -353,7 +353,9 @@ LiquidCube liquidAtCube(const int chunkIndex, const ivec3 cubeCoord) {
 	const int cubeIndex = cubeCoord.x + cubeCoord.y * cubesInChunkDim + cubeCoord.z * cubesInChunkDim * cubesInChunkDim;
 	const int index = chunkIndex * cubesInChunkCount + cubeIndex;
 
-	const uint data = chunksLiquid.data[index];
+	uint data = chunksLiquid.data[index];
+	
+	if((data >> 24 & 1) != 0) data |= (0xffu << 16); //set level to maximun if liquid is falling down
 	
 	return LiquidCube(data);
 }
