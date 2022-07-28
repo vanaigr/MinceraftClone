@@ -5,6 +5,28 @@
 #include"Units.h"
 #include"stdint.h"
 
+struct Blocks {
+	enum {
+		airBlock = 0,
+		grassBlock = 1,
+		dirtBlock = 2,
+		planksBlock = 3,
+		woodBlock = 4,
+		leavesBlock = 5,
+		stoneBlock = 6,
+		glassBlock = 7,
+		diamondBlock = 8,
+		obsidianBlock = 9,
+		rainbowBlock = 10,
+		firebrickBlock = 11,
+		stoneBrickBlock = 12,
+		lamp1Block = 13,
+		lamp2Block = 14,
+		water = 15,
+		grass = 16,
+	};
+};
+
 
 inline bool useInAO(chunk::Block::id_t const id) {
 	return id != 0 && id != 5 && id != 7 && id != 16;
