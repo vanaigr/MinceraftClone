@@ -271,7 +271,7 @@ static ReadStatus readChunksColumn(
 					incorrect flag will only affect how this cube is rendered
 				*/
 			);
-			chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
+			if(liquidCube.liquid() && liquidCube.id != 0) chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
 		});
 	}
 

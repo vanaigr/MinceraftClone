@@ -379,11 +379,8 @@ void chunk::ChunksLiquidCubes::update() {
 					if(!liquidThrough(cubeUpChunk.data().cubeAt2(cubeUpCoord))) return false ;
 					
 					auto &upLiquidCube{ cubeUpChunk.liquid()[neighbourCubePosData.cubeIndex] };
-					if(upLiquidCube.id == liquidCube.id) {/*
-						note: inflows and outflows aren't checked, but this should be fine
-						because outflows do nothing and inflows will be updated anyway
-					*/
-						genNext.push_back(neighbourCubePosData);
+					if(upLiquidCube.liquid() && upLiquidCube.level > 0 && upLiquidCube.id == liquidCube.id) {
+						genNext.push_back(neighbourCubePosData);						
 						return true;
 					}
 					return false;
