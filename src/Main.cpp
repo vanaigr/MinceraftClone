@@ -34,6 +34,7 @@
 #include<vector>
 #include<sstream>
 #include<string>
+#include<cstdlib>
 
 //https://learnopengl.com/In-Practice/Debugging
 GLenum glCheckError_(const char *file, int line)
@@ -165,14 +166,22 @@ static bool numpad[10];
 
 static bool mouseCentered{ true };
 
+
 enum class BlockAction {
 	NONE = 0,
 	PLACE,
 	BREAK
 };
 static BlockAction blockAction{ BlockAction::NONE };
-static double const blockActionCD{ 300.0 / 1000.0 };
+namespace LiquidPlaceType { enum LiquidPlaceType { 
+	liquid, inflow, outflow,   typesCount
+}; }/*
+	note: with this method of handling special types, inflow and outflow couldn't
+	be placed at the same time
+*/
+static LiquidPlaceType::LiquidPlaceType liquidPlaceType{ LiquidPlaceType::liquid };
 static bool breakFullBlock{ false };
+static double const blockActionCD{ 300.0 / 1000.0 };
 
 static const Font font{ "./assets/font.txt" };
 
@@ -377,6 +386,9 @@ void handleKey(int const key) {
 	
 	if(key == GLFW_KEY_Z && !isPress) {
 		breakFullBlock = !breakFullBlock;
+	}
+	else if(key == GLFW_KEY_X && !isPress) {
+		liquidPlaceType = LiquidPlaceType::LiquidPlaceType( (liquidPlaceType + 1) % LiquidPlaceType::typesCount );
 	}
 	
 	if(key == GLFW_KEY_MINUS && isPress) zoom = 1 + (zoom - 1) * 0.95;
@@ -1362,11 +1374,21 @@ bool performBlockAction() {
 		pCube const first{ blockInChunkPos                        };
 		pCube const last { blockInChunkPos + pBlock{1} - pCube{1} };
 		
-		if(blockPlaceId == 15) { //water
-			auto &block{ chunk.data()[blockInChunkCoord] };
+		if(blockPlaceId == Blocks::water) {
+			auto const cubeId{ chunk.data().cubeAt2(cubeInChunkPos) };
 				
-			if(placeThrough(block.id())) {
-				liquid[cubeInChunkPos] = chunk::LiquidCube{ uint16_t(blockPlaceId), chunk::LiquidCube::maxLevel, false };
+			if(placeThrough(cubeId)) {
+				if(liquidPlaceType == LiquidPlaceType::liquid) {
+					liquid[cubeInChunkPos] = chunk::LiquidCube::liquid(blockPlaceId, chunk::LiquidCube::maxLevel, false);
+				}
+				else if(liquidPlaceType == LiquidPlaceType::inflow) {
+					liquid[cubeInChunkPos] = chunk::LiquidCube::special(blockPlaceId, chunk::LiquidCube::maxLevel, true, false);
+				}
+				else if(liquidPlaceType == LiquidPlaceType::outflow) {
+					liquid[cubeInChunkPos] = chunk::LiquidCube::special(blockPlaceId, chunk::LiquidCube::minLevel/*!*/, false, true);			
+				}
+				else assert(false && "unreachable (LiquidPlaceType)");
+				
 				chunks.liquidCubes.add({chunk.chunkIndex(), chunk::cubeCoordToIndex(cubeInChunkPos)});
 				
 				chunk.modified() = true;

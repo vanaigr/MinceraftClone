@@ -28,10 +28,10 @@ inline void iterateCubeNeighbours(
 	
 	for(auto i{decltype(chunk::ChunkLighting::dirsCount){}}; i < chunk::ChunkLighting::dirsCount; i++) {
 		auto const neighbourDir{ chunk::ChunkLighting::indexAsDir(i) };
-		auto const [neighbourCubeChunkIndex, neighbourCubeInChunkIndex] = getNeighbourCube(cubeChunk, pCube{cubeCoord}, neighbourDir);
-		if(neighbourCubeChunkIndex == -1) continue;
+		auto const neighbourCube{ getNeighbourCube(cubeChunk, pCube{cubeCoord}, neighbourDir) };
+		if(neighbourCube.chunkIndex == -1) continue;
 
-		action(neighbourDir, chunks[neighbourCubeChunkIndex], chunk::cubeIndexToCoord(neighbourCubeInChunkIndex).val());
+		action(neighbourDir, chunks[neighbourCube.chunkIndex], chunk::cubeIndexToCoord(neighbourCube.cubeIndex).val());
 	}
 }
 

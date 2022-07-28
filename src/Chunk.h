@@ -466,22 +466,28 @@ namespace chunk {
 		static constexpr level_t maxLevel = std::numeric_limits<level_t>::max();
 		static constexpr level_t minLevel = std::numeric_limits<level_t>::lowest();
 		
-		Block::id_t id;
-		level_t level;
-		bool falling;
-		
-		LiquidCube() = default;
-		//LiquidCube(Block::id_t const id_, level_t level_) : id{id_}, level{level_} { if(level == 0) id = 0; }	
-		LiquidCube(Block::id_t const id_, int const level_, bool const falling_) //integer promotion
-		: id{id_}, level(level_), falling{falling_} {  
-			assert(level_ >= minLevel && level <= maxLevel); 
-			if(level == 0 || id == 0) { id = 0; level = 0; falling = false; }
+		static LiquidCube liquid(Block::id_t const id, int const level, bool const falling) {
+			assert(level >= minLevel && level <= maxLevel); 
+			if(level == 0 || id == 0) return {};
+			else return { id, level_t(level), falling, false, false };
 		}
 		
-		bool isEmpty() const { return id == 0; }
+		static LiquidCube special(Block::id_t const id, int const level, bool const inflow, bool const outflow) {
+			assert(level >= minLevel && level <= maxLevel); 
+			return { id, level_t(level), false, inflow, outflow }; //allows level to be equal to 0
+		}
+	public:
+		Block::id_t id;
+		level_t level;
+		uint8_t falling : 1;
+		uint8_t inflow  : 1;
+		uint8_t outflow : 1;
+	public:
+		constexpr bool liquid() const { return !inflow && !outflow; }
 		
 		friend bool operator==(LiquidCube const f, LiquidCube const s) {
-			return f.id == s.id && f.level == s.level && f.falling == s.falling;
+			return f.id == s.id && f.level == s.level && f.falling == s.falling
+				&& f.inflow == s.inflow && f.outflow == s.outflow;
 		}
 		friend bool operator!=(LiquidCube const f, LiquidCube const s) { return !(f == s); }
 	};
@@ -630,19 +636,25 @@ namespace chunk {
 	};
 	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);
 	
-	using chunkIndex_t = int32_t;
+	using chunkIndex_t = int32_t;	
 	struct ChunkAndCube {
-		chunk::chunkIndex_t chunkIndex;
 		chunk::CubeInChunkIndex cubeIndex;
+		chunk::chunkIndex_t chunkIndex;
 		
-		constexpr bool operator==(ChunkAndCube const it) const  noexcept {
-			return chunkIndex == it.chunkIndex && cubeIndex == it.cubeIndex;
+		ChunkAndCube() noexcept = default;
+		ChunkAndCube(chunk::chunkIndex_t const chunkIndex_, chunk::CubeInChunkIndex const cubeIndex_) noexcept
+		: cubeIndex{ cubeIndex_ }, chunkIndex{ chunkIndex_ } {}
+		
+		friend constexpr bool operator==(ChunkAndCube const f, ChunkAndCube const s)  noexcept {
+			return f.chunkIndex == s.chunkIndex && f.cubeIndex == s.cubeIndex;
 		}	
 		
-		constexpr bool operator<(ChunkAndCube const it) const noexcept {
-			if(chunkIndex < it.chunkIndex) return true;
-			else if(chunkIndex > it.chunkIndex) return false;
-			else return cubeIndex < it.cubeIndex;
+		friend constexpr bool operator<(ChunkAndCube const f, ChunkAndCube const s) noexcept {
+			static_assert(sizeof(cubeIndex) <= 4);
+			auto const fValue{ f.cubeIndex | (uint64_t(f.chunkIndex) << 32) };
+			auto const sValue{ s.cubeIndex | (uint64_t(s.chunkIndex) << 32) };
+			
+			return fValue < sValue;
 		}
 	};
 	
