@@ -474,7 +474,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 
 static int blockPlaceId = 1;
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) noexcept {
-	blockPlaceId = 1+misc::mod(blockPlaceId-1 + int(yoffset), 16);
+	blockPlaceId = 1+misc::mod<int>(blockPlaceId-1 + int(yoffset), Blocks::blocksCount-1);
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) noexcept {
@@ -784,6 +784,15 @@ static void reloadShaderStorageBuffers() {
 			c(17, 0), c(17, 0), c(17, 0), c(0, 1), //lamp 2
 			c(18, 0), c(18, 0), c(18, 0), c(0, 1), //water
 			c(19, 0), c(19, 0), c(19, 0), c(19, 1), //grass
+			c(20, 0), c(20, 0), c(20, 0), c(20, 1), //glassMagentaBlock
+			c(21, 0), c(21, 0), c(21, 0), c(21, 1), //glassVioletBlock
+			c(22, 0), c(22, 0), c(22, 0), c(22, 1), //glassBlueBlock
+			c(23, 0), c(23, 0), c(23, 0), c(23, 1), //glassCyanBlock
+			c(24, 0), c(24, 0), c(24, 0), c(24, 1), //glassTurquoiseBlock
+			c(25, 0), c(25, 0), c(25, 0), c(25, 1), //glassGreenBlock
+			c(26, 0), c(26, 0), c(26, 0), c(26, 1), //glassYellowBlock
+			c(27, 0), c(27, 0), c(27, 0), c(27, 1), //glassOrangeBlock
+			c(28, 0), c(28, 0), c(28, 0), c(28, 1), //glassRedBlock
 		};
 		
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, atlasDescription_ssbo);

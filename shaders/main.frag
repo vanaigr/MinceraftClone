@@ -87,6 +87,40 @@ bool exit_ = false;
 vec3 exitVec3 = vec3(5,5,5);
 #endif
 
+
+const uint airBlock = 0u;
+const uint grassBlock = 1u;
+const uint dirtBlock = 2u;
+const uint planksBlock = 3u;
+const uint woodBlock = 4u;
+const uint leavesBlock = 5u;
+const uint stoneBlock = 6u;
+const uint glassBlock = 7u;
+const uint diamondBlock = 8u;
+const uint obsidianBlock = 9u;
+const uint rainbowBlock = 10u;
+const uint firebrickBlock = 11u;
+const uint stoneBrickBlock = 12u;
+const uint lamp1Block = 13u;
+const uint lamp2Block = 14u;
+const uint water = 15u;
+const uint grass = 16u;
+const uint glassRedBlock = 17u;
+const uint glassOrangeBlock = 18u;
+const uint glassYellowBlock = 19u;
+const uint glassGreenBlock = 20u;
+const uint glassTurquoiseBlock = 21u;
+const uint glassCyanBlock = 22u;
+const uint glassBlueBlock = 23u;
+const uint glassVioletBlock = 24u;
+const uint glassMagentaBlock = 25u;
+
+const uint blocksCount = 26u;
+
+bool isGlass(const uint id) {
+	return id == glassBlock || (id >= glassRedBlock && id <= glassMagentaBlock);
+}
+
 //copied from Units.h
 const int blocksInChunkDimAsPow2 = 4;
 const int blocksInChunkDim = 1 << blocksInChunkDimAsPow2;
@@ -1100,8 +1134,8 @@ BlocksIntersection blocksIntersection(
 		
 		if(blockId == 0) continue; 
 		if(intersectionSide == bvec3(false) || !alphaTest(ray.orig, vec3(intersectionSide), dirSign, blockCoord, blockId)) continue;
-		if(blockId == lowestIntersectionId && (blockId == 7 || blockId == 15)) { lowestIntersectionId = 0; continue; }
-		if(lowestIntersectionId != 0 && lowestIntersectionId != 15 && blockId == 15) continue; //ignore water backside
+		if(blockId == lowestIntersectionId && (isGlass(blockId) || blockId == water)) { lowestIntersectionId = 0; continue; }
+		if(lowestIntersectionId != 0 && lowestIntersectionId != water && blockId == water) continue; //ignore water backside
 		
 		if(surface < bias) continue;
 		lowestIntersectionId = blockId;
@@ -1359,8 +1393,8 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 	const bool isLighting = current.rayType == rayTypeLightingBlock;
 	const uint surfaceId = current.surfaceId;
 	
-	if(surfaceId == 7 || surfaceId == 15) {
-		const bool glass = surfaceId == 7;
+	if(isGlass(surfaceId) || surfaceId == 15) {
+		const bool glass = isGlass(surfaceId);
 		
 		const float fresnel = unpackHalf2x16(current.data).x;
 		const bool backside = bool(current.data >> 16);
@@ -1625,7 +1659,7 @@ RayResult resolveIntersection(const int iteration) {
 		
 		float light;
 		float ambient;
-		if(!shadow && !isPlayer && iteration < 3) {				
+		if(!shadow && !isPlayer) {				
 			const ivec3 otherAxis1 = intersectionSide.x ? ivec3(0,1,0) : ivec3(1,0,0);
 			const ivec3 otherAxis2 = intersectionSide.z ? ivec3(0,1,0) : ivec3(0,0,1);
 			const ivec3 vertexCoord = ivec3(floor(coord * cubesInBlockDim)) - chunkPosition * cubesInChunkDim;//cubeLocalToChunk(cubeCoord);
@@ -1665,8 +1699,8 @@ RayResult resolveIntersection(const int iteration) {
 			ambient = 1;
 		}
 		
-		if(blockId == 7 || blockId == 15) {
-			const bool glass = blockId == 7;
+		if(isGlass(surfaceId) || blockId == 15) {
+			const bool glass = isGlass(surfaceId);
 
 			const float offsetMag = clamp(t * 50 - 0.01, 0, 1);
 			const vec3 glassOffset = vec3( 
