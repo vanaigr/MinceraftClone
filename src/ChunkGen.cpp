@@ -69,7 +69,7 @@ static void writeChunksColumn(chunk::Chunks &chunks, vec2<pChunk::value_type::va
 	std::ofstream file{ ss.str(), std::ios::binary };
 	if(!file) { std::cout << "ERROR: could not write chunk column " << xz << '\n'; return; }
 	
-	uint32_t const version{};
+	uint32_t const version{ 1 };
 	file.write((char*) &version, sizeof(version));
 	
 	chunk::MovingChunk curMChunk{ chunks, vec3i{xz.x, chunkColumnChunkYMin, xz.y} };
@@ -116,9 +116,11 @@ static void writeChunksColumn(chunk::Chunks &chunks, vec2<pChunk::value_type::va
 			auto const &liquidCube{ liquid[cubeCoord] };
 			auto const id{ liquidCube.id };
 			auto const level{ liquidCube.level };
+			uint8_t const flags( (liquidCube.falling & 1) | (uint8_t(liquidCube.inflow & 1) << 1) | (uint8_t(liquidCube.outflow & 1) << 2) );
 			
 			file.write((char*) &id, sizeof(id));
 			file.write((char*) &level, sizeof(level));
+			file.write((char*) &flags, sizeof(flags));
 		});
 		
 		curMChunk = curMChunk.offseted(vec3i{0, 1, 0});
@@ -219,9 +221,9 @@ static ReadStatus readChunksColumn(
 		return rs;
 	}
 	
-	uint32_t version{};
+	uint32_t version;
 	file.read((char*) &version, sizeof(version));
-	assert(version == 0);
+	assert(version <= 1);
 
 	for(auto y{chunkColumnChunkYMin}; y <= chunkColumnChunkYMax; y++) {
 		auto const chunkIndex{ chunksIndices[y - chunkColumnChunkYMin] };
@@ -258,19 +260,20 @@ static ReadStatus readChunksColumn(
 			auto &liquidCube{ liquid[cubeCoord] };
 			chunk::Block::id_t id;
 			chunk::LiquidCube::level_t level;
+			uint8_t flags;
 			
 			file.read((char*) &id, sizeof(id));
 			file.read((char*) &level, sizeof(level));
+			if(version == 0) flags = 0;//0 | (0 << 1) | (0 << 2)
+			else file.read((char*) &flags, sizeof(flags));
 			
-			liquidCube = chunk::LiquidCube::liquid( 
+			liquidCube = chunk::LiquidCube{ 
 				id, 
 				level, 
-				false/*
-					note: falling flag is not saved, 
-					so false is used because even if liquid was falling down, 
-					incorrect flag will only affect how this cube is rendered
-				*/
-			);
+				bool(flags & 0b001u),
+				bool(flags & 0b010u),
+				bool(flags & 0b100u)
+			};
 			if(liquidCube.liquid() && liquidCube.id != 0) chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
 		});
 	}
