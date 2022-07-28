@@ -1696,11 +1696,11 @@ RayResult resolveIntersection(const int iteration) {
 			const vec2 newUV = mod(blockUv(newBlockCoord, ivec3(intersectionSide), dirSign), 1);
 			const vec3 color = fade(sampleAtlas(atlasOffset, newUV) * mix(0.5, 1.0, ambient), t);
 			
-			vec3 incoming = any(intersectionSide) ? ray.dir : (ray.dir * (1 + offset_));
+			vec3 incoming = any(intersectionSide) ? ray.dir : normalize(ray.dir * (1.01 + offset_));
 			if(any(isnan(incoming))) incoming = ray.dir;
 			
 			const vec3 normalDir = any(intersectionSide) ? normalize(vec3(normal) + offset * vec3(not(intersectionSide))) : -incoming;
-			const float ior = glass ? 1.0 : 1.00;
+			const float ior = glass ? 1.0 : 1.05;
 			
 			const float n1 = backside ? ior : 1;
 			const float n2 = backside ? 1 : ior;

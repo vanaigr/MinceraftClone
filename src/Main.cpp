@@ -313,7 +313,7 @@ static void reload(Reload::Flags flags) {
 
 
 static bool reloadTraceBuffer(bool const is) {
-	if(!is) {
+	if(is) {
 		const size_t size{ windowSize.x * windowSize.y * (20 * 8*sizeof(uint32_t) + sizeof(uint32_t)) };
 		
 		glDeleteBuffers(1, &traceTest_ssbo);
@@ -478,7 +478,7 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) 
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) noexcept {
-	newWindowSize = { width, height };
+	newWindowSize = vec2i{ width, height }.max(1);
 }
 
 
@@ -1382,7 +1382,7 @@ bool performBlockAction() {
 					liquid[cubeInChunkPos] = chunk::LiquidCube::liquid(blockPlaceId, chunk::LiquidCube::maxLevel, false);
 				}
 				else if(liquidPlaceType == LiquidPlaceType::inflow) {
-					liquid[cubeInChunkPos] = chunk::LiquidCube::special(blockPlaceId, chunk::LiquidCube::maxLevel, true, false);
+					liquid[cubeInChunkPos] = chunk::LiquidCube::special(blockPlaceId, 5, true, false);
 				}
 				else if(liquidPlaceType == LiquidPlaceType::outflow) {
 					liquid[cubeInChunkPos] = chunk::LiquidCube::special(blockPlaceId, chunk::LiquidCube::minLevel/*!*/, false, true);			
@@ -1714,7 +1714,7 @@ int main() {
 	auto const a2{ std::chrono::steady_clock::now() };
 	updateChunks(chunks);
 	auto const a3{ std::chrono::steady_clock::now() };
-	reload(Reload::everything);
+	reload(Reload::everything & ~Reload::config);
 	auto const a4{ std::chrono::steady_clock::now() };
 	
 	#define b(ARG) ( double(std::chrono::duration_cast<std::chrono::microseconds>(ARG).count()) / 1000.0 )
@@ -1916,7 +1916,7 @@ int main() {
 					result += count * (float(n)/x + minLogLum) * log(2);
 				}
 				
-				return expf(result / total * 1);
+				return expf(result / total);
 			}() };
 			/*auto const curLum{ [&]() { //arithmetic mean
 				auto const total{ windowSize.x * windowSize.y };
@@ -1934,6 +1934,8 @@ int main() {
 			static float prevLum{ curLum };
 			prevLum = prevLum + (curLum - prevLum) * (1 - exp(-deltaTime * 1.25));
 			auto const exposure{ 0.23 / (misc::clamp(prevLum, 0.1f, 5.0f) + 0.2) };
+			
+			//std::cout << curLum <<  ' ' << prevLum << '\n';
 			
 			if(!numpad[5]) {
 				glUseProgram(blur_p);

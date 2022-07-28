@@ -108,7 +108,12 @@ void parseConfigFromFile(Config &dst) {
 				break; case FT::NO_VALUE : parsedValue.emplace<indexOf(FT::NO_VALUE)>(NoValue{});
 				break; case FT::INT      : parsedValue.emplace<indexOf(FT::INT     )>(result(stoi));
 				break; case FT::REAL     : parsedValue.emplace<indexOf(FT::REAL    )>(result(stod));
-				break; case FT::BOOL     : parsedValue.emplace<indexOf(FT::BOOL    )>(result(stoi));
+				break; case FT::BOOL     : parsedValue.emplace<indexOf(FT::BOOL    )>([&](){ 
+					auto const res{result(stoi)}; 
+					if(res == 1) return true; 
+					else if(res == 0) return false;
+					else throw int();
+				}() );
 				break; case FT::STRING   : parsedValue.emplace<indexOf(FT::STRING  )>(value       );
 			}
 			
