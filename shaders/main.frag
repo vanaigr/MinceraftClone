@@ -1,6 +1,6 @@
 #version 460
 
-#define DEBUG 0
+#define DEBUG 1
 
 /**
 	TODO: figure out how to use multiple sources for shader and how and where to specify #version
@@ -1134,7 +1134,7 @@ BlocksIntersection blocksIntersection(
 		
 		if(blockId == 0) continue; 
 		if(intersectionSide == bvec3(false) || !alphaTest(ray.orig, vec3(intersectionSide), dirSign, blockCoord, blockId)) continue;
-		if(blockId == lowestIntersectionId && (isGlass(blockId) || blockId == water)) { lowestIntersectionId = 0; continue; }
+		if(blockId == lowestIntersectionId && (isGlass(blockId) || blockId == water || blockId == diamondBlock)) { lowestIntersectionId = 0; continue; }
 		if(lowestIntersectionId != 0 && lowestIntersectionId != water && blockId == water) continue; //ignore water backside
 		
 		if(surface < bias) continue;
@@ -1393,7 +1393,7 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 	const bool isLighting = current.rayType == rayTypeLightingBlock;
 	const uint surfaceId = current.surfaceId;
 	
-	if(isGlass(surfaceId) || surfaceId == 15) {
+	if(isGlass(surfaceId) || surfaceId == 15 || surfaceId == diamondBlock) {
 		const bool glass = isGlass(surfaceId);
 		
 		const float fresnel = unpackHalf2x16(current.data).x;
@@ -1418,7 +1418,7 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 			const vec3 innerCol = inner.color * (both ? (reflect ? fresnel : 1 - fresnel) : 1.0) * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0);
 			const vec3 waterInnerCol = ( backside ^^ reflect ? innerCol : mix(current.color, innerCol, exp(-inner.depth)) );
 			
-			result.color += glass ? (current.color * innerCol) : ( reflect ? mix(current.color, waterInnerCol, 0.97) : waterInnerCol );
+			result.color += glass || surfaceId == diamondBlock ? (current.color * innerCol) : ( reflect ? mix(current.color, waterInnerCol, 0.97) : waterInnerCol );
 		}
 	}
 	else if(surfaceId == 8) {
@@ -1699,7 +1699,7 @@ RayResult resolveIntersection(const int iteration) {
 			ambient = 1;
 		}
 		
-		if(isGlass(surfaceId) || blockId == 15) {
+		if(isGlass(surfaceId) || blockId == 15 || blockId == diamondBlock) {
 			const bool glass = isGlass(surfaceId);
 
 			const float offsetMag = clamp(t * 50 - 0.01, 0, 1);
@@ -1734,22 +1734,59 @@ RayResult resolveIntersection(const int iteration) {
 			if(any(isnan(incoming))) incoming = ray.dir;
 			
 			const vec3 normalDir = any(intersectionSide) ? normalize(vec3(normal) + offset * vec3(not(intersectionSide))) : -incoming;
-			const float ior = glass ? 1.0 : 1.05;
+			const float ior = glass ? 1.00 : (blockId == diamondBlock ? 1.3 : 1.05);
 			
-			const float n1 = backside ? ior : 1;
-			const float n2 = backside ? 1 : ior;
-			const float r0 = pow((n1 - n2) / (n1 + n2), 2);
-			const float fresnel = r0 + (1 - r0) * pow(1 - abs(dot(incoming, normalDir)), 5);
+			//https://developer.blender.org/diffusion/B/browse/master/intern/cycles/kernel/closure/bsdf_util.h$13
+			//fresnel_dielectric()
+			vec3 refracted;
+			float fresnel;
+			{
+				const vec3 N = (backside ? 1 : -1) * normalDir;
+				const vec3 I = incoming;
+				const float eta = ior;
+				
+				float cos = dot(N, I), neta;
+				vec3 Nn;
+				
+				// check which side of the surface we are on
+				if (cos > 0) {
+					// we are on the outside of the surface, going in
+					neta = 1 / eta;
+					Nn = N;
+				}
+				else {
+					// we are inside the surface
+					cos = -cos;
+					neta = eta;
+					Nn = -N;
+				}
+				
+				float arg = 1 - (neta * neta * (1 - (cos * cos)));
+				if (arg < 0) {
+					refracted = vec3(0);
+					fresnel = 1;  // total internal reflection
+				}
+				else {
+					float dnp = max(sqrt(arg), 1e-7f);
+					float nK = (neta * cos) - dnp;
+					refracted = -(neta * I) + (nK * Nn);
 
-			const vec3 refracted = refract(incoming, normalDir, n1 / n2);
+					// compute Fresnel terms
+					float cosTheta1 = cos;  // N.R
+					float cosTheta2 = -dot(Nn, refracted);
+					float pPara = (cosTheta1 - eta * cosTheta2) / (cosTheta1 + eta * cosTheta2);
+					float pPerp = (eta * cosTheta1 - cosTheta2) / (eta * cosTheta1 + cosTheta2);
+					fresnel = 0.5f * (pPara * pPara + pPerp * pPerp);
+					refracted = -refracted;
+				}
+			}
 			
 			const bool isRefracted = refracted != vec3(0);
-			const bool isReflected = any(intersectionSide) ? (isRefracted ? !backside && iteration < 3 : true) : false;
+			const bool isReflected = any(intersectionSide) ? true || (isRefracted ? !backside && iteration < 3 : true) : false;
 			
 			const uint data = (packHalf2x16(vec2(fresnel, 0.0)) & 0xffffu) | (uint(backside) << 16);
 			
-			pushResult(Result( color, t, data, blockId, rayIndex, type, parent, last ));
-			
+			pushResult(Result( color, t, data, blockId, rayIndex, type, parent, last ));			
 			
 			if(isRefracted && canPushParams()) {
 				const vec3 newDir = refracted;
