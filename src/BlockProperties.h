@@ -40,47 +40,49 @@ namespace Blocks {
 	};
 };
 
+namespace {
+	
+using namespace Blocks;
+
+inline bool isGlass(chunk::Block::id_t const id) {
+	return id == glassBlock || (id >= glassRedBlock && id <= glassMagentaBlock);
+}
 
 inline bool useInAO(chunk::Block::id_t const id) {
-	using namespace Blocks;
-	return id != airBlock && id != leavesBlock && id != glassBlock && id != grass;
+	return id != airBlock && id != leavesBlock && !isGlass(id) && id != grass;
 }
 
 inline bool useInCollision(chunk::Block::id_t const id) {
-	using namespace Blocks;
 	return id != airBlock && id != leavesBlock && id != grass;
 }
 
 inline bool liquidThrough(chunk::Block::id_t const id) {
-	using namespace Blocks;
 	return id == airBlock || id == leavesBlock || id == grass;
 }
 
 inline bool placeThrough(chunk::Block::id_t const id) {
-	using namespace Blocks;
 	return id == airBlock || id == leavesBlock || id == grass;
 }
 
 inline int lightingLost(chunk::Block::id_t const id) {
-	using namespace Blocks;
 	     if(id == airBlock) return 0;
 	else if(id == leavesBlock) return 3;
-	else if(id == glassBlock || (id >= glassRedBlock && id <= glassMagentaBlock)) return 2;
+	else if(isGlass(id)) return 2;
 	else if(id == grass) return 0;
 	//note: liquids are not used in lighting calculations
 	else             return 0;
 }
 
-static constexpr int cubeLightingLosses = misc::divCeil<int>(chunk::ChunkLighting::maxValue, 32); /*
+static constexpr int cubeLightingLosses = misc::divCeil<int>(chunk::ChunkLighting::maxValue, units::cubesInChunkDim); /*
 	lighting will at most propagate to neighbouring chunks (I hope)
 */
 
 inline bool isBlockTranslucent(chunk::Block::id_t const id) {
-	using namespace Blocks;
-	return id == airBlock || id == leavesBlock || id == glassBlock || (id >= glassRedBlock && id <= glassMagentaBlock) || id == grass;
+	return id == airBlock || id == leavesBlock || isGlass(id) || id == grass;
 }
 
 inline bool isBlockEmitter(chunk::Block::id_t const id) {
-	using namespace Blocks;
 	return id == lamp1Block || id == lamp2Block;
+}
+
 }
