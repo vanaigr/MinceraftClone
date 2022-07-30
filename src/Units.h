@@ -1,11 +1,11 @@
 #pragma once
 #include"Misc.h"
+#include"Unit.h"
 
 #include<stdint.h>
-//#include<utility>
 #include<cmath>
+#include<limits>
 
-#include"Unit.h"
 
 namespace units {
 	/*note: constexpr is important here because it disallows int and long long overflows and incorrect shifts, so all the constants below are correct*/
@@ -67,9 +67,9 @@ namespace units {
 	template<typename Unit> constexpr bool fitsInOneChunk(Unit const unit) { return fitsIn<Unit, Chunk>(unit, Chunk{0}); }
 	
 	
-	static constexpr inline Fractional posToFrac(double value) { return Fractional::create(floor(value*fracInBlockDim)); }
-	static constexpr inline Fractional posToFracTrunk(double value) { return Fractional::create(value*fracInBlockDim/*default is truncate*/); }
-	static constexpr inline Fractional posToFracRAway(double value) {  //round away from zero
+	inline Fractional posToFrac(double value) { return Fractional::create(floor(value*fracInBlockDim)); }
+	inline Fractional posToFracTrunk(double value) { return Fractional::create(value*fracInBlockDim/*default is truncate*/); }
+	inline Fractional posToFracRAway(double value) {  //round away from zero
 		auto const val{ value*fracInBlockDim };
 		return Fractional::create( std::copysign(ceil(abs(val)), val) ); 
 	}

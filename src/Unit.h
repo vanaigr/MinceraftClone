@@ -145,12 +145,12 @@ namespace unit {
 				 - Cast<Hierarchy, Other, common>::castUnit(c2);
 		}
 		
-		template<typename Other, std::enable_if_t<!HaveCommon<Hierarchy, This, Other>::value, int> = 0, typename = decltype(Unit{std::declval<Other>()})> 
+		template<typename Other, std::enable_if_t<!HaveCommon<Hierarchy, This, Other>::value, int> = 0, typename = decltype(This{std::declval<Other>()})> 
 		constexpr friend auto operator+(This const c1, Other const c2) {
 			return c1 + Unit{c2};
 		}
 		
-		template<typename Other, std::enable_if_t<!HaveCommon<Hierarchy, This, Other>::value, int> = 0, typename = decltype(Unit{std::declval<Other>()})> 
+		template<typename Other, std::enable_if_t<!HaveCommon<Hierarchy, This, Other>::value, int> = 0, typename = decltype(This{std::declval<Other>()})> 
 		constexpr friend auto operator-(This const c1, Other const c2) {
 			return c1 - Unit{c2};
 		}

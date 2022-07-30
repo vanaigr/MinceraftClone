@@ -13,30 +13,24 @@ WIN_API_LIBS=-l opengl32.lib -l gdi32.lib -l user32.lib -l shell32.lib
 
 EXECUTABLE=output.exe
 
-
 CC=clang++
 
-CUR_PATH_0=$(shell cd)
-CUR_PATH=$(abspath $(CUR_PATH_0))
-SOURCES_0=$(shell dir $(SOURCE_DIR)\*.cpp /s /b)
-SOURCES_10=$(abspath $(SOURCES_0))
-SOURCES_20=$(SOURCES_10:$(CUR_PATH)/$(SOURCE_DIR)/%=%)
-SOURCES_LOC=$(filter-out $(CPP_EXCLUDES),$(SOURCES_20))
-SOURCES=$(addprefix $(SOURCE_DIR)/,$(SOURCES_LOC))
-
-OBJECT_FILES_0=$(addprefix $(OBJECT_DIR)/,$(SOURCES_LOC))
-OBJECT_FILES=$(OBJECT_FILES_0:.cpp=.o)
 
 GCH:=$(shell git log --format=%H -n1)
 GCM=$(shell git log --format=%s -n1)
 GCB=$(shell git branch --show current)
 GCD=$(shell git log --format=%ad -n1 --date=iso)
-
 PPFLAGS+= -DCOMMIT_HASH="\"$(GCH)\"" -DCOMMIT_NAME="\"$(GCM)\"" -DCOMMIT_BRANCH="\"$(GCB)\"" -DCOMMIT_DATE="\"$(GCD)\""
+
+SOURCES_10=$(wildcard $(SOURCE_DIR)/*.cpp)
+SOURCES_20=$(SOURCES_10:$(SOURCE_DIR)/%=%)
+SOURCES_LOC=$(filter-out $(CPP_EXCLUDES),$(SOURCES_20))
+OBJECT_FILES_0=$(addprefix $(OBJECT_DIR)/,$(SOURCES_LOC))
+OBJECT_FILES=$(OBJECT_FILES_0:.cpp=.o)
 
 build-run: $(EXECUTABLE)
 	$(EXECUTABLE)
-	
+
 build: $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECT_FILES)
@@ -47,23 +41,19 @@ $(OBJECT_DIR)/%.o: $(SOURCE_DIR)/%.cpp
 	@echo compiling $<
 	@if not exist "$(dir $@)" mkdir "$(dir $@)"
 	@ $(CC) $(PPFLAGS) $(INCLUDES) $(CFLAGS) "$<" -o "$@"
-	
-clear-obj: 
-	@if exist "$(OBJECT_DIR)" rmdir $(OBJECT_DIR) /s
-	
-clear: clear-obj
-	@if exist "$(OBJECT_DIR)" rmdir $(EXECUTABLE)
+
+clear:
+	@if exist "$(OBJECT_DIR)" rmdir /s /q $(OBJECT_DIR)
+	@if exist "$(EXECUTABLE)" @del $(EXECUTABLE)
 
 
-SHADERS_0=$(shell dir $(SHADERS_DIR)\*.vert /s /b)
-SHADERS_1=$(shell dir $(SHADERS_DIR)\*.frag /s /b)
-SHADERS_2=$(SHADERS_0) $(SHADERS_1)
-SHADERS_10=$(abspath $(SHADERS_2))
-SHADERS_20=$(SHADERS_10:$(CUR_PATH)/$(SHADERS_DIR)/%=%)
-SHADERS=$(addprefix $(SHADERS_DIR)/,$(SHADERS_20))
+SHADERS_10=$(wildcard $(SHADERS_DIR)/*.frag)
+SHADERS_20=$(wildcard $(SHADERS_DIR)/*.vert)
+SHADERS=$(SHADERS_10) $(SHADERS_20)
 
 .FORCE:
 $(SHADERS_DIR)/%: .FORCE
-	glslangValidator.exe "$@"
+	@echo validating $@
+	@ dependencies/glslangValidator.exe "$@"
 
 glslValidate: $(SHADERS)

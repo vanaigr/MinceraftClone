@@ -21,8 +21,14 @@ void updateBlockDataWithoutNeighbours(chunk::Chunk const chunk, pBlock const blo
 	
 	static_assert(sizeof(chunk::Block::id_t) == 2);
 	static_assert(sizeof(chunk::LiquidCube::level_t) == 1);
+#ifdef _MSC_VER
+	//when SDL checks are enabled, pragma warning(disable:4700) doesn't disable the uninitialized variable error
+	__m128i ids{ _mm_setzero_si128() };
+	__m128i levels{ _mm_setzero_si128() };
+#else
 	__m128i ids;
 	__m128i levels;
+#endif	
 	
 	#define set(INDEX) {\
 		auto const &liquidCube{ liquid[startingCubeOffset + chunk::cubeCoordToIndex(chunk::cubeIndexInBlockToCoord(INDEX))] };\

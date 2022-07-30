@@ -1,8 +1,10 @@
 @echo off
 
-md dependencies\include\GLFW
-md dependencies\include\GLEW
-md glslang
+md dependencies\include\GLFW\
+md dependencies\include\GLEW\
+md dependencies\GLFW\
+md dependencies\GLEW\
+md glslang\
 
 echo setting up glfw
 curl -sSL -o glfw-3.3.2.bin.WIN64.zip https://github.com/glfw/glfw/releases/download/3.3.2/glfw-3.3.2.bin.WIN64.zip
@@ -23,8 +25,6 @@ rmdir /s /q glew-2.1.0
 echo settng up glslangValidator
 curl -sSL -o glslang-master-windows-x64-Release.zip https://github.com/KhronosGroup/glslang/releases/download/master-tot/glslang-master-windows-x64-Release.zip
 tar -xf glslang-master-windows-x64-Release.zip -C glslang
-move glslang\bin\glslangValidator.exe .\
+move glslang\bin\glslangValidator.exe .\dependencies
 del glslang-master-windows-x64-Release.zip
 rmdir /s /q glslang
-
-pause
