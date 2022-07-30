@@ -274,7 +274,10 @@ static ReadStatus readChunksColumn(
 				bool(flags & 0b010u),
 				bool(flags & 0b100u)
 			};
-			if(liquidCube.liquid() && liquidCube.id != 0) chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
+			
+			if(liquidCube.liquid() && liquidCube.id == 0) return;
+			if(liquidCube.outflow) return;
+			chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
 		});
 	}
 

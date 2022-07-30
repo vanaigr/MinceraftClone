@@ -34,8 +34,9 @@ namespace Blocks {
 		glassBlueBlock = 23,
 		glassVioletBlock = 24,
 		glassMagentaBlock = 25,
+		goldBlock = 26,
 		
-		blocksCount = 26,
+		blocksCount,
 	};
 };
 

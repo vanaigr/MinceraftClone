@@ -82,7 +82,7 @@ GLFWwindow* window;
 
 static int  viewDistance = 3;
 static bool loadChunks = false, saveChunks = false;
-static std::string worldName{ "world0" };
+static std::string worldName{ "demo" };
 
 static vec2d mouseSensitivity{ 0.8, -0.8 };
 static int chunkUpdatesPerFrame = 5;
@@ -181,7 +181,7 @@ namespace LiquidPlaceType { enum LiquidPlaceType {
 */
 static LiquidPlaceType::LiquidPlaceType liquidPlaceType{ LiquidPlaceType::liquid };
 static bool breakFullBlock{ false };
-static double const blockActionCD{ 300.0 / 1000.0 };
+static double const blockActionCD{ 150.0 / 1000.0 };
 
 static const Font font{ "./assets/font.txt" };
 
@@ -767,7 +767,7 @@ static void reloadShaderStorageBuffers() {
 			return int32_t( uint32_t(uint16_t(x)) | (uint32_t(uint16_t(y)) << 16) );
 		}; //pack coord
 		int32_t const sides[] = { //side, top, bottom, alpha. Texture offset in tiles from top-left corner of the atlas
-			c(0, 0), c(0, 0), c(0, 0), c(0, 1), //0
+			c(0, 0), c(0, 0), c(0, 0), c(0, 1), //airBlock
 			c(1, 0), c(2, 0), c(3, 0), c(0, 1), //grass
 			c(3, 0), c(3, 0), c(3, 0), c(0, 1), //dirt
 			c(4, 0), c(4, 0), c(4, 0), c(0, 1), //planks
@@ -784,15 +784,16 @@ static void reloadShaderStorageBuffers() {
 			c(17, 0), c(17, 0), c(17, 0), c(0, 1), //lamp 2
 			c(18, 0), c(18, 0), c(18, 0), c(0, 1), //water
 			c(19, 0), c(19, 0), c(19, 0), c(19, 1), //grass
-			c(20, 0), c(20, 0), c(20, 0), c(20, 1), //glassMagentaBlock
-			c(21, 0), c(21, 0), c(21, 0), c(21, 1), //glassVioletBlock
-			c(22, 0), c(22, 0), c(22, 0), c(22, 1), //glassBlueBlock
-			c(23, 0), c(23, 0), c(23, 0), c(23, 1), //glassCyanBlock
+			c(20, 0), c(20, 0), c(20, 0), c(20, 1), //glassRedBlock
+			c(21, 0), c(21, 0), c(21, 0), c(21, 1), //glassOrangeBlock
+			c(22, 0), c(22, 0), c(22, 0), c(22, 1), //glassYellowBlock
+			c(23, 0), c(23, 0), c(23, 0), c(23, 1), //glassGreenBlock
 			c(24, 0), c(24, 0), c(24, 0), c(24, 1), //glassTurquoiseBlock
-			c(25, 0), c(25, 0), c(25, 0), c(25, 1), //glassGreenBlock
-			c(26, 0), c(26, 0), c(26, 0), c(26, 1), //glassYellowBlock
-			c(27, 0), c(27, 0), c(27, 0), c(27, 1), //glassOrangeBlock
-			c(28, 0), c(28, 0), c(28, 0), c(28, 1), //glassRedBlock
+			c(25, 0), c(25, 0), c(25, 0), c(25, 1), //glassCyanBlock
+			c(26, 0), c(26, 0), c(26, 0), c(26, 1), //glassBlueBlock
+			c(27, 0), c(27, 0), c(27, 0), c(27, 1), //glassVioletBlock
+			c(28, 0), c(28, 0), c(28, 0), c(28, 1), //glassMagentaBlock
+			c(29, 0), c(29, 0), c(29, 0), c(28, 1), //goldBlock
 		};
 		
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, atlasDescription_ssbo);
@@ -1725,6 +1726,7 @@ int main() {
 	auto const a3{ std::chrono::steady_clock::now() };
 	reload(Reload::everything & ~Reload::config);
 	auto const a4{ std::chrono::steady_clock::now() };
+	numpad[1] = true; //don't load new chunks
 	
 	#define b(ARG) ( double(std::chrono::duration_cast<std::chrono::microseconds>(ARG).count()) / 1000.0 )
 	std::cout << "reload config: " << b(a2 - a1) << ", update chunks: " << b(a3 - a2) << ", reload shaders " << b(a4 - a3) << '\n';
@@ -1808,7 +1810,7 @@ int main() {
 			glUniform1f(near_u, currentCam.near);
 			glUniform1f(far_u , currentCam.far );
 			
-			static pChunk lastCameraChunkCoord{};
+			static pChunk lastCameraChunkCoord{cameraChunk};
 			
 			if(!numpad[1]) lastCameraChunkCoord = pChunk{cameraChunk};
 			auto const startCoord{ pos::fracToPos(cameraCoord - lastCameraChunkCoord + pChunk{viewDistance}) };
@@ -1941,8 +1943,8 @@ int main() {
 			}() };*/
 			
 			static float prevLum{ curLum };
-			prevLum = prevLum + (curLum - prevLum) * (1 - exp(-deltaTime * 1.25));
-			auto const exposure{ 0.23 / (misc::clamp(prevLum, 0.1f, 5.0f) + 0.2) };
+			prevLum = prevLum + (curLum - prevLum) * (1 - exp(-deltaTime * 1.1));
+			auto const exposure{ 0.16 / (misc::clamp(prevLum, 0.1f, 5.0f) + 0.07) };
 			
 			//std::cout << curLum <<  ' ' << prevLum << '\n';
 			

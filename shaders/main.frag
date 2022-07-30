@@ -87,6 +87,8 @@ bool exit_ = false;
 vec3 exitVec3 = vec3(5,5,5);
 #endif
 
+const vec3 rgbToLum = vec3(0.2126, 0.7152, 0.0722);
+
 
 const uint airBlock = 0u;
 const uint grassBlock = 1u;
@@ -707,7 +709,7 @@ struct Result {
 int putResultPos = 0;
 int putParamsPos = 0;
 
-const int size = 40;
+const int size = 48;
 uint stack[size]; 
 //add results ->              <- add params
 //result | result | 0 | 0 | params | params;
@@ -1421,7 +1423,7 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 			result.color += glass || surfaceId == diamondBlock ? (current.color * innerCol) : ( reflect ? mix(current.color, waterInnerCol, 0.97) : waterInnerCol );
 		}
 	}
-	else if(surfaceId == 8) {
+	else if(surfaceId == 26) {
 		for(int i = 0; i < childrenCount; i++) {
 			const Result inner = readResult(currentIndex+1 + i);
 			if(isShadow) {
@@ -1432,7 +1434,7 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 				if(inner.rayType == rayTypeLightingEmitter) result.rayType = rayTypeLightingEmitter;
 				else continue;
 			}
-			result.color = current.color * inner.color * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0);
+			result.color = mix(current.color, current.color * inner.color * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0), 0.8);
 		}
 	}
 	else {
@@ -1466,14 +1468,14 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 			if(inner.rayIndex == 1) {
 				if(inner.rayType == rayTypeShadowSky) {
 					result.rayType = rayTypeShadowSky;
-					result.color += mix(current.color, inner.color, 0.2);
+					result.color += current.color * inner.color;
 				}
 				else if(inner.rayType == rayTypeLightingEmitter) {
 					result.rayType = rayTypeLightingEmitter;
-					result.color += mix(current.color, inner.color * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0), 0.2);
+					result.color += current.color * inner.color * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0);
 				}
 				else if(inner.rayType == rayTypeLightingBlock || inner.rayType == rayTypeShadowBlock) /*do nothing*/;
-				else result.color += mix(current.color, inner.color, 0.03);
+				else result.color += current.color * inner.color;
 				
 				i++;
 			}
@@ -1708,9 +1710,7 @@ RayResult resolveIntersection(const int iteration) {
 				sin(localSpaceCoord.z*9)/8, 
 				sin(localSpaceCoord.y*6 + localSpaceCoord.x*4)/8
 			) / 100;
-			const vec3 waterOffset = any(intersectionSide.xz) ?
-				vec3(0)
-				: (texture(noise, uvAbs / 5  + (texture(noise, uvAbs/30 + time/60).xy-0.5) * 0.8 ).xyz - 0.5) * 0.2;
+			const vec3 waterOffset = (texture(noise, uvAbs / 5  + (texture(noise, uvAbs/30 + time/60).xy-0.5) * 0.8 ).xyz - 0.5) * 0.2;
 			const vec3 offset_ = (glass ? glassOffset : waterOffset);
 			const vec3 offset = offset_ * offsetMag;
 			
@@ -1804,11 +1804,11 @@ RayResult resolveIntersection(const int iteration) {
 				pushed = true;
 			}
 		}
-		else if(blockId == 8) {
+		else if(blockId == 26) {
 			const vec3 offset = normalize(texture(noise, uv/5).xyz - 0.5) * 0.01;
 			
 			const vec3 newBlockCoord = localSpaceCoord - offset;
-			const vec2 newUv = blockUv(newBlockCoord, ivec3(intersectionSide), dirSign);
+			const vec2 newUv = clamp(blockUv(newBlockCoord, ivec3(intersectionSide), dirSign), 0.0001, 0.9999);
 			
 			const vec3 color_ = sampleAtlas(atlasOffset, newUv) * light * mix(0.3, 1.0, ambient);
 			const vec3 color = fade(color_, t);
@@ -1950,8 +1950,6 @@ vec3 trace(const Ray startRay) {
 coherent buffer Luminance {
 	uint data[256];
 } luminance;
-
-const vec3 rgbToLum = vec3(0.2126, 0.7152, 0.0722);
 
 uniform float minLogLum;
 uniform float rangeLogLum;
