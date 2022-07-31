@@ -11,11 +11,8 @@ static inline void copy2DArray(El const (&in)[i_][j_], El (&out)[i_][j_]) {
 	}
 }
 
-struct Viewport {
-	public:
-	
+struct Viewport {	
     vec2<double> rotation{};
-
 
     constexpr vec3<double> rightDir() const {
         return vec3<double>(cos(rotation.x), 0, sin(rotation.x));

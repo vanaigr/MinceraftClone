@@ -61,6 +61,8 @@ void updateBlockDataWithoutNeighbours(chunk::Chunk const chunk, pBlock const blo
 		auto const areAllSame{ _mm_cmpeq_epi16(ids, _mm_set1_epi16(_mm_cvtsi128_si32(ids))) };
 		auto const areFull{ _mm_cmpeq_epi16(levels, _mm_set1_epi16(chunk::LiquidCube::maxLevel)) };
 		auto const areFullSame{ _mm_and_si128(areAllSame, areFull) };
+		/*no shuffling prior to movemask_epi8 because the result is just compared with 0
+		  so the fact that individual cubes' results are duplicated in the mask is not important*/
 		blockData.fullSameLiquid = ~uint16_t(_mm_movemask_epi8(areFullSame)) == 0;
 	}
 
@@ -153,8 +155,6 @@ void updateBlocksDataWithoutNeighboursInArea(chunk::Chunk startChunk, pBlock con
 	
 	auto const first{ firstRel + startChunkPos };
 	auto const last { lastRel  + startChunkPos };
-	
-	
 	
 	iterateChunks(startChunk, first.as<pChunk>(), last.as<pChunk>(), [&](chunk::Chunk chunk, pChunk const chunkPos) {		
 		auto const area{ intersectAreas3i(

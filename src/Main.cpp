@@ -37,25 +37,22 @@
 #include<cstdlib>
 
 //https://learnopengl.com/In-Practice/Debugging
-GLenum glCheckError_(const char *file, int line)
-{
-    GLenum errorCode;
-    while ((errorCode = glGetError()) != GL_NO_ERROR)
-    {
-        std::string error;
-        switch (errorCode)
-        {
-            case GL_INVALID_ENUM:                  error = "INVALID_ENUM"; break;
-            case GL_INVALID_VALUE:                 error = "INVALID_VALUE"; break;
-            case GL_INVALID_OPERATION:             error = "INVALID_OPERATION"; break;
-            case GL_STACK_OVERFLOW:                error = "STACK_OVERFLOW"; break;
-            case GL_STACK_UNDERFLOW:               error = "STACK_UNDERFLOW"; break;
-            case GL_OUT_OF_MEMORY:                 error = "OUT_OF_MEMORY"; break;
-            case GL_INVALID_FRAMEBUFFER_OPERATION: error = "INVALID_FRAMEBUFFER_OPERATION"; break;
-        }
-        std::cout << error << " | " << file << " (" << line << ")" << std::endl;
-    }
-    return errorCode;
+GLenum glCheckError_(const char *file, int line) {
+	GLenum errorCode;
+	while ((errorCode = glGetError()) != GL_NO_ERROR) {
+		char const *error;
+		switch (errorCode) {
+			break; case GL_INVALID_ENUM:                  error = "INVALID_ENUM";
+			break; case GL_INVALID_VALUE:                 error = "INVALID_VALUE";
+			break; case GL_INVALID_OPERATION:             error = "INVALID_OPERATION";
+			break; case GL_STACK_OVERFLOW:                error = "STACK_OVERFLOW";
+			break; case GL_STACK_UNDERFLOW:               error = "STACK_UNDERFLOW";
+			break; case GL_OUT_OF_MEMORY:                 error = "OUT_OF_MEMORY";
+			break; case GL_INVALID_FRAMEBUFFER_OPERATION: error = "INVALID_FRAMEBUFFER_OPERATION";
+		}
+		std::cout << error << " | " << file << " (" << line << ")\n";
+	}
+	return errorCode;
 }
 #define ce glCheckError_(__FILE__, __LINE__);
 
@@ -72,20 +69,21 @@ static vec2i newWindowSize{ windowSize };
 static vec2d windowSize_d() { return windowSize.convertedTo<double>(); };
 static double aspect() { return windowSize_d().y / windowSize_d().x; };
 
-static bool lockFramerate = false;
+static bool lockFramerate{ false };
+
+GLFWwindow* window;
 
 
 static double       deltaTime{ 16.0/1000.0 };
 static double const fixedDeltaTime{ 16.0/1000.0 };
 
-GLFWwindow* window;
-
-static int  viewDistance = 3;
-static bool loadChunks = false, saveChunks = false;
+static int  viewDistance{ 3 };
+static bool loadChunks{ true }, saveChunks{ false };
 static std::string worldName{ "demo" };
 
 static vec2d mouseSensitivity{ 0.8, -0.8 };
 static int chunkUpdatesPerFrame = 5;
+
 
 static double const playerHeight{ 1.95 };
 static double const playerWidth{ 0.6 };
@@ -103,7 +101,8 @@ static double playerSpeed{ 2.7 };
 static double spectatorSpeed{ 6 };
 
 static vec3d playerForce{};
-static bool isOnGround{false};
+static bool isOnGround{ false };
+
 
 static vec3l const playerCameraOffset{ 0, units::posToFrac(playerHeight*0.85).value(), 0 };
 static pos::Fractional playerCoord{ pos::posToFrac(vec3d{0.5,12.001,0.5}) };
@@ -118,14 +117,13 @@ static Camera desiredPlayerCamera{
 };
 static Camera playerCamera{ desiredPlayerCamera };
 
-
 static Viewport viewportCurrent{ /*angles=*/vec2d{ misc::pi / 2.0, 0 } };
 static Viewport viewportDesired{ viewportCurrent };
 
 static bool isSpectator{ false };
 
 static bool isSmoothCamera{ false };
-static double zoom = 3;
+static double zoom{ 3 };
 
 static double currentZoom() {
 	if(isSmoothCamera) return zoom;
@@ -183,6 +181,7 @@ static LiquidPlaceType::LiquidPlaceType liquidPlaceType{ LiquidPlaceType::liquid
 static bool breakFullBlock{ false };
 static double const blockActionCD{ 150.0 / 1000.0 };
 
+
 static const Font font{ "./assets/font.txt" };
 
 enum BitmapTextures : GLuint {
@@ -202,15 +201,15 @@ enum FramebufferTextures : GLuint {
 	
 	bitmapAndFramebufferTexturesCount
 };
-static constexpr GLint framebufferTextureCount = bitmapAndFramebufferTexturesCount - firstFramebufferTexture;
+static constexpr GLint framebufferTextureCount{ bitmapAndFramebufferTexturesCount - firstFramebufferTexture };
 static GLuint textures[bitmapAndFramebufferTexturesCount];
-static GLuint const		&atlas_t           = textures[atlas_it], 
-						&font_t            = textures[font_it], 
-						&noise_t           = textures[noise_it],
-						&screenshotColor_t = textures[screenshotColor_it],
-						&render_t          = textures[render_it],
-						&pp1_t             = textures[pp1_it],
-						&pp2_t             = textures[pp2_it];
+static GLuint const		&atlas_t          { textures[atlas_it] }, 
+						&font_t           { textures[font_it] }, 
+						&noise_t          { textures[noise_it] },
+						&screenshotColor_t{ textures[screenshotColor_it] },
+						&render_t         { textures[render_it] },
+						&pp1_t            { textures[pp1_it] },
+						&pp2_t            { textures[pp2_it] };
 
 enum SSBOs : GLuint {
 	chunksIndices_b = 0,
@@ -227,26 +226,27 @@ enum SSBOs : GLuint {
 	ssbosCount
 };
 
-static constexpr GLuint traceTest_b = 10;
+static constexpr GLuint traceTest_b{ 10 };
 static GLuint traceTest_ssbo;
 
 static GLuint ssbos[ssbosCount];
 static GLuint const	
-	&chunksIndices_ssbo       = ssbos[chunksIndices_b],
-	&chunksBlocks_ssbo        = ssbos[chunksBlocks_b], 
-	&chunksLiquid_ssbo        = ssbos[chunksLiquid_b],	
-	&chunksMesh_ssbo          = ssbos[chunksMesh_b],
-	&chunksBounds_ssbo        = ssbos[chunksBounds_b], 
-	&chunksAO_ssbo            = ssbos[chunksAO_b],
-	&chunksLighting_ssbo      = ssbos[chunksLighting_b],
-	&chunksEmittersGPU_ssbo   = ssbos[chunksEmittersGPU_b],
-	&atlasDescription_ssbo    = ssbos[atlasDescription_b],
-	&luminance_ssbo           = ssbos[luminance_b];
+	&chunksIndices_ssbo     { ssbos[chunksIndices_b] },
+	&chunksBlocks_ssbo      { ssbos[chunksBlocks_b] },
+	&chunksLiquid_ssbo      { ssbos[chunksLiquid_b] },	
+	&chunksMesh_ssbo        { ssbos[chunksMesh_b] },
+	&chunksBounds_ssbo      { ssbos[chunksBounds_b] }, 
+	&chunksAO_ssbo          { ssbos[chunksAO_b]  },
+	&chunksLighting_ssbo    { ssbos[chunksLighting_b] },
+	&chunksEmittersGPU_ssbo { ssbos[chunksEmittersGPU_b] },
+	&atlasDescription_ssbo  { ssbos[atlasDescription_b] },
+	&luminance_ssbo         { ssbos[luminance_b] };
 	
 static GLuint properties_ub;
 static int const ubosCount{ 1 };
 static GLuint ubos[ubosCount];
 static GLuint &properties_ubo = ubos[properties_ub];
+
 
 static GLuint mainProgram;
   static GLint rightDir_u;
@@ -267,17 +267,18 @@ static GLuint blockHitbox_p;
   static GLint blockHitboxModelMatrix_u;
 
 static GLuint screenshot_fb;
-bool takeScreenshot;
-
-static GLuint render_fb;
-
-static GLuint pp1_fb, pp2_fb;
+static bool takeScreenshot;
 
 static GLuint blur_p;
-  static GLint sampler_u;
+  static GLint sampler_u, horisontal_u;
 
 static GLuint toLDR_p;
   static GLint ldr_sampler_u, ldr_blurSampler_u, ldr_exposure_u;
+
+
+static GLuint render_fb;
+static GLuint pp1_fb, pp2_fb;
+
 
 static chunk::Chunks chunks{};
 
@@ -311,9 +312,9 @@ static void reload(Reload::Flags flags) {
 	if(Reload::is(Reload::shader, flags)) reloadShaders();
 }
 
-
-static bool reloadTraceBuffer(bool const is) {
-	if(is) {
+static bool useTraceBuffer{ false };
+static bool reloadTraceBuffer() {
+	if(useTraceBuffer) {
 		const size_t size{ windowSize.x * windowSize.y * (20 * 8*sizeof(uint32_t) + sizeof(uint32_t)) };
 		
 		glDeleteBuffers(1, &traceTest_ssbo);
@@ -337,10 +338,6 @@ static bool reloadTraceBuffer(bool const is) {
 		std::cout << "trace buffer disabled\n";
 		return false;
 	}
-}
-static bool is{ false };	
-static void useTraceBuffer() {
-	is = reloadTraceBuffer(is);
 }
 
 
@@ -426,8 +423,10 @@ void handleKey(int const key) {
 			}		
 			else if(key == GLFW_KEY_F4)
 				takeScreenshot = true;
-			else if(key == GLFW_KEY_F5)
-				useTraceBuffer();
+			else if(key == GLFW_KEY_F5) {
+				useTraceBuffer = !useTraceBuffer;
+				reloadTraceBuffer();
+			}
 		}
 	}
 }
@@ -446,7 +445,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     ctrl = (mods & GLFW_MOD_CONTROL) != 0;
 }
 
-static vec2<double> pmousePos(0, 0);
+static vec2<double> pmousePos;
 static void cursor_position_callback(GLFWwindow* window, double mousex, double mousey) noexcept {
 	//https://github.com/glfw/glfw/issues/1523
 	
@@ -1014,6 +1013,7 @@ static void reloadShaders() {
 		glUseProgram(blur_p);
 		
 		sampler_u = glGetUniformLocation(blur_p, "sampler");
+		horisontal_u = glGetUniformLocation(blur_p, "h");
 		ce
 	}
 	
@@ -1421,7 +1421,7 @@ bool performBlockAction() {
 		else {
 			auto &block{ chunk.data()[blockInChunkCoord] };
 				
-			if(checkCanPlaceBlock(chunkPos + blockInChunkPos) && placeThrough(block.id())) {
+			if((useInCollision(block.id()) ? checkCanPlaceBlock(chunkPos + blockInChunkPos) : true) && placeThrough(block.id())) {
 				block = chunk::Block::fullBlock(blockPlaceId);
 				
 				if(!liquidThrough(blockPlaceId)) {
@@ -1639,8 +1639,7 @@ int main() {
 	if(mouseCentered) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	
     GLenum err = glewInit();
-    if (err != GLEW_OK)
-    {
+    if (err != GLEW_OK) {
         fprintf(stderr, "Error: %s\n", glewGetErrorString(err));
         glfwTerminate();
         return -1;
@@ -1667,7 +1666,7 @@ int main() {
     glfwSetScrollCallback(window, scroll_callback);
 	
 	
-	int constexpr charsCount{ 512*8 };
+	static constexpr int charsCount{ 512*8 };
 	GLuint fontVB;
 	glGenBuffers(1, &fontVB);
 	glBindBuffer(GL_ARRAY_BUFFER, fontVB);
@@ -1695,30 +1694,9 @@ int main() {
 		glVertexAttribDivisor(3, 1);
 	glBindVertexArray(0); 
 	
-	GLuint testVB;
-	glGenBuffers(1, &testVB);
+	ce
 	
-	GLuint testVA;
-	glGenVertexArrays(1, &testVA);
-	glBindVertexArray(testVA);
-		glBindBuffer(GL_ARRAY_BUFFER, testVB);
-		
-		glEnableVertexAttribArray(0);
-		glEnableVertexAttribArray(1);
-	
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), NULL); //relativePos
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)( 3*sizeof(float) )); //relativePos
-		
-		
-	glBindVertexArray(0); 
-	
-	
-	while ((err = glGetError()) != GL_NO_ERROR) {
-        std::cout << err << std::endl;
-    }
-	
-	//useTraceBuffer();
-
+	assert(useTraceBuffer == false);//reloadTraceBuffer();
 	auto const a1{ std::chrono::steady_clock::now() };
 	reloadConfig();
 	auto const a2{ std::chrono::steady_clock::now() };
@@ -1734,12 +1712,14 @@ int main() {
 	
     auto const completionTime = std::chrono::steady_clock::now();
 	std::cout << "Time to start (ms): " << ( double(std::chrono::duration_cast<std::chrono::microseconds>(completionTime - startupTime).count()) / 1000.0 ) << '\n';
+	bool firstFrame{ true };
 	
-	Counter<150> mc{};
+	//in microseconds
+	Counter<150> frameTime{};
 	Counter<150> timeToTrace{};
-	bool firstFrame = true;
+	
     while (!glfwWindowShouldClose(window)) {
-		auto startFrame = std::chrono::steady_clock::now();
+		auto const startFrame{ std::chrono::steady_clock::now() };
 		
 		if(lockFramerate) glfwSwapInterval(1);
 		else glfwSwapInterval(0);
@@ -1753,21 +1733,20 @@ int main() {
 		auto const cameraPosInChunk{ pos::fracToPos(cameraCoord.in<pos::Chunk>()) };
 		
 		if(newWindowSize != windowSize) {
-			auto const resizeFB{ (newWindowSize > windowSize).any() };
+			static vec2i maxWindowSize{ windowSize };
+			auto const resizeFB{ (newWindowSize > maxWindowSize).any() };
 			windowSize = newWindowSize;
 			
 			if(resizeFB) {
+				maxWindowSize = windowSize;
 				reloadFramebuffers();
-				reloadTraceBuffer(is);
+				reloadTraceBuffer();
 			}
 			
 			glViewport(0, 0, windowSize.x, windowSize.y);
 		}
 		
-		{ //set properties
-			//screen size
-			GLint screenSize[2] = { windowSize.x, windowSize.y };
-			
+		{ //set properties			
 			//projection
 			float projection[4][4];
 			currentCamera().projectionMatrix(aspect(), &projection);
@@ -1789,15 +1768,14 @@ int main() {
 			
 			//
 			glBindBuffer(GL_UNIFORM_BUFFER, properties_ubo);
-			glBufferSubData(GL_UNIFORM_BUFFER, 0, 8, &screenSize);
+			glBufferSubData(GL_UNIFORM_BUFFER, 0, 8, &windowSize);
 			glBufferSubData(GL_UNIFORM_BUFFER, 8, 4, &time);
 			glBufferSubData(GL_UNIFORM_BUFFER, 16, 4 * 4*4, &projectionT[0][0]);
 			glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		}
 		
 		
-		{ //draw world
-			//glClear(GL_COLOR_BUFFER_BIT);
+		{ //draw the world
 			glDisable(GL_DEPTH_TEST); 
 			glDisable(GL_CULL_FACE); 
 			
@@ -1824,57 +1802,59 @@ int main() {
 			glUniform3f(playerRelativePosition_u, playerRelativePos.x, playerRelativePos.y, playerRelativePos.z);
 			
 			glUniform1i(drawPlayer_u, isSpectator);
-			 
-			//reset gpu indices that are not visible 
+			
+			
+			//reset gpu indices for chunks that are not visible 
 			for(auto const chunkIndex : chunks.usedChunks()) { 
 				auto chunk{ chunks[chunkIndex] };
 				auto const chunkCoord{ chunk.position() };
 				auto const localChunkCoord{ chunkCoord - lastCameraChunkCoord.val() };
 				auto const chunkInView{ checkChunkInView(localChunkCoord) };
 				
-				auto &gpuIndex{ chunk.gpuIndex() };
 				if(!chunkInView) {
+					auto &gpuIndex{ chunk.gpuIndex() };
 					gpuChunksIndex.recycle(gpuIndex);
 					gpuIndex = chunk::Chunks::index_t{};
 				}
 			}
 			
-			//update chunks and construct gpu indices grid
-			int updatedCount{};
-
-			auto const renderDiameter{ viewDistance*2+1 };
-			auto const gpuChunksCount{ renderDiameter*renderDiameter*renderDiameter };
 			
-			static std::vector<chunk::Chunks::index_t> indices{};
-			indices.resize(gpuChunksCount);
-			int i = 0;
-			/*(clear, reserve, push_back) can be used instead of (resize, [i++])*/
-			
-			iterateAllChunks(
-				chunks[playerChunkCand], 
-				lastCameraChunkCoord - pChunk{viewDistance}, lastCameraChunkCoord + pChunk{viewDistance}, 
-				[&](chunk::Chunks::index_t const chunkIndex, pChunk const coord) {
-					if(chunkIndex == -1) { indices[i++] = 0; return; }
-					
-					auto chunk{ chunks[chunkIndex] };
-					
-					const bool updated{ updateChunk(chunk, lastCameraChunkCoord.val(), updatedCount >= chunkUpdatesPerFrame) };
-					if(updated) updatedCount++; 
+			{//update chunks and construct gpu indices grid
+				int updatedCount{};
+	
+				auto const renderDiameter{ viewDistance*2+1 };
+				auto const gpuChunksCount{ renderDiameter*renderDiameter*renderDiameter };
 				
-					indices[i++] = chunk.gpuIndex();	
-			});
-			
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksIndices_ssbo);
-			glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, gpuChunksCount * sizeof(chunk::Chunks::index_t), &indices[0]);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);	
+				static std::vector<chunk::Chunks::index_t> indices{};
+				indices.clear();
+				indices.reserve(gpuChunksCount);
+				
+				iterateAllChunks(
+					chunks[playerChunkCand], 
+					lastCameraChunkCoord - pChunk{viewDistance}, lastCameraChunkCoord + pChunk{viewDistance}, 
+					[&](chunk::Chunks::index_t const chunkIndex, pChunk const coord) {
+						if(chunkIndex == -1) { 
+							indices.push_back(0);  
+						}
+						else {
+							auto chunk{ chunks[chunkIndex] };
+							
+							const bool updated{ updateChunk(chunk, lastCameraChunkCoord.val(), updatedCount >= chunkUpdatesPerFrame) };
+							if(updated) updatedCount++; 
+							
+							indices.push_back(chunk.gpuIndex());
+						}
+				});
+				
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksIndices_ssbo);
+				glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, gpuChunksCount * sizeof(chunk::Chunks::index_t), &indices[0]);
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+			}
 			
 			//clear luminance histogram
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, luminance_ssbo);
 			glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R8, 0, 256 * sizeof(uint32_t), GL_RED_INTEGER, GL_UNSIGNED_BYTE, nullptr);
-			
-			
-			if(numpad[3]) glFinish();
-			auto const startTraceTime{ std::chrono::steady_clock::now() };
+			//no unbinding yet
 			
 			auto const minExp{ 0.1f };
 			auto const maxExp{ 5.0f };
@@ -1886,15 +1866,21 @@ int main() {
 			glUniform1f(minLogLum_u, minLogLum);
 			glUniform1f(rangeLogLum_u, rangeLogLum);
 			
+			
 			glBindFramebuffer(GL_FRAMEBUFFER, render_fb);
-			GLenum buffers1[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
-			glDrawBuffers(2, buffers1);		
+			GLenum const buffers[]{ GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+			glDrawBuffers(2, buffers);
+			
+			if(numpad[3]) glFinish();
+			auto const startTraceTime{ std::chrono::steady_clock::now() };
 			
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 			
-			GLenum buffers2[] = { GL_COLOR_ATTACHMENT0 };
-			glDrawBuffers(1, buffers2);
+			if(numpad[3]) glFinish();
+			auto const endTraceTime{ std::chrono::steady_clock::now() };
+			
+			glDrawBuffers(1, buffers);
 			
 			
 			uint32_t luminanceHistogram[256];
@@ -1945,52 +1931,49 @@ int main() {
 			static float prevLum{ curLum };
 			prevLum = prevLum + (curLum - prevLum) * (1 - exp(-deltaTime * 1.1));
 			auto const exposure{ 0.16 / (misc::clamp(prevLum, 0.1f, 5.0f) + 0.07) };
-			
-			//std::cout << curLum <<  ' ' << prevLum << '\n';
+
 			
 			if(!numpad[5]) {
 				glUseProgram(blur_p);
-				GLint const h_u{ glGetUniformLocation(blur_p, "h") };
 				
 				glBindFramebuffer(GL_FRAMEBUFFER, pp2_fb);
 				glUniform1i(sampler_u, pp1_it);
-				glUniform1ui(h_u, 0);
+				glUniform1ui(horisontal_u, 0);
 				glDrawArrays(GL_TRIANGLES, 0, 3);	
 				
 				glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
 				glUniform1i(sampler_u, pp2_it);
-				glUniform1ui(h_u, 1);
+				glUniform1ui(horisontal_u, 1);
 				glDrawArrays(GL_TRIANGLES, 0, 3);	
 				
 				glBindFramebuffer(GL_FRAMEBUFFER, pp2_fb);
 				glUniform1i(sampler_u, pp1_it);
-				glUniform1ui(h_u, 0);
+				glUniform1ui(horisontal_u, 0);
 				glDrawArrays(GL_TRIANGLES, 0, 3);	
 				
 				glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
 				glUniform1i(sampler_u, pp2_it);
-				glUniform1ui(h_u, 1);
+				glUniform1ui(horisontal_u, 1);
 				glDrawArrays(GL_TRIANGLES, 0, 3);
 			}
 			else {
+				/*pp1 framebuffer color texture is bound to render framebuffer GL_COLOR_ATTACHMENT1 texture (bloom)
+				  so if bloom is disabled we need to clear the texture*/
 				glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
 				glClear(GL_COLOR_BUFFER_BIT);
 				glBindFramebuffer(GL_FRAMEBUFFER, 0);
 			}
 			
-			glUseProgram(toLDR_p);
 			
 			if(takeScreenshot) glBindFramebuffer(GL_FRAMEBUFFER, screenshot_fb);
 			else               glBindFramebuffer(GL_FRAMEBUFFER, 0);
 			
+			glUseProgram(toLDR_p);
 			glUniform1f(ldr_exposure_u, exposure);
 			glUniform1i(ldr_sampler_u, render_it);
 			glUniform1i(ldr_blurSampler_u, pp1_it);
 			
 			glDrawArrays(GL_TRIANGLES, 0, 3);
-			
-			if(numpad[3]) glFinish();
-			auto const endTraceTime{ std::chrono::steady_clock::now() };
 			
 			if(takeScreenshot) {
 				takeScreenshot = false;
@@ -2062,11 +2045,7 @@ int main() {
 		}
 		
 		{ //draw text
-			glEnable(GL_BLEND);
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			
-			vec2f const textPos(10, 10);
-			    
+			//fill the text
 			std::stringstream ss{};
 			ss << std::fixed;
 			
@@ -2079,7 +2058,7 @@ int main() {
 					ss << "No information about build version\n";
 				#endif
 				
-				PosDir const pd{ PosDir(cameraCoord, pos::posToFracTrunk(viewportCurrent.forwardDir() * 7).value()) };
+				PosDir const pd{ cameraCoord, pos::posToFracTrunk(viewportCurrent.forwardDir() * 7).value() };
 				auto const optionalResult{ trace(chunks, pd) };
 				if(optionalResult) {
 					auto const result{ *optionalResult };
@@ -2134,7 +2113,7 @@ int main() {
 				ss.precision(4);
 				ss << "camera in: chunk=" << currentCoord().valAs<pos::Chunk>() << " inside chunk=" << pos::fracToPos(currentCoord().valIn<pos::Chunk>()) << '\n';
 				ss << "camera forward=" << forwardDir << '\n';
-				ss << "frame time=" << (mc.mean() / 1000.0) << "ms\n";
+				ss << "frame time=" << (frameTime.mean() / 1000.0) << "ms\n";
 				if(numpad[3]) {
 					ss << "trace time=" << timeToTrace.mean() << "ms\n";
 				}
@@ -2144,51 +2123,56 @@ int main() {
 				}
 			}
 			ss.precision(1);
-			ss << (1000000.0 / mc.mean()) << '(' << (1000000.0 / mc.max()) << ')' << "FPS";
+			ss << (1000000.0 / frameTime.mean()) << '(' << (1000000.0 / frameTime.max()) << ')' << "FPS";
 			
-			std::string const text{ ss.str() };
-	
-			auto const textCount{ std::min<unsigned long long>(text.size(), charsCount) };
+			auto const text{ ss.str() }; //copy
 			
-			std::array<std::array<vec2f, 4>, charsCount> data;
+			//fill buffer from text
+			static std::array<std::array<vec2f, 4>, charsCount> data;
+			int dataSize{ 0 };
 			
-			vec2f const startPoint(textPos.x / windowSize_d().x * 2 - 1, 1 - textPos.y / windowSize_d().y * 2);
-			
-			auto const lineH = font.base();
-			auto const lineHeight = font.lineHeight();
-			float const scale = 5;
+			auto const lineBase{ font.base() };
+			auto const lineHeight{ font.lineHeight() };
+			auto const scale{ 0.1f };
 			auto const aspectRatio{ aspect() };
 
-			vec2f currentPoint(startPoint);
-			for(uint64_t i{}; i != textCount; i++) {
-				auto const ch{ text[i] };
-				if(ch == '\n') {
-					currentPoint = vec2f(startPoint.x, currentPoint.y - lineHeight / scale);
-					continue;
+			vec2f const textPos{ 10.0f, 10.0f };
+			auto const startPoint{ textPos / vec2f(windowSize_d()) / scale };
+			
+			auto currentPoint{ startPoint };
+			for(auto const ch : text) {
+				if(dataSize >= charsCount) break;
+				
+				if(ch == '\n') currentPoint = { startPoint.x, currentPoint.y + lineHeight };
+				else {
+					auto const &fc{ font[ch] };
+					
+					auto const charOffset{ vec2f(fc.xOffset, fc.yOffset + lineHeight) };
+					if(ch != ' ') data[dataSize++] = {
+						//pos
+						(currentPoint + vec2f(       0              , fc.height - lineBase) + charOffset) * scale,
+						(currentPoint + vec2f(fc.width * aspectRatio,         0 - lineBase) + charOffset) * scale, 
+						//uv
+						vec2f{fc.x, fc.y+fc.height},
+						vec2f{fc.x+fc.width, fc.y},
+					};
+					
+					currentPoint.x += fc.xAdvance * aspectRatio;
 				}
-				auto const &fc{ font[ch] };
-				
-				auto const charOffset{ vec2f(fc.xOffset, -fc.yOffset - lineHeight) / scale };
-				if(ch != ' ') data[i] = {
-					//pos
-					currentPoint + vec2f(0, -fc.height + lineH) / scale + charOffset,
-					currentPoint + vec2f(fc.width*aspectRatio, 0 + lineH) / scale + charOffset, 
-					//uv
-					vec2f{fc.x, 1-fc.y-fc.height},
-					vec2f{fc.x+fc.width,1-fc.y},
-				};
-				
-				currentPoint += vec2f(fc.xAdvance*aspectRatio, 0) / scale;
 			}
-
+			
+			//draw the text
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			
 			glUseProgram(fontProgram);
 			
 			glBindBuffer(GL_ARRAY_BUFFER, fontVB);
-			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(data[0]) * textCount, &data[0]);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(data[0]) * dataSize, &data[0]);
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
 			
 			glBindVertexArray(fontVA);
-			glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, textCount);
+			glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, dataSize);
 			glBindVertexArray(0);
 			
 			glDisable(GL_BLEND);
@@ -2203,7 +2187,7 @@ int main() {
         update(chunks);
 		
 		auto const dTime{ std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - startFrame).count() };
-		mc.add(dTime);
+		frameTime.add(dTime);
 		deltaTime = double(dTime) / 1000000.0;
 		
 		if(firstFrame) {

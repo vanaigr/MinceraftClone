@@ -81,13 +81,13 @@ namespace chunk {
 		  return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim;
 	  }
 	  
-	  inline constexpr BlockInChunkIndex blockCoordToIndex(pBlock const coord) { return blockIndex(coord.val()); }
-	  inline constexpr pBlock blockIndexToCoord(BlockInChunkIndex const index) { return pBlock{indexBlock(index)}; }
-	  
-	  inline constexpr CubeInChunkIndex cubeCoordToIndex(pCube const coord) { return cubeIndexInChunk(coord.val()); }
-	  inline constexpr pCube cubeIndexToCoord(CubeInChunkIndex const index) { return pCube{cubeCoordInChunk(index)}; }
-	  
-	  inline constexpr uint8_t cubeCoordInBlockToIndex(pCube const pos) {
+	inline constexpr BlockInChunkIndex blockCoordToIndex(pBlock const coord) { return blockIndex(coord.val()); }
+	inline constexpr pBlock blockIndexToCoord(BlockInChunkIndex const index) { return pBlock{indexBlock(index)}; }
+	
+	inline constexpr CubeInChunkIndex cubeCoordToIndex(pCube const coord) { return cubeIndexInChunk(coord.val()); }
+	inline constexpr pCube cubeIndexToCoord(CubeInChunkIndex const index) { return pCube{cubeCoordInChunk(index)}; }
+	
+	inline constexpr uint8_t cubeCoordInBlockToIndex(pCube const pos) {
 		assert(checkCubeCoordInBlockValid(pos));
 		auto const coord{ pos.val() };
 		return coord.x + (coord.y << units::cubesInBlockDimAsPow2) + (coord.z << (units::cubesInBlockDimAsPow2*2));
@@ -101,6 +101,7 @@ namespace chunk {
 			(index >> (units::cubesInBlockDimAsPow2*2)) % units::cubesInBlockDim
 		);
 	}
+	
 	
 	template<typename Unit> struct PackedAABB;
 	
@@ -137,6 +138,7 @@ namespace chunk {
 		constexpr pCube first() const { return chunk::cubeIndexToCoord(int16_t(data&0xffff)); }
 		constexpr pCube last() const { return chunk::cubeIndexToCoord(int16_t(data>>16)); } 
 	};
+	
 	
 	template<typename Chunks>
 	struct Chunk_{
@@ -182,6 +184,7 @@ namespace chunk {
 	
 	struct Chunks;
 	using Chunk = Chunk_<Chunks>;
+
 
 	struct Block { //used in main.shader
 		static_assert(pos::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
@@ -313,8 +316,10 @@ namespace chunk {
 			static uint8_t mirror(vec3i const dir) {
 				return dirAsIndex(-dir);
 			}
-		
+	private:
 		std::array<OptionalChunkIndex, neighboursCount> n;
+	public:
+		Neighbours() = default;
 		
 		OptionalChunkIndex &operator[](uint8_t index) { assert(checkIndexValid(index)); return n[index]; }
 		OptionalChunkIndex const &operator[](uint8_t index) const { assert(checkIndexValid(index)); return n[index]; }
@@ -495,6 +500,7 @@ namespace chunk {
 	
 	struct ChunkLiquid : CubesArray<LiquidCube> { using CubesArray::CubesArray; };
 	
+	
 	struct BlockData { //used in main.frag
 		static_assert(pos::cubesInBlockCount == 8);
 		uint8_t solidCubes;
@@ -517,6 +523,7 @@ namespace chunk {
 	static_assert(sizeof(BlockData) == 4);
 	
 	struct BlocksData : BlocksArray<BlockData> { using BlocksArray::BlocksArray; };
+	
 	
 	struct ChunkBlocksList {
 		using value_type = int16_t; static_assert(pos::blocksInChunkCount < std::numeric_limits<value_type>::max());
@@ -556,6 +563,7 @@ namespace chunk {
 		}
 	};
 	
+	
 	struct ChunkData : BlocksArray<Block> {
 		using BlocksArray::BlocksArray;
 		using BlocksArray::operator[];
@@ -582,6 +590,7 @@ namespace chunk {
 			return cube.block.id() * cube.isSolid;
 		}
 	};
+	
 	
 	struct Chunk3x3BlocksList {
 		static int constexpr sidelength = 3 * units::blocksInChunkDim;
@@ -636,6 +645,7 @@ namespace chunk {
 	};
 	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);
 	
+	
 	using chunkIndex_t = int32_t;	
 	struct ChunkAndCube {
 		chunk::CubeInChunkIndex cubeIndex;
@@ -658,6 +668,7 @@ namespace chunk {
 		}
 	};
 	
+	
 	struct ChunksLiquidCubes {
 	private:
 		static constexpr int gensCount = 2;
@@ -676,7 +687,8 @@ namespace chunk {
 			gens[genIndex].push_back(cube);
 		}
 	};
-
+	
+	
 	struct Chunks {	
 		using index_t = chunkIndex_t;
 	private:
@@ -859,6 +871,7 @@ namespace chunk {
 		
 		bool is() const { return valid; }
 	};
+	
 	
 	//same as Move_to_neighbour_Chunk but better
 	struct MovingChunk {
