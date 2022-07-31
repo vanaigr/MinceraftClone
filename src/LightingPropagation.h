@@ -22,7 +22,7 @@ namespace AddLighting {
 	namespace {
 		template<typename Config>
 		inline void propagateAddLight(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const startLight) {
-			cubeChunk.status().setLightingUpdated(true);
+			cubeChunk.status().current.lighting = false;
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord, 
 				[startLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
@@ -102,7 +102,7 @@ namespace SubtractLighting {
 					
 					auto const expectedLight{ Config::propagationRule(fromLight, fromDir, blockId, isCube) };
 					if(type == LightingCubeType::medium && expectedLight >= light && !alreadyChecked) {
-						cubeChunk.status().setLightingUpdated(true);
+						cubeChunk.status().current.lighting = false;
 						light = 0;
 						propagateLightRemove<Config>(endCubes, cubeChunk, cubeInChunkCoord, expectedLight);
 					}
@@ -120,7 +120,7 @@ namespace SubtractLighting {
 		) {
 			if((cubesEndInChunkCoord < cubesStartInChunkCoord).all()) return;
 			
-			cubesChunk.status().setLightingUpdated(true);
+			cubesChunk.status().current.lighting = false;
 			
 			for(int32_t z{cubesStartInChunkCoord.z}; z <= cubesEndInChunkCoord.z; z++)
 			for(int32_t y{cubesStartInChunkCoord.y}; y <= cubesEndInChunkCoord.y; y++)
@@ -147,7 +147,7 @@ namespace SubtractLighting {
 						auto &light{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 						if(type == LightingCubeType::medium) {
 							auto const expectedLight{ light };
-							cubeChunk.status().setLightingUpdated(true);
+							cubeChunk.status().current.lighting = false;
 							light = 0;
 							propagateLightRemove<Config>(endCubes, cubeChunk, cubeInChunkCoord, expectedLight);
 						}

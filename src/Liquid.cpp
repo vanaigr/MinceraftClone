@@ -165,7 +165,7 @@ void chunk::ChunksLiquidCubes::update() {
 				auto const aabbCombined{ aabbPart1 + Area{ first, last } };
 				aabb = { aabbCombined.first, aabbCombined.last };
 				
-				chunk.status().setBlocksUpdated(true);
+				chunk.status().current.blocks = false;
 				chunk.modified() = true;
 			});
 		}

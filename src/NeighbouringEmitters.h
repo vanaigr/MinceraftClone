@@ -65,7 +65,7 @@ static void setChunksUpdateNeighbouringEmitters(chunk::Chunk chunk) {
 	iterate3by3Volume([&](vec3i const dir, int const i) {
 		auto const neighbourIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(dir).get() };
 		if(neighbourIndex != -1) {
-			chunks[neighbourIndex].status().setUpdateNeighbouringEmitters(true);
+			chunks[neighbourIndex].status().updateNeighbouringEmitters = true;
 		}
 	});
 }

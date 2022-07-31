@@ -517,9 +517,8 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		chunk.position() = chunkPosition;
 		
 		chunk.status() = chunk::ChunkStatus{};
-		chunk.status().setEverythingUpdated();
-		chunk.status().setUpdateAO(true);
-		chunk.status().setUpdateNeighbouringEmitters(true);
+		chunk.status().updateAO = true;
+		chunk.status().updateNeighbouringEmitters = true;
 		
 		chunk.gpuIndex() = chunk::Chunks::index_t{};
 		
@@ -617,10 +616,9 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		) };
 		
 		{ //updates for current chunk
-			assert(chunk.status().isUpdateAO()); //AO is updated later in updateChunk()
+			assert(chunk.status().updateAO); //AO is updated later in updateChunk()
 		
 			updateBlocksDataNeighboursInfoInArea(chunk, pBlock{aabb.first}, pBlock{aabb.last});
-			assert(chunk.status().isBlocksUpdated()); //chunk.status().setBlocksUpdated(true); //already set
 		}
 		
 		//updates for neighbouring chunks
@@ -632,14 +630,14 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 			auto neighbourChunk{ chunks[neighbourIndex.get()] };
 			auto const &neighbourAabb{ neighbourChunk.aabb() };
 			
-			if(!neighbourChunk.status().isUpdateAO()) { //AO
+			if(!neighbourChunk.status().updateAO) { //AO
 				auto const updatedAreaCubes{ intersectAreas3i(
 					{ vec3i{0} - offset*units::cubesInChunkDim, vec3i{units::cubesInChunkDim} - offset*units::cubesInChunkDim },
 					{ neighbourAabb.first * units::cubesInBlockDim, (neighbourAabb.last+1) * units::cubesInBlockDim - 1 })
 				};
 				
 				updateAOInArea(neighbourChunk, pCube{updatedAreaCubes.first}, pCube{updatedAreaCubes.last});
-				neighbourChunk.status().setAOUpdated(true);
+				neighbourChunk.status().current.ao = false;
 			}
 			
 			{ //neighbours info
@@ -653,10 +651,10 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 				) };
 				
 				updateBlocksDataNeighboursInfoInArea(neighbourChunk, pBlock{updatedAreaBlocks.first}, pBlock{updatedAreaBlocks.last});
-				neighbourChunk.status().setBlocksUpdated(true);
+				neighbourChunk.status().current.blocks = false;
 			}
 			
-			neighbourChunk.status().setUpdateNeighbouringEmitters(true);
+			neighbourChunk.status().updateNeighbouringEmitters = true;
 		}
 	}
 	

@@ -181,6 +181,9 @@ void calculateLighting(
 	int const lowestNotFullY{ chunkColumnChunkYMin };
 	
 	{//sky lighting
+		static std::vector<chunk::CubeInChunkIndex> lightingUpdateCubes{};
+		lightingUpdateCubes.clear(); 
+		
 		{ //sky cuhnks
 			/* Iterate over emptyChunks with maximum sky lighting's neighbours.
 				If the neighbour can accept some lighting frim that chunk, call setUpdateLightingAdd(true);
@@ -203,7 +206,7 @@ void calculateLighting(
 						auto const toNeighbourDir{ axis * sign };
 						auto optNeighbourChunk{ chunk::MovingChunk{ chunk }.offseted(toNeighbourDir) };
 						if(!optNeighbourChunk.is()) continue;
-						auto neighbourChunk{ optNeighbourChunk.get() };
+						auto const neighbourChunk{ optNeighbourChunk.get() };
 						
 						auto const &neighbourChunkBlocks{ neighbourChunk.data() };
 						auto &neighbourChunkLighting{ SkyLightingConfig::getLighting(neighbourChunk) };
@@ -223,7 +226,7 @@ void calculateLighting(
 							neighbourAabb,
 							{ firstInNeighbourChunkPos.val(), lastInNeighbourChunkPos.val() }
 						) };
-	
+						
 						for(int o1{0}; o1 < units::cubesInChunkDim; o1++)
 						for(int o2{0}; o2 < units::cubesInChunkDim; o2++) {
 							pCube const cubePosInChunk{
@@ -247,20 +250,26 @@ void calculateLighting(
 							
 							if(SkyLightingConfig::getType(toCube.block.id(), toCube.isSolid) != LightingCubeType::medium) continue;
 							
-							auto const cubeLight         { chunk::ChunkLighting::maxValue };
-							auto const neighbourCubeLight{ neighbourChunkLighting[neighbourCubePosInNeighbourChunk.val()] };
+							auto const cubeLight    { chunk::ChunkLighting::maxValue };
+							auto &neighbourCubeLight{ neighbourChunkLighting[neighbourCubePosInNeighbourChunk] };
 							
 							auto const toNeighbourCubeLighting{ 
 								SkyLightingConfig::propagationRule(cubeLight, toNeighbourDir, toCube.block.id(), toCube.isSolid)
 							};
 							if(toNeighbourCubeLighting > neighbourCubeLight) {
-								neighbourChunk.status().setUpdateLightingAdd(true);
-								goto nextChunk;
+								neighbourCubeLight = toNeighbourCubeLighting;
+								lightingUpdateCubes.push_back(chunk::cubeCoordToIndex(neighbourCubePosInNeighbourChunk));
 							}
 						}
-					}
 					
-					nextChunk:;
+						if(!lightingUpdateCubes.empty()) {
+							neighbourChunk.status().current.lighting = false;
+							for(auto const cubeIndex : lightingUpdateCubes) {
+								AddLighting::fromCube<SkyLightingConfig>(neighbourChunk, chunk::cubeIndexToCoord(cubeIndex).val());
+							}
+							lightingUpdateCubes.clear();
+						}
+					}
 				}
 			}
 		}
@@ -382,7 +391,7 @@ void calculateLighting(
 						auto const toNeighbourDir{ axis * sign };
 						auto optNeighbourChunk{ chunk::MovingChunk{ chunk }.offseted(toNeighbourDir) };
 						if(!optNeighbourChunk.is()) continue;
-						auto neighbourChunk{ optNeighbourChunk.get() };
+						auto const neighbourChunk{ optNeighbourChunk.get() };
 						
 						auto &chunkLighting{ SkyLightingConfig::getLighting(chunk) };	
 						
@@ -428,18 +437,25 @@ void calculateLighting(
 							
 							if(SkyLightingConfig::getType(neighbourCube.block.id(), neighbourCube.isSolid) != LightingCubeType::medium) continue;
 							
-							auto const &cubeLight   { chunkLighting         [cubePosInChunk                  .val()] };
-							auto &neighbourCubeLight{ neighbourChunkLighting[neighbourCubePosInNeighbourChunk.val()] };
+							auto const &cubeLight   { chunkLighting         [cubePosInChunk                  ] };
+							auto &neighbourCubeLight{ neighbourChunkLighting[neighbourCubePosInNeighbourChunk] };
 							
 							auto const toNeighbourCubeLighting{ 
 								SkyLightingConfig::propagationRule(cubeLight, toNeighbourDir, neighbourCube.block.id(), neighbourCube.isSolid)
 							};
 							if(toNeighbourCubeLighting > neighbourCubeLight) {
-								neighbourChunk.status().setUpdateLightingAdd(true);
-								goto nextChunk2;
-							}
+								neighbourCubeLight = toNeighbourCubeLighting;
+								lightingUpdateCubes.push_back(chunk::cubeCoordToIndex(neighbourCubePosInNeighbourChunk));
+							}							
 						}
-						nextChunk2:;
+						
+						if(!lightingUpdateCubes.empty()) {
+							neighbourChunk.status().current.lighting = false;
+							for(auto const cubeIndex : lightingUpdateCubes) {
+								AddLighting::fromCube<SkyLightingConfig>(neighbourChunk, chunk::cubeIndexToCoord(cubeIndex).val());
+							}
+							lightingUpdateCubes.clear();
+						}
 					}
 				}
 			}

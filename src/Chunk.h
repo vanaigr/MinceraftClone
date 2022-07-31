@@ -328,52 +328,43 @@ namespace chunk {
 		OptionalChunkIndex const &operator[](vec3i dir) const { return n[dirAsIndex(dir)]; }
 	};
 	
-	
-	struct ChunkStatus {
-	private:
-		uint8_t updateAO : 1;
-		uint8_t updateLightingAdd : 1;
-		uint8_t updateNeighbouringEmitters : 1;
+	struct StatusFlags {
+		uint8_t ao : 1;
+		uint8_t blocks : 1;
+		uint8_t lighting : 1;
+		uint8_t neighbouringEmitters : 1;
 		
-		uint8_t aoUpdated : 1;
-		uint8_t blocksUpdated : 1;
-		uint8_t lightingUpdated : 1;
-		uint8_t neighbouringEmittersUpdated : 1;
+		bool isInvalidated() const { return !ao || !blocks || !lighting || !neighbouringEmitters; }
+		
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Winvalid-token-paste"
+	
+		#define o(field) static_cast<uint8_t>(f.##field | s.##field)
+		friend StatusFlags operator|(StatusFlags const f, StatusFlags const s) {
+			return { o(ao), o(blocks), o(lighting), o(neighbouringEmitters) };
+		}
+		#undef o
+		
+		#define o(field) static_cast<uint8_t>(f.field & s.##field)
+		friend StatusFlags operator&(StatusFlags const f, StatusFlags const s) {
+			return { o(ao), o(blocks), o(lighting), o(neighbouringEmitters) };
+		}
+		#undef o
+	#pragma clang diagnostic pop
+		
+		StatusFlags &operator|=(StatusFlags const s) { return *this = (*this | s); }	
+		StatusFlags &operator&=(StatusFlags const s) { return *this = (*this & s); }
+	};
+	struct ChunkStatus {
+		StatusFlags loaded;
+		StatusFlags current;
+		
+		uint8_t updateAO : 1;
+		uint8_t updateNeighbouringEmitters : 1;
 	public:
 		ChunkStatus() = default;
 		
-		void setEverythingUpdated() {
-			setAOUpdated(true);
-			setBlocksUpdated(true);
-			setLightingUpdated(true);
-			setNeighbouringEmittersUpdated(true);
-		}
-		
-		bool isInvalidated() const { return aoUpdated || blocksUpdated || lightingUpdated || neighbouringEmittersUpdated; }
-		bool needsUpdate()   const { return updateAO || updateLightingAdd || updateNeighbouringEmitters; }	
-		
-		bool isAOUpdated() const { return aoUpdated; }
-		void setAOUpdated(bool const val) { aoUpdated = val; }		
-		
-		bool isBlocksUpdated() const { return blocksUpdated; }
-		void setBlocksUpdated(bool const val) { blocksUpdated = val; } 
-		
-		bool isLightingUpdated() const { return lightingUpdated; }
-		void setLightingUpdated(bool const val) { lightingUpdated = val; }		
-
-		bool isNeighbouringEmittersUpdated() const { return neighbouringEmittersUpdated; }
-		void setNeighbouringEmittersUpdated(bool const val) { neighbouringEmittersUpdated = val; }
-		
-
-		bool isUpdateAO() const { return updateAO; }
-		void setUpdateAO(bool const val) { updateAO = val; }		
-		
-		bool isUpdateLightingAdd() const { return updateLightingAdd; }
-		void setUpdateLightingAdd(bool const val) { updateLightingAdd = val; }
-		
-		bool isUpdateNeighbouringEmitters() const { return updateNeighbouringEmitters; }
-		void setUpdateNeighbouringEmitters(bool const it) { updateNeighbouringEmitters = it; }
-		
+		bool needsUpdate() const { return updateAO || updateNeighbouringEmitters; }	
 	};
 	
 	
