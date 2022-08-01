@@ -14,10 +14,10 @@
 
 struct TextRenderer {
 	enum class VAlign {
-		top, bottom
+		top, center, bottom
 	};	
 	enum class HAlign {
-		left, right
+		left, center, right
 	};
 	
 	struct Cursor {
@@ -31,11 +31,12 @@ public:
 	TextRenderer();
 
 	void draw(
-		std::string_view const text,
+		std::string_view const text, TextRenderer::HAlign const textHAlign,
+		
 		Cursor const *const beginCursor, Cursor const *const endCursor,
 		vec2f const origin, TextRenderer::VAlign const originVAlign, TextRenderer::HAlign const originHAlign, 
+		
 		float const lineCount, //in one screen
-		Font const &font, vec2i const windowSize, GLuint const program,
-		vec2f &dimensions_out
+		Font const &font, vec2i const windowSize, GLuint const program
 	);
 };

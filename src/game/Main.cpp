@@ -36,7 +36,6 @@
 #include<sstream>
 #include<string>
 #include<cstdlib>
-
 //https://learnopengl.com/In-Practice/Debugging
 GLenum glCheckError_(const char *file, int line) {
 	GLenum errorCode;
@@ -159,7 +158,10 @@ Input &currentInput() {
 	else return playerInput;
 }
 
-
+namespace Overlay { enum Overlay {
+	disable, important, all,   count
+}; }
+static Overlay::Overlay overlay{ Overlay::all };
 static bool debugInfo{ false };
 static bool numpad[10];
 
@@ -263,7 +265,7 @@ static GLuint mainProgram;
 static GLuint fontProgram;
 
 static GLuint currentBlockProgram;
-  static GLint cb_blockIndex_u;
+  static GLint cb_blockIndex_u, startPos_u, endPos_u;
 
 static GLuint blockHitbox_p;
   static GLint blockHitboxModelMatrix_u;
@@ -429,6 +431,9 @@ void handleKey(int const key) {
 			else if(key == GLFW_KEY_F5) {
 				useTraceBuffer = !useTraceBuffer;
 				reloadTraceBuffer();
+			}			
+			else if(key == GLFW_KEY_F6) {
+				overlay = Overlay::Overlay( (overlay - 1 + Overlay::Overlay::count) % Overlay::Overlay::count );
 			}
 		}
 	}
@@ -992,8 +997,11 @@ static void reloadShaders() {
 	
 		glUseProgram(currentBlockProgram);
 		
-		glUniform1i(glGetUniformLocation(currentBlockProgram, "atlas"), atlas_it);
 		cb_blockIndex_u = glGetUniformLocation(currentBlockProgram, "block");
+		startPos_u = glGetUniformLocation(currentBlockProgram, "startPos");
+		endPos_u = glGetUniformLocation(currentBlockProgram, "endPos");
+		
+		glUniform1i(glGetUniformLocation(currentBlockProgram, "atlas"), atlas_it);
 		glUniform1f(glGetUniformLocation(currentBlockProgram, "atlasTileSize"), 16); //from main program
 		bindProperties(currentBlockProgram);
 		
@@ -1780,6 +1788,9 @@ int main() {
 		}
 		
 		
+		auto const defaultFB{ takeScreenshot ? screenshot_fb : 0 };
+		glBindFramebuffer(GL_FRAMEBUFFER, defaultFB);
+		
 		{ //draw the world
 			glDisable(GL_DEPTH_TEST); 
 			glDisable(GL_CULL_FACE); 
@@ -2005,12 +2016,9 @@ int main() {
 				  so if bloom is disabled we need to clear the texture*/
 				glBindFramebuffer(GL_FRAMEBUFFER, pp1_fb);
 				glClear(GL_COLOR_BUFFER_BIT);
-				glBindFramebuffer(GL_FRAMEBUFFER, 0);
 			}
 			
-			
-			if(takeScreenshot) glBindFramebuffer(GL_FRAMEBUFFER, screenshot_fb);
-			else               glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			glBindFramebuffer(GL_FRAMEBUFFER, defaultFB);
 			
 			glUseProgram(toLDR_p);
 			glUniform1f(ldr_exposure_u, exposure);
@@ -2019,37 +2027,11 @@ int main() {
 			
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 			
-			if(takeScreenshot) {
-				takeScreenshot = false;
-				glFinish();
-				
-				static uint8_t *data{ 0 };
-				static int size{ 0 };
-				if(size < 3 * windowSize.x * windowSize.y) {
-					delete[] data;
-					data = new uint8_t[3 * windowSize.x * windowSize.y];
-				}
-				
-				glActiveTexture(GL_TEXTURE0 + screenshotColor_it);
-				glGetTexImage(GL_TEXTURE_2D, 0, GL_BGR, GL_UNSIGNED_BYTE, data);
-				
-				generateBitmapImage(data, windowSize.y, windowSize.x, "screenshot.bmp");
-				
-				glBindFramebuffer(GL_READ_FRAMEBUFFER, screenshot_fb);
-				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-				glBlitFramebuffer(	
-					0, 0, windowSize.x, windowSize.y,
-					0, 0, windowSize.x, windowSize.y,
-					GL_COLOR_BUFFER_BIT, GL_NEAREST 
-				);
-				glBindFramebuffer(GL_FRAMEBUFFER, 0);
-			}
-			
 			auto const diffMs{ std::chrono::duration_cast<std::chrono::microseconds>(endTraceTime - startTraceTime).count() / 1000.0 };
 			timeToTrace.add(diffMs);
 		}
 		
-		{ //draw block hitbox
+		if(overlay >= Overlay::Overlay::important) { //draw block hitbox
 			PosDir const pd{ PosDir(cameraCoord, pos::posToFracTrunk(forwardDir * 7).value()) };
 			auto const optionalResult{ trace(chunks, pd) };
 				
@@ -2080,15 +2062,102 @@ int main() {
 			}
 		}
 		
-		{ //draw current block
+		auto const [curBlockStartPos, curBlockEndPos]{ [&](){
+			auto const size{ vec2f(aspect(), 1) * 0.06 };
+			auto const end_{ vec2f(1 - 0.02 * aspect(), 1-0.02) };
+			auto const start_{ end_ - size };
+			
+			auto const startPos{ (start_ * vec2f(windowSize)).floor() };
+			auto const endPos  { (end_   * vec2f(windowSize)).floor() };
+			
+			return std::make_tuple(startPos, endPos);
+		}() };
+		
+		if(overlay >= Overlay::Overlay::important) { //draw current block
 			glUseProgram(currentBlockProgram);
+			
+			auto const startPos{  curBlockStartPos / vec2f(windowSize) * 2 - 1 };
+			auto const endPos  {  curBlockEndPos   / vec2f(windowSize) * 2 - 1 };
+			
 			glUniform1ui(cb_blockIndex_u, blockPlaceId);
+			glUniform2f(startPos_u, startPos.x, startPos.y);
+			glUniform2f(endPos_u, endPos.x, endPos.y);
+			
 			glEnable(GL_FRAMEBUFFER_SRGB); 
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 			glDisable(GL_FRAMEBUFFER_SRGB); 
 		}
 		
-		{ //draw debug info 1
+		
+		struct Cursors {
+			std::vector<TextRenderer::Cursor> cursors;
+			decltype(std::stringstream{}.tellp()) prevSize;
+			
+			auto begin() { return &*std::begin(cursors); }
+			auto end  () { return &*std::end  (cursors); }
+			
+			void clear() {
+				cursors.clear();
+				prevSize = 0;
+			}
+			
+			void push(std::stringstream &ss, uint32_t const color) {
+				auto const textSize{ ss.tellp() - prevSize };
+				prevSize = ss.tellp();
+				cursors.push_back({color, int(textSize)});
+			};
+		};
+		
+		static Cursors cursors{};
+		cursors.clear();
+		
+			
+		static constexpr uint32_t trueFalseColors[]{ 0xff6e1104u, 0xff23611du };
+		static constexpr std::string_view wordsED[]{ "disabled" , "enabled"   };
+		static constexpr std::string_view wordsTF[]{ "false"    , "true"      };
+		
+		static constexpr uint32_t numberColor{ 0xff104661u };
+			
+		if(overlay >= Overlay::Overlay::all) { //draw block info
+			//fill text
+			std::stringstream ss{};
+			
+			ss << "block id (mouse wheel): ";
+			cursors.push(ss, 0xff181818u);
+			ss << blockPlaceId << '\n';
+			cursors.push(ss, numberColor);
+			
+			ss << "liquid type (X): ";
+			cursors.push(ss, 0xff181818u);
+			switch(liquidPlaceType) {
+				break; case LiquidPlaceType::liquid : ss << "liquid" ;
+				break; case LiquidPlaceType::inflow : ss << "inflow" ;
+				break; case LiquidPlaceType::outflow: ss << "outflow";
+				break; default                      : ss << "unknown(" << int(misc::to_underlying(liquidPlaceType)) << ')';
+			}
+			ss << '\n';
+			cursors.push(ss, 0xff252525u);
+			
+			ss << "full block (Z): ";
+			cursors.push(ss, 0xff181818u);
+			ss << wordsTF[breakFullBlock];
+			cursors.push(ss, trueFalseColors[breakFullBlock]);
+			
+			auto const text{ ss.str() }; //copy
+			
+			//render text
+			textRenderer.draw(
+				text, TextRenderer::HAlign::right,
+				cursors.begin(), cursors.end(),
+				vec2f(curBlockStartPos.x, windowSize.y - curBlockEndPos.y) - vec2f(7.0, 5.0), TextRenderer::VAlign::top, TextRenderer::HAlign::right,
+				48.0f,
+				font, windowSize, fontProgram
+			);
+			
+			cursors.clear();
+		}
+		
+		if(overlay >= Overlay::Overlay::important) { //draw debug info 1
 			//fill the text
 			std::stringstream ss{};
 			ss << std::fixed;
@@ -2167,31 +2236,24 @@ int main() {
 				}
 			}
 			ss.precision(1);
-			ss << (1000000.0 / frameTime.mean()) << '(' << (1000000.0 / frameTime.max()) << ')' << "FPS";
+			ss << (1000000.0 / frameTime.mean()) << '(' << (1000000.0 / frameTime.max()) << ')' << "FPS (F2)";
 			
 			auto const text{ ss.str() }; //copy
 			
 			TextRenderer::Cursor const cursor{ 0xff000000u, 100 };
-			vec2f dimensions{};
 			textRenderer.draw(
-				text,
+				text, TextRenderer::HAlign::left,
 				&cursor, &cursor + 1,
-				vec2f(10.0, 0.0), TextRenderer::VAlign::top, TextRenderer::HAlign::left,
+				vec2f(7.0, 1.0), TextRenderer::VAlign::top, TextRenderer::HAlign::left,
 				48.0f,
-				font, windowSize, fontProgram,
-				dimensions
+				font, windowSize, fontProgram
 			);
 		}
 		
-		{ //draw debug info 2
+		if(overlay >= Overlay::Overlay::all) { //draw debug info 2
 			//fill text
 			std::stringstream ss{};
-			static std::vector<TextRenderer::Cursor> cursors{};
-			cursors.clear();
-			
-			static constexpr uint32_t        colors[]{ 0xff9e1f0eu, 0xff3e9c16u };
-			static constexpr std::string_view words[]{ "disabled" , "enabled"   };
-			
+
 			static constexpr std::string_view names[]{
 				"physics", "chunk generation", "time update",
 				"world render timeing", "bloom"
@@ -2200,44 +2262,112 @@ int main() {
 			static constexpr int indices[]{ 0, 1, 2, 3, 5 };
 			static constexpr auto count{ std::end(indices) - std::begin(indices) };
 			
-			
-			decltype(ss.tellp()) prevSize{ 0 };
-			
 			ss << "Numpad flags:\n";
-			auto const titleSize{ ss.tellp() - prevSize };
-			prevSize = ss.tellp();
-			cursors.push_back({0xff141414u, int(titleSize)});
+			cursors.push(ss, 0xff141414u);
 			
 			for(int i{}; i < count; i++) {
 				auto const index{ indices[i] };
 				auto const name { names[i] };
 				
 				ss << name << " (" << index << "): ";
-				auto const textSize{ ss.tellp() - prevSize };
-				prevSize = ss.tellp();
-				cursors.push_back({0xff161616u, int(textSize)});
+				cursors.push(ss, 0xff161616u);
 				
 				int const nump{ numpad[index] ^ negate[i] };
-				ss << words[nump] << '\n';
-				auto const statusSize{ ss.tellp() - prevSize };
-				prevSize = ss.tellp();
-				cursors.push_back({colors[nump], int(statusSize)});
+				ss << wordsED[nump];
+				if(i != count-1) ss << '\n';
+				cursors.push(ss, trueFalseColors[nump]);
 			}
 			auto const text{ ss.str() }; //copy
 			
-			vec2f dimensions{};
 			//render text
 			textRenderer.draw(
-				text,
-				&*std::begin(cursors), &*std::end(cursors),
-				vec2f(10.0, windowSize_d().y), TextRenderer::VAlign::bottom, TextRenderer::HAlign::left,
+				text, TextRenderer::HAlign::left,
+				cursors.begin(), cursors.end(),
+				vec2f(7.0, windowSize_d().y), TextRenderer::VAlign::bottom, TextRenderer::HAlign::left,
 				48.0f,
-				font, windowSize, fontProgram,
-				dimensions
+				font, windowSize, fontProgram
 			);
+			
+			cursors.clear();
 		}
 		
-		{ //draw crosshair
+		if(overlay >= Overlay::Overlay::all) { //draw debug info 3
+			//fill text
+			std::stringstream ss{};
+			
+			uint32_t    const spectatorColors[]{ 0xff8a340au, 0xff0e30abu };
+			char const *const spectatorWords []{ "player"   , "spectator" };
+			
+			ss << "overlay (F6): ";
+			cursors.push(ss, 0xff181818u);
+			switch(overlay) {
+				break; case Overlay::Overlay::disable  : ss << "disabled" ;
+				break; case Overlay::Overlay::important: ss << "important";
+				break; case Overlay::Overlay::all      : ss << "all"      ;
+				break; default                         : ss << "unknown(" << int(misc::to_underlying(overlay)) << ')';
+			}
+			ss << '\n';
+			cursors.push(ss, 0xff252525u);
+			
+			ss << "mode (F3): ";
+			cursors.push(ss, 0xff181818u);
+			ss << spectatorWords[isSpectator] << '\n';
+			cursors.push(ss, spectatorColors[isSpectator]);
+			
+			ss << "trace buffer (F5): ";
+			cursors.push(ss, 0xff181818u);
+			ss << wordsED[useTraceBuffer] << '\n';
+			cursors.push(ss, trueFalseColors[useTraceBuffer]);
+			
+			ss << "window resolution: ";
+			cursors.push(ss, 0xff181818u);
+			ss << windowSize.x;
+			cursors.push(ss, numberColor);	
+			ss << 'x';
+			cursors.push(ss, 0xff252525u);
+			ss << windowSize.y << '\n';
+			cursors.push(ss, numberColor);	
+			
+			ss << "view distance: ";
+			cursors.push(ss, 0xff181818u);
+			ss << viewDistance << '\n';
+			cursors.push(ss, numberColor);	
+			
+			ss << "load chunks: ";
+			cursors.push(ss, 0xff181818u);
+			ss << wordsTF[loadChunks] << '\n';
+			cursors.push(ss, trueFalseColors[loadChunks]);		
+			
+			ss << "save chunks: ";
+			cursors.push(ss, 0xff181818u);
+			ss << wordsTF[saveChunks] << '\n';
+			cursors.push(ss, trueFalseColors[saveChunks]);	
+			
+			ss << "lock framerate: ";
+			cursors.push(ss, 0xff181818u);
+			ss << wordsTF[lockFramerate] << '\n';
+			cursors.push(ss, trueFalseColors[lockFramerate]);
+			
+			ss << "world name: ";
+			cursors.push(ss, 0xff181818u);
+			ss << worldName;
+			cursors.push(ss, 0xff252525u);
+			
+			auto const text{ ss.str() }; //copy
+			
+			//render text
+			textRenderer.draw(
+				text, TextRenderer::HAlign::right,
+				cursors.begin(), cursors.end(),
+				vec2f(windowSize) + vec2f(-7.0, 0), TextRenderer::VAlign::bottom, TextRenderer::HAlign::right,
+				48.0f,
+				font, windowSize, fontProgram
+			);
+			
+			cursors.clear();
+		}
+		
+		if(overlay >= Overlay::Overlay::important) { //draw crosshair
 			glEnable(GL_BLEND);
 			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			
@@ -2247,6 +2377,31 @@ int main() {
 			glDisable(GL_BLEND);
 		}
 		
+		if(takeScreenshot) {
+			takeScreenshot = false;
+			
+			static uint8_t *data{ 0 };
+			static int size{ 0 };
+			if(size < 3 * windowSize.x * windowSize.y) {
+				delete[] data;
+				data = new uint8_t[3 * windowSize.x * windowSize.y];
+			}
+			
+			glFinish();
+			glActiveTexture(GL_TEXTURE0 + screenshotColor_it);
+			glGetTexImage(GL_TEXTURE_2D, 0, GL_BGR, GL_UNSIGNED_BYTE, data);
+			
+			generateBitmapImage(data, windowSize.y, windowSize.x, "screenshot.bmp");
+			
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, screenshot_fb);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+			glBlitFramebuffer(	
+				0, 0, windowSize.x, windowSize.y,
+				0, 0, windowSize.x, windowSize.y,
+				GL_COLOR_BUFFER_BIT, GL_NEAREST 
+			);
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		}
 		
 		glfwSwapBuffers(window);
 		glfwPollEvents();

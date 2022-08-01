@@ -1,5 +1,7 @@
 #include"TextRenderer.h"
 
+#include<vector>
+
 #pragma pack(push, 1)
 struct TextParams {
 	vec2<GLfloat> startPos;
@@ -38,12 +40,13 @@ TextRenderer::TextRenderer() {
 }
 
 void TextRenderer::draw(
-	std::string_view const text,
+	std::string_view const text, TextRenderer::HAlign const textHAlign,
+	
 	Cursor const *const beginCursor, Cursor const *const endCursor,
 	vec2f const origin, TextRenderer::VAlign const originVAlign, TextRenderer::HAlign const originHAlign,
+	
 	float const lineCount, 
-	Font const &font, vec2i const windowSize, GLuint const program,
-	vec2f &dimensions
+	Font const &font, vec2i const windowSize, GLuint const program
 ) {
 	assert(beginCursor != endCursor);
 	
@@ -54,21 +57,24 @@ void TextRenderer::draw(
 	auto const startPoint{ origin / vec2f(windowSize) * font.lineHeight * lineCount };
 	
 	//calculate text bounding box and chars count
-	float currentLine{};
-	dimensions = {};
+	static std::vector<float> linesWidth{};
+	linesWidth.clear();
+	float currentLineWidth{};
+	vec2f dimensions{};
 	size_t count{};
 	
 	for(size_t i{};; i++) {
 		auto const ch{ text[i] };
 		auto const end{ i == text.size() };
 		if(ch == '\n' || end) {
-			dimensions = vec2f(std::max(dimensions.x, currentLine), dimensions.y + font.lineHeight);
-			currentLine = 0;
+			linesWidth.push_back(currentLineWidth);
+			dimensions = vec2f(std::max(dimensions.x, currentLineWidth), dimensions.y + font.lineHeight);
+			currentLineWidth = 0;
 			if(end) break;
 		}
 		else {
 			auto const fc{ font.fontChars[int(ch)] };			
-			currentLine += fc.xAdvance * aspectRatio;
+			currentLineWidth += fc.xAdvance * aspectRatio;
 			if(ch != ' ') count++;
 		}
 	}
@@ -77,8 +83,11 @@ void TextRenderer::draw(
 		float x, y;
 		
 		if(originVAlign == VAlign::top) y = -font.base + font.lineHeight;
-		else y = -dimensions.y;		
+		else if(originVAlign == VAlign::center) y = -dimensions.y / 2.0f;
+		else y = -dimensions.y;	
+		
 		if(originHAlign == HAlign::left) x = 0;
+		else if(originHAlign == HAlign::center) x = -dimensions.x / 2.0f;
 		else x = -dimensions.x;
 		
 		return vec2f{x,y};
@@ -105,6 +114,7 @@ void TextRenderer::draw(
 		assert(data != nullptr);
 		
 		int currentData = 0;
+		int currentLine = 0;
 		
 		auto currentPoint{ startPoint };
 		auto const *currentCursor{ beginCursor };
@@ -119,11 +129,20 @@ void TextRenderer::draw(
 				}
 			}
 			
-			if(ch == '\n') currentPoint = { startPoint.x, currentPoint.y + font.lineHeight };
+			if(ch == '\n') {
+				currentPoint = { startPoint.x, currentPoint.y + font.lineHeight };
+				currentLine++;
+			}
 			else {
 				auto const fc{ font.fontChars[int(ch)] };
 				
-				auto const charOffset{ vec2f(fc.xOffset, fc.yOffset) + alignment };
+				auto const lineXOffset{ [&]() {
+					if(textHAlign == HAlign::left) return 0.0f;
+					if(textHAlign == HAlign::center) return  (dimensions.x - linesWidth[currentLine]) / 2.0f;
+					else return dimensions.x - linesWidth[currentLine];
+				}() };
+				
+				auto const charOffset{ vec2f(fc.xOffset, fc.yOffset) + alignment + vec2f(lineXOffset, 0) };
 				if(ch != ' ') {
 					TextParams const params{
 						//pos

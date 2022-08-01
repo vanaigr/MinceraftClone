@@ -7,8 +7,8 @@ layout(std140) uniform Properties {
 	mat4 projection; //from local space to screen space
 };
 
-in vec2 startPos;
-in vec2 endPos;
+uniform vec2 startPos;
+uniform vec2 endPos;
 
 out vec4 color;
 
