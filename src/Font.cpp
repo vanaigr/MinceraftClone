@@ -3,8 +3,7 @@
 #include<iostream>
 #include<cassert>
 
-Font::Font(char const *path) {
-	//std::memset(&fontChars[0], 0, sizeof(fontChars));
+void loadFont(Font &font, char const *const path) {
 	std::ifstream info{ path };
 	
 	auto const parseField = [](std::ifstream &i) -> int {
@@ -21,14 +20,20 @@ Font::Font(char const *path) {
 		return field;
 	};
 	
-	for(int i = 0; i < 15; i++) parseField(info);
-	lineHeight_ = parseField(info);
-	base_ = parseField(info);
-	auto const width = float(parseField(info));
-	auto const height = float(parseField(info));
+	for(int i = 0; i < 9; i++) parseField(info);
+	font.paddingT = parseField(info);
+	font.paddingR = parseField(info);
+	font.paddingB = parseField(info);
+	font.paddingL = parseField(info);
+	for(int i = 0; i < 2; i++) parseField(info);
 	
-	lineHeight_ /= height;
-	base_ /= height;
+	
+	int paddings[] = { 1, 1, -1, -1, 0, 0, 0 };
+	
+	font.lineHeight = parseField(info);
+	font.base = parseField(info);
+	font.width = parseField(info);
+	font.height = parseField(info);
 	
 	int const pages{ parseField(info) };
 	if(pages != 1) {
@@ -42,34 +47,29 @@ Font::Font(char const *path) {
 	
 	while(true) {
 		int fieldIndex = 0;
-		float fields[7];
+		int fields[7];
 		int index;
 		
 		while(true) {
 			if(fieldIndex == 8) {
-				FontChar const it{ fields };
-				if(index < 0 || index > 256) {
-					std::cerr << "font char " << index << " is not in ASCII set\n";
-					exit(-1);
-				}
-				fontChars[index] = it;
-				//std::cout << fontChars[index] << '\n';
-				fieldIndex = 0;
-				
 				parseField(info); //page
 				parseField(info); //chnl
+				
+				font.fontChars[index] = FontChar::fromArray(fields);
+				
+				fieldIndex = 0;
+				continue;
 			}
 			
-			if(fieldIndex == 0) index = parseField(info);
-			else fields[fieldIndex-1] = float(parseField(info)) / (fieldIndex % 2 == 1 ? width : height);
+			if(fieldIndex == 0) {
+				index = parseField(info);
+				assert(index >= 0 && index < 256);
+			}
+			else fields[fieldIndex-1] = parseField(info) + paddings[fieldIndex-1];
 		
 			if(info.peek() == -1) return;
 			fieldIndex ++;
 		}
 	}
-}
-
-FontChar const &Font::operator[](int index) const {
-	return fontChars[index];
 }
 

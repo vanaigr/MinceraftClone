@@ -182,7 +182,7 @@ static bool breakFullBlock{ false };
 static double const blockActionCD{ 150.0 / 1000.0 };
 
 
-static const Font font{ "./assets/font.txt" };
+static Font font{};
 
 enum BitmapTextures : GLuint {
 	firstBitmapTexture = 0,
@@ -1705,14 +1705,16 @@ int main() {
 	auto const a1{ std::chrono::steady_clock::now() };
 	reloadConfig();
 	auto const a2{ std::chrono::steady_clock::now() };
-	updateChunks(chunks);
+	loadFont(font, "./assets/font.txt");
 	auto const a3{ std::chrono::steady_clock::now() };
-	reload(Reload::everything & ~Reload::config);
+	updateChunks(chunks);
 	auto const a4{ std::chrono::steady_clock::now() };
+	reload(Reload::everything & ~Reload::config);
+	auto const a5{ std::chrono::steady_clock::now() };
 	numpad[1] = true; //don't load new chunks
 	
 	#define b(ARG) ( double(std::chrono::duration_cast<std::chrono::microseconds>(ARG).count()) / 1000.0 )
-	std::cout << "reload config: " << b(a2 - a1) << ", update chunks: " << b(a3 - a2) << ", reload shaders " << b(a4 - a3) << '\n';
+	std::cout << "reload config: " << b(a2 - a1) << ", load font: " << b(a3 - a2) << ", update chunks: " << b(a4 - a3) << ", reload shaders " << b(a5 - a4) << '\n';
 	#undef b
 	
     auto const completionTime = std::chrono::steady_clock::now();
@@ -2175,30 +2177,28 @@ int main() {
 			static std::array<std::array<vec2f, 4>, charsCount> data;
 			int dataSize{ 0 };
 			
-			auto const lineBase{ font.base() };
-			auto const lineHeight{ font.lineHeight() };
+			vec2i const fontSize{ font.width, font.height };
 			auto const scale{ 0.1f };
 			auto const aspectRatio{ aspect() };
 
-			vec2f const textPos{ 10.0f, 10.0f };
-			auto const startPoint{ textPos / vec2f(windowSize_d()) / scale };
+			auto const startPoint{ vec2f(10.0f, 10.0f) / scale };
 			
 			auto currentPoint{ startPoint };
 			for(auto const ch : text) {
 				if(dataSize >= charsCount) break;
 				
-				if(ch == '\n') currentPoint = { startPoint.x, currentPoint.y + lineHeight };
+				if(ch == '\n') currentPoint = { startPoint.x, currentPoint.y + font.lineHeight };
 				else {
-					auto const &fc{ font[ch] };
+					auto const fc{ font.fontChars[int(ch)] };
 					
-					auto const charOffset{ vec2f(fc.xOffset, fc.yOffset + lineHeight) };
+					auto const charOffset{ vec2f(fc.xOffset, fc.yOffset + font.lineHeight) };
 					if(ch != ' ') data[dataSize++] = {
 						//pos
-						(currentPoint + vec2f(       0              , fc.height - lineBase) + charOffset) * scale,
-						(currentPoint + vec2f(fc.width * aspectRatio,         0 - lineBase) + charOffset) * scale, 
+						(currentPoint + vec2f(       0              , fc.height - font.base) + charOffset) / vec2f(fontSize) * scale,
+						(currentPoint + vec2f(fc.width * aspectRatio,         0 - font.base) + charOffset) / vec2f(fontSize) * scale, 
 						//uv
-						vec2f{fc.x, fc.y+fc.height},
-						vec2f{fc.x+fc.width, fc.y},
+						vec2f(fc.x, fc.y+fc.height) / vec2f(fontSize),
+						vec2f(fc.x+fc.width, fc.y) / vec2f(fontSize),
 					};
 					
 					currentPoint.x += fc.xAdvance * aspectRatio;

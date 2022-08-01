@@ -1,31 +1,22 @@
 #include<iostream>
+#include<cassert>
 
 struct FontChar {
-	//char id=0       x=0    y=0    width=0    height=0    xoffset=-1   yoffset=0    xadvance=1    page=0    chnl=0 
+	static FontChar fromArray(int const (&d)[7]) {
+		return { d[0], d[1], d[2], d[3], d[4], d[5], d[6] };
+	}
+public:
+	int x;
+	int y;
 	
-	float x;
-	float y;
+	int width;
+	int height;
 	
-	float width;
-	float height;
+	int xOffset;
+	int yOffset;
 	
-	float xOffset;
-	float yOffset;
-	
-	float xAdvance;
-	
-	FontChar() = default;
-	
-	FontChar(float const (&d)[7]) : 
-		x{d[0]},
-		y{d[1]},
-		width{d[2]},
-		height{d[3]},
-		xOffset{d[4]},
-		yOffset{d[5]},
-		xAdvance{d[6]}
-	{}
-	
+	int xAdvance;
+
 	friend std::ostream &operator<<(std::ostream &o, FontChar const &i) {
 		return o << '('
 			<< i.x << ';'<< i.y << ';'
@@ -36,21 +27,17 @@ struct FontChar {
 };
 
 struct Font {
-private: FontChar fontChars[255]; 
-		 float lineHeight_;
-		 float base_;
-public:
-	Font(char const *path);
-	Font(Font const &) = default;
-	Font & operator=(Font const &)= default;
-	~Font() = default;
+	FontChar fontChars[256]; 	
+	int paddingT;
+	int paddingR;
+	int paddingB;
+	int paddingL;
 	
-	FontChar const &operator[](int index) const;
+	int width;
+	int height;
 	
-	float lineHeight() const {
-		return lineHeight_;
-	}
-	float base() const {
-		return base_;
-	}
+	int lineHeight;
+	int base;
 };
+
+void loadFont(Font &font, char const *const path);
