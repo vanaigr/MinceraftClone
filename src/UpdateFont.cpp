@@ -3,8 +3,17 @@
 
 //https://libgdx.com/wiki/tools/hiero
 int main() {
-	std::ifstream fnt{".\\font.fnt", std::ios::binary};
-	std::ofstream out{".\\font.txt"};
+	std::ifstream fnt{"./assets/font.fnt"};
+	std::ofstream out{"./assets/font.txt"};
+	
+	if(!fnt.is_open()) {
+		std::cout << "ERROR: could not open ./assets/font.fnt for reading\n";
+		exit(-1);
+	}	
+	if(!out.is_open()) {
+		std::cout << "ERROR: could not open ./assets/font.txt for wrighting\n";
+		exit(-1);
+	}
 	
 	bool nFirst{};
 	while(true) {

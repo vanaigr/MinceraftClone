@@ -22,12 +22,12 @@
 #include"NeighbouringEmitters.h"
 
 #include"Config.h"
-#include"Font.h"
 #include"ShaderLoader.h"
-#include"Read.h"
 #include"Misc.h"
 #include"Counter.h"
-#include"SaveBMP.h"
+#include"font/Font.h"
+#include"image/Read.h"
+#include"image/SaveBMP.h"
 
 #include<iostream>
 #include<chrono>
@@ -752,7 +752,7 @@ static void reloadTextures() {
 	
 	{ //font texture
 		Image image;
-		ImageLoad("assets/font.bmp", &image);
+		ImageLoad("assets/sdfFont.bmp", &image);
 		
 		glActiveTexture(GL_TEXTURE0 + font_it);
 		glBindTexture(GL_TEXTURE_2D, font_t);
