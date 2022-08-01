@@ -277,6 +277,7 @@ static GLuint blur_p;
 static GLuint toLDR_p;
   static GLint ldr_sampler_u, ldr_blurSampler_u, ldr_exposure_u;
 
+static GLuint crosshairProgram;
 
 static GLuint render_fb;
 static GLuint pp1_fb, pp2_fb;
@@ -1044,6 +1045,29 @@ static void reloadShaders() {
 		ldr_sampler_u = glGetUniformLocation(toLDR_p, "sampler");
 		ldr_blurSampler_u = glGetUniformLocation(toLDR_p, "blurSampler");
 		ldr_exposure_u = glGetUniformLocation(toLDR_p, "exposure");
+		ce
+	}
+	
+	{ //crosshair program
+		glDeleteProgram(crosshairProgram);
+		crosshairProgram = glCreateProgram();
+		ShaderLoader sl{};
+		
+		sl.addShaderFromProjectFileName("shaders/crosshair.vert", GL_VERTEX_SHADER, "crosshair vertex");
+		sl.addShaderFromProjectFileName("shaders/crosshair.frag", GL_FRAGMENT_SHADER, "crosshair shader");
+	
+		sl.attachShaders(crosshairProgram);
+	
+		glLinkProgram(crosshairProgram);
+		printLinkErrors(crosshairProgram, "crosshair");
+		glValidateProgram(crosshairProgram);
+		
+		glUseProgram(crosshairProgram);
+		glUniform1f(glGetUniformLocation(crosshairProgram, "radius"), 0.015);
+		
+		bindProperties(crosshairProgram);
+		
+		sl.deleteShaders();
 		ce
 	}
 }
@@ -2211,6 +2235,16 @@ int main() {
 				font, windowSize, fontProgram,
 				dimensions
 			);
+		}
+		
+		{ //draw crosshair
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			
+			glUseProgram(crosshairProgram);
+			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			
+			glDisable(GL_BLEND);
 		}
 		
 		
