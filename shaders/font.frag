@@ -7,8 +7,9 @@ in vec2 endPos;
 in vec2 startUV;
 in vec2 endUV;
 
+in vec4 color;
 
-out vec4 color;
+out vec4 outColor;
 
 uniform sampler2D font;
 
@@ -30,5 +31,5 @@ void main() {
 	const float bias = 0.48;
 	const float steepness = 8;
 	const float a = clamp((c - bias) * steepness + bias, 0, 1);
-	color = vec4(vec3(0), a);
+	outColor = vec4(color.rgb, color.a * a);
 }

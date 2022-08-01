@@ -20,6 +20,7 @@
 #include"Physics.h"
 #include"ChunkGen.h"
 #include"NeighbouringEmitters.h"
+#include"TextRenderer.h"
 
 #include"Config.h"
 #include"ShaderLoader.h"
@@ -260,7 +261,7 @@ static GLuint mainProgram;
   static GLint viewDistance_u;
 
 static GLuint fontProgram;
-	
+
 static GLuint currentBlockProgram;
   static GLint cb_blockIndex_u;
 
@@ -1670,34 +1671,7 @@ int main() {
 	glfwGetCursorPos(window, &pmousePos.x, &pmousePos.y);
     glfwSetScrollCallback(window, scroll_callback);
 	
-	
-	static constexpr int charsCount{ 512*8 };
-	GLuint fontVB;
-	glGenBuffers(1, &fontVB);
-	glBindBuffer(GL_ARRAY_BUFFER, fontVB);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(std::array<std::array<vec2f, 4>, charsCount>{}), NULL, GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	
-	GLuint fontVA;
-	glGenVertexArrays(1, &fontVA);
-	glBindVertexArray(fontVA);
-		glBindBuffer(GL_ARRAY_BUFFER, fontVB);
-		
-		glEnableVertexAttribArray(0);
-		glEnableVertexAttribArray(1);
-		glEnableVertexAttribArray(2);
-		glEnableVertexAttribArray(3);
-	
-		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8*sizeof(float), NULL); //startPos
-		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8*sizeof(float), (void*)( 2*sizeof(float) )); //endPos
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8*sizeof(float), (void*)( 4*sizeof(float) )); //startUV
-		glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 8*sizeof(float), (void*)( 6*sizeof(float) )); //endUV
-	
-		glVertexAttribDivisor(0, 1);
-		glVertexAttribDivisor(1, 1);
-		glVertexAttribDivisor(2, 1);
-		glVertexAttribDivisor(3, 1);
-	glBindVertexArray(0); 
+	TextRenderer textRenderer{};
 	
 	ce
 	
@@ -2090,7 +2064,7 @@ int main() {
 			glDisable(GL_FRAMEBUFFER_SRGB); 
 		}
 		
-		{ //draw text
+		{ //draw debug info 1
 			//fill the text
 			std::stringstream ss{};
 			ss << std::fixed;
@@ -2173,53 +2147,70 @@ int main() {
 			
 			auto const text{ ss.str() }; //copy
 			
-			//fill buffer from text
-			static std::array<std::array<vec2f, 4>, charsCount> data;
-			int dataSize{ 0 };
+			TextRenderer::Cursor const cursor{ 0xff000000u, 100 };
+			vec2f dimensions{};
+			textRenderer.draw(
+				text,
+				&cursor, &cursor + 1,
+				vec2f(10.0, 0.0), TextRenderer::VAlign::top, TextRenderer::HAlign::left,
+				48.0f,
+				font, windowSize, fontProgram,
+				dimensions
+			);
+		}
+		
+		{ //draw debug info 2
+			//fill text
+			std::stringstream ss{};
+			static std::vector<TextRenderer::Cursor> cursors{};
+			cursors.clear();
 			
-			vec2i const fontSize{ font.width, font.height };
-			auto const scale{ 0.1f };
-			auto const aspectRatio{ aspect() };
-
-			auto const startPoint{ vec2f(10.0f, 10.0f) / scale };
+			static constexpr uint32_t        colors[]{ 0xff9e1f0eu, 0xff3e9c16u };
+			static constexpr std::string_view words[]{ "disabled" , "enabled"   };
 			
-			auto currentPoint{ startPoint };
-			for(auto const ch : text) {
-				if(dataSize >= charsCount) break;
+			static constexpr std::string_view names[]{
+				"physics", "chunk generation", "time update",
+				"world render timeing", "bloom"
+			};
+			static constexpr int  negate[]{ 1, 1, 1, 0, 1 };
+			static constexpr int indices[]{ 0, 1, 2, 3, 5 };
+			static constexpr auto count{ std::end(indices) - std::begin(indices) };
+			
+			
+			decltype(ss.tellp()) prevSize{ 0 };
+			
+			ss << "Numpad flags:\n";
+			auto const titleSize{ ss.tellp() - prevSize };
+			prevSize = ss.tellp();
+			cursors.push_back({0xff141414u, int(titleSize)});
+			
+			for(int i{}; i < count; i++) {
+				auto const index{ indices[i] };
+				auto const name { names[i] };
 				
-				if(ch == '\n') currentPoint = { startPoint.x, currentPoint.y + font.lineHeight };
-				else {
-					auto const fc{ font.fontChars[int(ch)] };
-					
-					auto const charOffset{ vec2f(fc.xOffset, fc.yOffset + font.lineHeight) };
-					if(ch != ' ') data[dataSize++] = {
-						//pos
-						(currentPoint + vec2f(       0              , fc.height - font.base) + charOffset) / vec2f(fontSize) * scale,
-						(currentPoint + vec2f(fc.width * aspectRatio,         0 - font.base) + charOffset) / vec2f(fontSize) * scale, 
-						//uv
-						vec2f(fc.x, fc.y+fc.height) / vec2f(fontSize),
-						vec2f(fc.x+fc.width, fc.y) / vec2f(fontSize),
-					};
-					
-					currentPoint.x += fc.xAdvance * aspectRatio;
-				}
+				ss << name << " (" << index << "): ";
+				auto const textSize{ ss.tellp() - prevSize };
+				prevSize = ss.tellp();
+				cursors.push_back({0xff161616u, int(textSize)});
+				
+				int const nump{ numpad[index] ^ negate[i] };
+				ss << words[nump] << '\n';
+				auto const statusSize{ ss.tellp() - prevSize };
+				prevSize = ss.tellp();
+				cursors.push_back({colors[nump], int(statusSize)});
 			}
+			auto const text{ ss.str() }; //copy
 			
-			//draw the text
-			glEnable(GL_BLEND);
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			
-			glUseProgram(fontProgram);
-			
-			glBindBuffer(GL_ARRAY_BUFFER, fontVB);
-			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(data[0]) * dataSize, &data[0]);
-			glBindBuffer(GL_ARRAY_BUFFER, 0);
-			
-			glBindVertexArray(fontVA);
-			glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, dataSize);
-			glBindVertexArray(0);
-			
-			glDisable(GL_BLEND);
+			vec2f dimensions{};
+			//render text
+			textRenderer.draw(
+				text,
+				&*std::begin(cursors), &*std::end(cursors),
+				vec2f(10.0, windowSize_d().y), TextRenderer::VAlign::bottom, TextRenderer::HAlign::left,
+				48.0f,
+				font, windowSize, fontProgram,
+				dimensions
+			);
 		}
 		
 		
