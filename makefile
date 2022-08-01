@@ -24,7 +24,6 @@ GCD=$(shell git log --format=%ad -n1 --date=iso)
 PPFLAGS+= -DCOMMIT_HASH="\"$(GCH)\"" -DCOMMIT_NAME="\"$(GCM)\"" -DCOMMIT_BRANCH="\"$(GCB)\"" -DCOMMIT_DATE="\"$(GCD)\""
 
 SOURCE_FILES=$(subst $(SOURCE_DIR)/,,$(wildcard $(SOURCE_DIR)/**/*.cpp))
-#OBJECT_FILES=$(subst .cpp,.o,$(addprefix $(OBJECT_DIR)/,$(SOURCE_FILES)))
 
 
 define MAKE_EXECUTABLE=
