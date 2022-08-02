@@ -53,17 +53,7 @@ namespace misc {
 	template<>
     inline int32_t mod<int32_t>(int32_t x, int32_t y) {
 		return ((x % y) + y) % y;
-    } /*
-		for some reason the code above performs better than {
-			auto mod = x % y;
-			//if the signs are different and modulo not zero, adjust result
-			if ((x ^ y) < 0ll && mod != 0) {
-				mod += y;
-			}
-			return mod;
-		}
-		and it seems that they produce the same results 
-	*/
+    }
 	
 	template<>
 	inline int64_t mod<int64_t>(int64_t x, int64_t y) {
@@ -113,14 +103,6 @@ namespace misc {
 	inline constexpr int positiveSign(bool const positive) { return (positive ? 1 : -1); }
 	inline constexpr int signPositive(int const sign) { assert(sign == 1 || sign == -1); return sign == 1; }
 	
-    //inline constexpr uint32_t intDivCeil(uint32_t number, uint32_t round) {
-    //    return roundUpIntTo(number, round) / round;
-    //}
-	//
-    //inline constexpr int32_t intDivFloor(int32_t number, int32_t round) {
-    //    return roundDownIntTo(number, round) / round;
-    //}
-	
 	template<typename T>
 	inline constexpr T divCeil(T number, T round) {
         return roundUpTo(number, round) / round;
@@ -160,27 +142,6 @@ namespace misc {
 	constexpr inline T mix(T const from, T const to, T const factor) {
 		return from * (T(1) - factor) + to * factor;
 	}
-
-	/*void invertMatrix3To(double const (&m)[3][3], double (*minv)[3][3]) {//https://stackoverflow.com/a/18504573/15291447
-	double const det = 
-				m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) -
-				m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
-				m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-				
-				std::cout << det << '\n';
-	
-	double const invdet = 1.0 / det;
-	
-	(*minv)[0][0] = (m[1][1] * m[2][2] - m[2][1] * m[1][2]) / invdet;
-	(*minv)[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / invdet;
-	(*minv)[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / invdet;
-	(*minv)[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) / invdet;
-	(*minv)[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / invdet;
-	(*minv)[1][2] = (m[1][0] * m[0][2] - m[0][0] * m[1][2]) / invdet;
-	(*minv)[2][0] = (m[1][0] * m[2][1] - m[2][0] * m[1][1]) / invdet;
-	(*minv)[2][1] = (m[2][0] * m[0][1] - m[0][0] * m[2][1]) / invdet;
-	(*minv)[2][2] = (m[0][0] * m[1][1] - m[1][0] * m[0][1]) / invdet;
-	}*/
 	
 	template<typename El, size_t r1, size_t c1r2, size_t c2>
 	inline constexpr void matMult(El const (&m1)[r1][c1r2], El const (&m2)[c1r2][c2], El (*o)[r1][c2]) {

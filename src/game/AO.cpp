@@ -5,34 +5,23 @@
 #include"Units.h"
 #include"BlockProperties.h"
 
+template<bool inChunk = false>
 static uint8_t calcAO(chunk::Chunk chunk, pCube const cubeCoordInChunk) {
-	pChunk const chunkPos{ chunk.position() };
 	auto &chunks{ chunk.chunks() };
 	
 	uint8_t cubes{};
 	for(int j{}; j < chunk::ChunkAO::dirsCount; j ++) {
-		auto const offsetcubeCoordInChunk_unnormalized{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0)/*-1, 0*/ };
-		auto const offsetCubePos{ chunkPos + offsetcubeCoordInChunk_unnormalized };
+		auto const offsetCubePos{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0)/*-1, 0*/ };
 		
-		auto const offsetCubeChunkIndex{ chunk::Move_to_neighbour_Chunk(chunk).move(offsetCubePos.valAs<pos::Chunk>()) };
-		if(!offsetCubeChunkIndex.is()) continue;
+		chunk::Chunk offsetCubeChunk;
+		if constexpr(inChunk) offsetCubeChunk = chunk;
+		else {
+			auto const offsetCubeChunkIndex{ chunk::MovingChunk{chunk}.offseted(offsetCubePos.valAs<pChunk>()).getIndex() };
+			if(!offsetCubeChunkIndex.is()) continue;
+			offsetCubeChunk = chunks[offsetCubeChunkIndex.get()];
+		}
 		
-		auto const offsetCubeChunk{ chunks[offsetCubeChunkIndex.get()] };
 		auto const offsetedCube{ offsetCubeChunk.data().cubeAt2(offsetCubePos.in<pos::Chunk>()) };
-		cubes = cubes | (int(useInAO(offsetedCube)) << j);
-	}
-	
-	return cubes;
-}
-
-static uint8_t calcAOInChunk(chunk::Chunk chunk, pCube const cubeCoordInChunk) {
-	auto &chunkBlocks{ chunk.data() };
-	
-	uint8_t cubes{};
-	for(int j{}; j < chunk::ChunkAO::dirsCount; j ++) {
-		auto const offsetcubeCoordInChunk{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0)/*-1, 0*/ };
-
-		auto offsetedCube{ chunkBlocks.cubeAt2(offsetcubeCoordInChunk.val()) };
 		cubes = cubes | (int(useInAO(offsetedCube)) << j);
 	}
 	
@@ -41,22 +30,17 @@ static uint8_t calcAOInChunk(chunk::Chunk chunk, pCube const cubeCoordInChunk) {
 
 static void updateAOInChunks(chunk::Chunk origChunk, pCube const firstRel, pCube const lastRel) {	
 	auto &chunks{ origChunk.chunks() };
-	pChunk const origChunkPos{ origChunk.position() };
+	pChunk const origChunkPos{ origChunk.position() };	
 	
-	auto const fChunk{ firstRel.as<pChunk>() + origChunkPos };
-	auto const lChunk{ lastRel .as<pChunk>() + origChunkPos };	
+	auto const fCube{ firstRel + origChunkPos };
+	auto const lCube{ lastRel  + origChunkPos };
 	
-	auto const fCube{ (firstRel + origChunkPos).valAs<pCube>() };
-	auto const lCube{ (lastRel  + origChunkPos).valAs<pCube>() };
-	
-	auto zMTNChunk{ chunk::Move_to_neighbour_Chunk{origChunk} };
-	
-	iterateChunks(origChunk, fChunk, lChunk, [&](chunk::Chunk chunk, pChunk const chunkPos) {
+	iterateChunks(origChunk, fCube.as<pChunk>(), lCube.as<pChunk>(), [&](chunk::Chunk chunk, pChunk const chunkPos) {
 		auto const chunkCubeCoord{ chunkPos.valAs<pCube>() };
 		
 		auto const updateArea{ intersectAreas3i(
-			{ 0                     , units::cubesInChunkDim-1 },
-			{ fCube - chunkCubeCoord, lCube - chunkCubeCoord   }
+			{ 0                           , units::cubesInChunkDim-1 },
+			{ fCube.val() - chunkCubeCoord, lCube.val() - chunkCubeCoord }
 		) };
 		
 		auto const f{ updateArea.first };
@@ -65,13 +49,13 @@ static void updateAOInChunks(chunk::Chunk origChunk, pCube const firstRel, pCube
 		iterateArea(f.max(1), l, [&](vec3i const coord) {
 			auto startChunk{ chunk };
 			pCube const cubeCoordInChunk{ coord };
-			startChunk.ao()[cubeCoordInChunk] = calcAOInChunk(startChunk, cubeCoordInChunk);
+			startChunk.ao()[cubeCoordInChunk] = calcAO</*InChunk=*/true>(startChunk, cubeCoordInChunk);
 		});
 		
-		static constexpr int axisCount = 3;
 		static constexpr vec3i axis[]{ {1,0,0}, {0,1,0}, {0,0,1} };
+		static constexpr int axisCount{ 3 };
 		static constexpr vec3i::value_type value = 0; //0'th coordinate
-		
+
 		//x=0, y=0. x=0, z=0. y=0, z=0 and other are calculated multiple times
 		for(int i{}; i < axisCount; i++) {
 			auto const mask{ axis[i] };

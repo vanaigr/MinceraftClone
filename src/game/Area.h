@@ -8,16 +8,6 @@
 
 template<typename C, typename Action> 
 inline std::enable_if_t<std::is_same_v< decltype(std::declval<Action>() ( std::declval<vec3<C>>() )), void >>
-iterateAreaX(vec3<C> const begin, vec3<C> const end, Action &&action) {
-	for(C z{begin.z}; z != end.z; z ++)
-	for(C y{begin.y}; y != end.y; y ++)
-	for(C x{begin.x}; x != end.x; x ++) {
-		action(vec3<C>{x, y, z});
-	}
-}
-
-template<typename C, typename Action> 
-inline std::enable_if_t<std::is_same_v< decltype(std::declval<Action>() ( std::declval<vec3<C>>() )), void >>
 iterateArea(vec3<C> const begin, vec3<C> const end, Action &&action) {
 	for(C z{begin.z}; z <= end.z; ++z)
 	for(C y{begin.y}; y <= end.y; ++y)
@@ -114,46 +104,6 @@ iterateArea(Area const area, Action &&action) {
 
 inline auto intersectAreas3(Area const a1, Area const a2) { return a1 * a2; }
 inline auto intersectAreas3i(Area const a1, Area const a2) { return intersectAreas3(a1, a2); }
-
-/*static_assert(
-	intersectAreas3i({vec3i{1, 2, 3}, vec3i{4, 5, 6}}, {vec3i{3, 1, 1}, vec3i{6, 4, 4}}).first == vec3i{ 3, 2, 3 } &&
-	intersectAreas3i({vec3i{1, 2, 3}, vec3i{4, 5, 6}}, {vec3i{3, 1, 1}, vec3i{6, 4, 4}}).last  == vec3i{ 4, 4, 4 }
-);*/
-
-struct Bounds {		
-	vec3i first;
-	vec3i last;
-	
-	constexpr bool isEmpty() const {
-		return (last >= first).all();
-	}
-};
-
-struct BlockBounds : Bounds {
-	constexpr static BlockBounds oneChunk() {
-		return BlockBounds{ vec3i{0}, vec3i{units::blocksInChunkDim - 1} };
-	}
-	
-	constexpr static BlockBounds emptyChunk() {
-		return BlockBounds{ vec3i{units::blocksInChunkDim - 1}, vec3i{0} };
-	}
-};
-
-struct CubeBounds : Bounds {
-	constexpr static CubeBounds oneChunk() {
-		return CubeBounds{ vec3i{0}, vec3i{units::cubesInChunkDim - 1} };
-	}
-	
-	constexpr static CubeBounds emptyChunk() {
-		return CubeBounds{ vec3i{units::cubesInChunkDim - 1}, vec3i{0} };
-	}
-	
-	constexpr static CubeBounds emptyLimits() {
-		return CubeBounds{ std::numeric_limits<vec3i::value_type>::max(), std::numeric_limits<vec3i::value_type>::lowest() };
-	}
-};
-
-//Bounds and Area are essentially the same
 
 inline constexpr int index3FromDir(vec3i const dir) {
 	assert((dir >= -1).all() && (dir <= 1).all());

@@ -19,7 +19,7 @@
 #include<filesystem>
 #include<chrono>
 
-
+//old filenames
 static std::string chunkFilename(chunk::Chunk const chunk) {
 	auto const &pos{ chunk.position() };
 	std::stringstream ss{};
@@ -134,7 +134,8 @@ struct ReadStatus {
 	std::array<bool, chunksCoumnChunksCount> is;
 };
 
-bool tryReadChunk(chunk::Chunk chunk) {
+//old loading function
+bool tryReadChunk(chunk::Chunk const chunk) {
 	auto &data{ chunk.data() };
 	auto &emitters{ chunk.emitters() };
 	
@@ -318,7 +319,7 @@ static vec3i getTreeBlock(vec2i const flatChunk) {
 	return vec3i{ it.x, int32_t(std::floor(height))+1, it.y };
 }
 
-static void genTrees(chunk::Chunk chunk) {	
+static void genTrees(chunk::Chunk const chunk) {	
 	auto const &chunkCoord{ chunk.position() };
 	auto &data{ chunk.data() };
 	auto &emitters{ chunk.emitters() };
@@ -343,9 +344,9 @@ static void genTrees(chunk::Chunk chunk) {
 				auto const index{ chunk::blockIndex(blk) };
 				chunk::Block &curBlock{ data[index] };
 				
-				if(curBlock.id() == 0 || curBlock.id() == 16) {
+				if(curBlock.id() == Blocks::airBlock || curBlock.id() == Blocks::grass) {
 					bool is = false;
-					if((is = tl.x == 0 && tl.z == 0 && tl.y <= 4)) curBlock = chunk::Block::fullBlock(4);
+					if((is = tl.x == 0 && tl.z == 0 && tl.y <= 4)) curBlock = chunk::Block::fullBlock(Blocks::woodBlock);
 					else if((is = 
 							(tl.y >= 2 && tl.y <= 3
 							&& !( (abs(x) == abs(z))&&(abs(x)==2) )
@@ -353,7 +354,7 @@ static void genTrees(chunk::Chunk chunk) {
 							(tl.in(vec3i{-1, 4, -1}, vec3i{1, 5, 1}).all()
 							&& !( (abs(x) == abs(z))&&(abs(x)==1) &&(tl.y==5 || (treeBlock.x*(x+1)/2+treeBlock.z*(z+1)/2)%2==0) )
 							)
-					)) curBlock = chunk::Block::fullBlock(5);
+					)) curBlock = chunk::Block::fullBlock(Blocks::leavesBlock);
 					
 					if(is) aabb += {blk};
 					if(isBlockEmitter(curBlock.id())) emitters.add(blk);
@@ -384,25 +385,24 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 		
 		auto const height{ heights[z * units::blocksInChunkDim + x] };
 		
-		//if(misc::mod(int32_t(height), 9) == misc::mod((pos.y * units::blocksInChunkDim + y + 1), 9)) { //repeated floor
 		double const diff{ height - double(pos.y * units::blocksInChunkDim + y) };
 		if(diff >= 0) {
-			uint16_t block;
-			
-			if(diff < 1) block = 1; //grass
-			else if(diff < 5) block = 2; //dirt
-			else block = 6; //stone
+			auto const block{ [&]() {
+				if(diff < 1) return Blocks::grassBlock;
+				else if(diff < 5) return Blocks::dirtBlock;
+				else return Blocks::stoneBlock;
+			}() };
 			
 			blocks[blockCoord] = chunk::Block::fullBlock(block);
 			aabb += {blockCoord};
 		}
 		else {
 			if(diff >= -1) {
-				blocks[blockCoord] = chunk::Block::fullBlock(16);
+				blocks[blockCoord] = chunk::Block::fullBlock(Blocks::grass);
 				aabb += {blockCoord};
 			}
 			else blocks[blockCoord] = chunk::Block::emptyBlock();
-			
+
 			if(pos.y * units::blocksInChunkDim + y == 7) {
 				aabb += {blockCoord};
 				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
@@ -413,17 +413,17 @@ static void genChunkData(double const (&heights)[units::blocksInChunkDim * units
 					
 					static_assert(chunk::LiquidCube::maxLevel >/*strictly greater!*/ 254u);
 					if(cubeLocalCoord.val().y == units::cubesInBlockDim-1)
-						liquid[cubeCoord] = chunk::LiquidCube::liquid(15, 254u, false);
+						liquid[cubeCoord] = chunk::LiquidCube::liquid(Blocks::water, 254u, false);
 					else 
-						liquid[cubeCoord] = chunk::LiquidCube::liquid(15, chunk::LiquidCube::maxLevel, false);
+						liquid[cubeCoord] = chunk::LiquidCube::liquid(Blocks::water, chunk::LiquidCube::maxLevel, false);
 				}
 			}
-			if(pos.y * units::blocksInChunkDim + y < 7) {
+			else if(pos.y * units::blocksInChunkDim + y < 7) {
 				aabb += {blockCoord};
 				
 				for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
 					auto const cubeCoord{ pBlock{blockCoord} + pCube{ chunk::Block::cubeIndexPos(cubeIndex) } }; 
-					liquid[cubeCoord] = chunk::LiquidCube::liquid(15, chunk::LiquidCube::maxLevel, false);
+					liquid[cubeCoord] = chunk::LiquidCube::liquid(Blocks::water, chunk::LiquidCube::maxLevel, false);
 					chunks.liquidCubes.add({ chunkIndex, chunk::cubeCoordToIndex(cubeCoord) });
 				}
 			}
@@ -453,7 +453,7 @@ static void fillChunksData(
 			heights[z* units::blocksInChunkDim + x] = height;
 			minHeight = std::min(minHeight, height);
 		}
-		
+		//generate chunks
 		for(int i{}; i < chunksCoumnChunksCount; i++) {
 			if(rs.is[i]) continue;
 			genChunkData(heights, chunks[chunkIndices[i]]);
@@ -461,22 +461,13 @@ static void fillChunksData(
 	}
 }
 
-extern long long diff__;
-
 void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::string_view const worldName, bool const loadChunks) {
 	constexpr int neighbourDirsCount = 8; //horizontal neighbours only
 	vec3i const neighbourDirs[] = { 
 		vec3i{-1,0,-1}, vec3i{-1,0,0}, vec3i{-1,0,+1}, vec3i{0,0,+1}, vec3i{+1,0,+1}, vec3i{+1,0,0}, vec3i{+1,0,-1}, vec3i{0,0,-1}
 	};
 	chunk::Move_to_neighbour_Chunk neighbourChunks[neighbourDirsCount] = { 
-		{chunks}, 
-		{chunks}, 
-		{chunks}, 
-		{chunks}, 
-		{chunks}, 
-		{chunks}, 
-		{chunks}, 
-		{chunks}
+		{chunks}, {chunks}, {chunks}, {chunks}, {chunks}, {chunks}, {chunks}, {chunks}
 	};
 	neighbourChunks[0] = {chunks, vec3i{columnPosition.x, chunkColumnChunkYMax, columnPosition.y} + neighbourDirs[0]};
 	
@@ -499,7 +490,7 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 	};
 	ChunkIndexAndNeighbours chunkIndicesWithNeighbours[chunksCoumnChunksCount];
 	
-	//auto const start{ std::chrono::steady_clock::now() };
+  //auto const start{ std::chrono::steady_clock::now() };
 	
 	//setup chunks
 	for(auto y { chunkColumnChunkYMax }; y >= chunkColumnChunkYMin; y--) {
@@ -534,11 +525,11 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		
 	}
 	
-	//auto const setup{ std::chrono::steady_clock::now() };
+  //auto const setup{ std::chrono::steady_clock::now() };
 	
 	fillChunksData(chunks, chunkIndices, columnPosition, worldName, loadChunks);
 	
-	//auto const fill{ std::chrono::steady_clock::now() };
+  //auto const fill{ std::chrono::steady_clock::now() };
 	
 	//setup neighbours and update data inside chunks
 	for(int i {chunksCoumnChunksCount-1}; i >= 0; i--) {
@@ -602,7 +593,7 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 		topNeighbourIndex = chunk::OptionalChunkIndex{ chunkIndex };
 	}
 	
-	//auto const data{ std::chrono::steady_clock::now() };
+  //auto const data{ std::chrono::steady_clock::now() };
 	
 	//update AO and blocks neighbours info 
 	for(auto const &[chunkIndex, neighbours] : chunkIndicesWithNeighbours) {		
@@ -659,25 +650,25 @@ void genChunksColumnAt(chunk::Chunks &chunks, vec2i const columnPosition, std::s
 	}
 	
 	
-	//auto const ao{ std::chrono::steady_clock::now() };
+  //auto const ao{ std::chrono::steady_clock::now() };
 	
 	calculateLighting(chunks, chunkIndices, columnPosition, lowestEmptyY);
 	
-	//auto const lighting{ std::chrono::steady_clock::now() };
+  //auto const lighting{ std::chrono::steady_clock::now() };
 	
-	//Counter<256> setup_{}, fill_{}, data_{}, ao_{}, lighting_{};
-	//
-	//#define a(PREV_COUNTER, COUNTER) COUNTER##_.add( std::chrono::duration_cast<std::chrono::microseconds>(COUNTER - PREV_COUNTER).count() );
-	//
-	//a(start, setup)
-	//a(setup, fill)
-	//a(fill, data)
-	//a(data, ao)
-	//a(ao, lighting)
-	//
-	//#undef a
-	//#define b(COUNTER) (COUNTER##_.mean()/1000.0) << ' ' <<
-	//
-	//std::cout << b(setup) b(fill) b(data) b(ao) b(lighting) '\n';
-	//#undef b
+  //Counter<256> setup_{}, fill_{}, data_{}, ao_{}, lighting_{};
+  //
+  //#define a(PREV_COUNTER, COUNTER) COUNTER##_.add( std::chrono::duration_cast<std::chrono::microseconds>(COUNTER - PREV_COUNTER).count() );
+  //
+  //a(start, setup)
+  //a(setup, fill)
+  //a(fill, data)
+  //a(data, ao)
+  //a(ao, lighting)
+  //
+  //#undef a
+  //#define b(COUNTER) (COUNTER##_.mean()/1000.0) << ' ' <<
+  //
+  //std::cout << b(setup) b(fill) b(data) b(ao) b(lighting) '\n';
+  //#undef b
 }

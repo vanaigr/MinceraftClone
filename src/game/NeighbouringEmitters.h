@@ -60,7 +60,7 @@ inline void updateNeighbouringEmitters(chunk::Chunk chunk) {
 
 
 
-static void setChunksUpdateNeighbouringEmitters(chunk::Chunk chunk) {
+inline void setChunksUpdateNeighbouringEmitters(chunk::Chunk chunk) {
 	auto &chunks{ chunk.chunks() };
 	iterate3by3Volume([&](vec3i const dir, int const i) {
 		auto const neighbourIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(dir).get() };

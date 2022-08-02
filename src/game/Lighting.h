@@ -86,6 +86,7 @@ struct BlocksLightingConfig {
 	}
 };
 
+#if 0
 template<typename... Configs>
 inline void setNeighboursLightingUpdate(chunk::Chunks &chunks, vec3i const minChunkPos, vec3i const maxChunkPos) {
 	static vec3i const sides[3]       = { {1,0,0}, {0,1,0}, {0,0,1} };
@@ -157,9 +158,11 @@ inline void setNeighboursLightingUpdate(chunk::Chunks &chunks, vec3i const minCh
 		}
 	}
 }
+#endif
 
 static /*constexpr*/ chunk::ChunkLighting const skyLighting{ chunk::ChunkLighting::maxValue };
 	
+#if 0
 template<typename Config>
 inline void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	chunk::Chunk chunk, 
@@ -289,6 +292,7 @@ inline void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	}
 }
 
+#endif
 /*static void addChunkIndicesInArea(std::vector<int> &chunkIndices, pChunk const fromChunk, pChunk const toChunk, chunk::Chunks const &chunks) {
 	//static std::vector<int> chunkIndices{};
 	//chunkIndices.clear();
@@ -322,21 +326,7 @@ inline void fastUpdateLightingInDir/*more like coarseUpdateLightingInDir*/(
 	}
 }*/
 
-inline void fillEmittersBlockLighting(chunk::Chunk chunk) {
-	auto &blockLighting{ chunk.blockLighting() };
-	
-	for(chunk::ChunkBlocksList::value_type const blockIndex : chunk.emitters()) {
-		pos::Block const blockInChunkCoord{ chunk::indexBlock(blockIndex) };
-		for(int cubeInBlockIndex{}; cubeInBlockIndex < pos::cubesInBlockCount; cubeInBlockIndex++) {
-			pos::Cube const cubeInBlockCoord{ chunk::Block::cubeIndexPos(cubeInBlockIndex) };
-			
-			auto const cubeInChunkCoord{ (blockInChunkCoord + cubeInBlockCoord).valAs<pos::Cube>() };
-			
-			blockLighting[cubeInChunkCoord] = chunk::ChunkLighting::maxValue;
-		}
-	}
-}
-
+#if 0
 template<typename Config>
 inline void updateLightingInChunks(chunk::Chunks &chunks, pChunk const fromChunk, pChunk const toChunk) {
 	CubeBounds cubesBounds{ fromChunk.valAs<pCube>(), toChunk.valAs<pCube>() + units::cubesInChunkDim-1 };
@@ -410,6 +400,7 @@ inline void updateLightingInChunks(chunk::Chunks &chunks, pChunk const fromChunk
 		}
 	}
 }
+#endif
 
 
 void calculateLighting(chunk::Chunks &chunks, int (&chunkIndices)[chunksCoumnChunksCount], 

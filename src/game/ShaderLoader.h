@@ -3,23 +3,19 @@
 #pragma clang diagnostic ignored "-Wlanguage-extension-token"
 	#include <GLEW/glew.h>
 #pragma clang diagnostic pop
-#include<string>
-#include<memory>
+#include<string_view>
+#include<vector>
 
-class ShaderLoader
-{
+class ShaderLoader {
 private:
-	struct Impl;
-	std::unique_ptr<Impl> pimpl;
+	std::vector<unsigned int> shaders;
 public:
-	ShaderLoader();
-	~ShaderLoader();
+	ShaderLoader() = default;
+	
+	GLuint addShaderFromCode(std::string_view const shaderCode, const unsigned int shaderType, std::string_view const name);
+	GLuint addShaderFromProjectFileName(std::string const &filename, const unsigned int shaderType, std::string_view const name);
 
-public:
-	GLuint addShaderFromCode(const std::string& shaderCode, const unsigned int shaderType, const std::string& name = "");
-	GLuint addShaderFromProjectFileName(const std::string& filename, const unsigned int shaderType, const std::string& name = "");
-
-	void attachShaders(const unsigned int programId);
+	void attachShaders(GLuint const programId);
 	void deleteShaders();
 };
 

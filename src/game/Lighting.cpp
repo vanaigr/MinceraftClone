@@ -390,7 +390,17 @@ void calculateLighting(
 		for(int chunkY{chunkColumnChunkYMax}; chunkY >= lowestNotFullY; chunkY--) {
 			auto const chunkI{ chunkY - chunkColumnChunkYMin };
 			auto chunk{ chunks[chunkIndices[chunkI]] };
-			fillEmittersBlockLighting(chunk);
+			
+			auto &blockLighting{ chunk.blockLighting() };
+	
+			for(auto const blockIndex : chunk.emitters()) {
+				pos::Block const blockInChunkCoord{ chunk::indexBlock(blockIndex) };
+				for(int cubeInBlockIndex{}; cubeInBlockIndex < pos::cubesInBlockCount; cubeInBlockIndex++) {
+					pos::Cube const cubeInBlockCoord{ chunk::Block::cubeIndexPos(cubeInBlockIndex) };
+					auto const cubeInChunkCoord{ (blockInChunkCoord + cubeInBlockCoord).valAs<pos::Cube>() };
+					blockLighting[cubeInChunkCoord] = chunk::ChunkLighting::maxValue;
+				}
+			}
 		}
 		
 		//propagate borders lighting in

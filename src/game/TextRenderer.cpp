@@ -104,6 +104,7 @@ void TextRenderer::draw(
 		if(size > size_t(bufferSize)) glBufferData(GL_ARRAY_BUFFER, sizeof(TextParams) * size, NULL, GL_DYNAMIC_DRAW);
 	}
 	
+	//fill the buffer
 	do {
 		void *const data{ glMapBufferRange(
 			GL_ARRAY_BUFFER,

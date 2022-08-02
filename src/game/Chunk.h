@@ -106,7 +106,7 @@ namespace chunk {
 	template<typename Unit> struct PackedAABB;
 	
 	template<> struct PackedAABB<pBlock> { //used in main.frag
-		static constexpr int64_t cd = units::blocksInChunkDim-1;
+		static constexpr int64_t cd = units::blocksInChunkDim;
 		static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two block indices must fit into 32 bits" );
 	private:
 		uint32_t data;
@@ -123,7 +123,7 @@ namespace chunk {
 	};
 	
 	template<> struct PackedAABB<pCube> { //used in main.frag
-		static constexpr int64_t cd = units::cubesInChunkDim-1;
+		static constexpr int64_t cd = units::cubesInChunkDim;
 		static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two cube indices must fit into 32 bits" );
 	private:
 		uint32_t data;
@@ -282,7 +282,6 @@ namespace chunk {
 		}
 	};
 	
-	
 	struct Neighbours {
 		static constexpr int neighboursCount{ 6 };
 		
@@ -367,7 +366,6 @@ namespace chunk {
 		bool needsUpdate() const { return updateAO || updateNeighbouringEmitters; }	
 	};
 	
-	
 	template<typename T>
 	struct CubesArray {
 		static constexpr int size = pos::cubesInChunkCount;
@@ -408,7 +406,6 @@ namespace chunk {
 		void reset() { data.fill(T()); }
 	};
 	
-	
 	struct ChunkAO : CubesArray<uint8_t> {
 		using CubesArray::CubesArray;
 		
@@ -423,7 +420,6 @@ namespace chunk {
 		}
 	};
 
-	
 	struct ChunkLighting : CubesArray<uint8_t> {
 		using CubesArray::CubesArray;
 		
@@ -455,7 +451,6 @@ namespace chunk {
 			return result; 
 		}
 	};
-	
 	
 	struct LiquidCube {
 		using level_t = uint8_t;
@@ -491,7 +486,6 @@ namespace chunk {
 	
 	struct ChunkLiquid : CubesArray<LiquidCube> { using CubesArray::CubesArray; };
 	
-	
 	struct BlockData { //used in main.frag
 		static_assert(pos::cubesInBlockCount == 8);
 		uint8_t solidCubes;
@@ -514,7 +508,6 @@ namespace chunk {
 	static_assert(sizeof(BlockData) == 4);
 	
 	struct BlocksData : BlocksArray<BlockData> { using BlocksArray::BlocksArray; };
-	
 	
 	struct ChunkBlocksList {
 		using value_type = int16_t; static_assert(pos::blocksInChunkCount < std::numeric_limits<value_type>::max());
@@ -554,7 +547,6 @@ namespace chunk {
 		}
 	};
 	
-	
 	struct ChunkData : BlocksArray<Block> {
 		using BlocksArray::BlocksArray;
 		using BlocksArray::operator[];
@@ -581,7 +573,6 @@ namespace chunk {
 			return cube.block.id() * cube.isSolid;
 		}
 	};
-	
 	
 	struct Chunk3x3BlocksList {
 		static int constexpr sidelength = 3 * units::blocksInChunkDim;
@@ -636,15 +627,22 @@ namespace chunk {
 	};
 	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);
 	
-	
 	using chunkIndex_t = int32_t;	
 	struct ChunkAndCube {
+		static ChunkAndCube fromCoord(chunk::chunkIndex_t const chunkIndex, pCube const cubeCoord) {
+			return ChunkAndCube{ chunkIndex, cubeCoordToIndex(cubeCoord) };
+		}
+	public:
 		chunk::CubeInChunkIndex cubeIndex;
 		chunk::chunkIndex_t chunkIndex;
 		
 		ChunkAndCube() noexcept = default;
 		ChunkAndCube(chunk::chunkIndex_t const chunkIndex_, chunk::CubeInChunkIndex const cubeIndex_) noexcept
 		: cubeIndex{ cubeIndex_ }, chunkIndex{ chunkIndex_ } {}
+		
+		pCube cubeCoord() const {
+			return cubeIndexToCoord(cubeIndex);
+		}
 		
 		friend constexpr bool operator==(ChunkAndCube const f, ChunkAndCube const s)  noexcept {
 			return f.chunkIndex == s.chunkIndex && f.cubeIndex == s.cubeIndex;
@@ -658,7 +656,6 @@ namespace chunk {
 			return fValue < sValue;
 		}
 	};
-	
 	
 	struct ChunksLiquidCubes {
 	private:
@@ -678,7 +675,6 @@ namespace chunk {
 			gens[genIndex].push_back(cube);
 		}
 	};
-	
 	
 	struct Chunks {	
 		using index_t = chunkIndex_t;
@@ -783,7 +779,6 @@ namespace chunk {
 		}
 	};
 	
-	
 	struct Move_to_neighbour_Chunk {
 	public:
 		static bool diagonalNeighbourDirValid(vec3i const dir) {
@@ -862,7 +857,6 @@ namespace chunk {
 		
 		bool is() const { return valid; }
 	};
-	
 	
 	//same as Move_to_neighbour_Chunk but better
 	struct MovingChunk {
