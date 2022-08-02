@@ -16,8 +16,8 @@ public:
 private:
 	chunk::ChunkLighting& (  *getLighting_      )(chunk::Chunk chunk);
 	uint8_t&              (  *getLight_         )(chunk::Chunk chunk, vec3i const cubeInChunkCoord);
-	LightingCubeType      (  *getType_          )(uint16_t const blockId, bool const cube);
-	uint8_t               (  *propagationRule_  )(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube);
+	LightingCubeType      (  *getType_          )(chunk::Block::id_t const id);
+	uint8_t               (  *propagationRule_  )(chunk::ChunkLighting::value_type const lighting, vec3i const fromDir, chunk::Block::id_t const toBlockId);
 
 	template<typename Config, template <typename> typename T>
 	constexpr ConfigInstance(T<Config>) :
@@ -31,10 +31,10 @@ public:
 	
 	uint8_t &getLight(chunk::Chunk chunk, vec3i const cubeInChunkCoord) const { return getLight_(chunk, cubeInChunkCoord); }
 	
-	LightingCubeType getType(uint16_t const blockId, bool const cube) const { return getType_(blockId, cube); }
+	LightingCubeType getType(chunk::Block::id_t const id) const { return getType_(id); }
 	
-	uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube) const { 
-		return propagationRule_(lighting, fromDir, toBlockId, cube); 
+	uint8_t propagationRule(chunk::ChunkLighting::value_type const lighting, vec3i const fromDir, chunk::Block::id_t const toBlockId) const { 
+		return propagationRule_(lighting, fromDir, toBlockId); 
 	}
 };
 
@@ -47,20 +47,17 @@ struct SkyLightingConfig {
 		return getLighting(chunk)[cubeInChunkCoord]; 
 	}
 	
-	static LightingCubeType getType(uint16_t const blockId, bool const cube) { 
-		if(!cube || isBlockTranslucent(blockId)) return LightingCubeType::medium;
+	static LightingCubeType getType(chunk::Block::id_t const id) { 
+		if(isBlockTranslucent(id)) return LightingCubeType::medium;
 		else return LightingCubeType::wall;
 	}
 	
-	static uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube) {
+	static uint8_t propagationRule(chunk::ChunkLighting::value_type const lighting, vec3i const fromDir, chunk::Block::id_t const toBlockId) {
 		assert(chunk::ChunkLighting::checkDirValid(fromDir));
-		
-		int const loss{ lightingLost(toBlockId * cube) };
-		
 		return misc::max(
 			int(lighting)
 			 - (fromDir == vec3i{0,-1,0} ? 0 : cubeLightingLosses)
-			 - loss, 
+			 - lightingLost(toBlockId), 
 			int(0)
 		);
 	}
@@ -74,19 +71,16 @@ struct BlocksLightingConfig {
 		return getLighting(chunk)[cubeInChunkCoord]; 
 	}
 	
-	static LightingCubeType getType(uint16_t const blockId, bool const cube) { 
-		if(!cube || isBlockTranslucent(blockId)) return LightingCubeType::medium;
+	static LightingCubeType getType(chunk::Block::id_t const blockId) { 
+		if(isBlockTranslucent(blockId)) return LightingCubeType::medium;
 		else if(isBlockEmitter(blockId)) return LightingCubeType::emitter;
 		else return LightingCubeType::wall;
 	}
 	
-	static uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube) {
+	static uint8_t propagationRule(chunk::ChunkLighting::value_type const lighting, vec3i const fromDir, chunk::Block::id_t const toBlockId) {
 		assert(chunk::ChunkLighting::checkDirValid(fromDir));
-		
-		int const loss{ lightingLost(toBlockId * cube) };
-		
 		return misc::max(
-			int(lighting) - cubeLightingLosses - loss, 
+			int(lighting) - cubeLightingLosses - lightingLost(toBlockId), 
 			int(0)
 		);
 	}

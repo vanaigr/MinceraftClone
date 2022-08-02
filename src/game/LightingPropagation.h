@@ -8,16 +8,6 @@ enum class LightingCubeType {
 	medium, wall, emitter
 };
 
-/*example struct Config {
-	static chunk::ChunkLighting &getLighting(chunk::Chunk chunk);
-	
-	static uint8_t &getLight(chunk::Chunk chunk, vec3i const cubeInChunkCoord);
-	
-	static LightingCubeType getType(uint16_t const blockId, bool const cube);
-	
-	static uint8_t propagationRule(uint8_t const lighting, vec3i const fromDir, uint16_t const toBlockId, bool const cube);
-};*/
-
 namespace AddLighting {
 	namespace {
 		template<typename Config>
@@ -26,16 +16,14 @@ namespace AddLighting {
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord, 
 				[startLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-					auto const cube{ cubeChunk.data().cubeAt(cubeInChunkCoord) };
-					auto const blockId{ cube.block.id() };
-					auto const isCube{ cube.isSolid };
+					auto const cube{ cubeChunk.data().cubeAt2(pCube{cubeInChunkCoord}) };
 					
-					auto const type{ Config::getType(blockId, isCube) };
+					auto const type{ Config::getType(cube) };
 					if(type == LightingCubeType::wall) return;
 					
 					auto &cubeLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 					if(type == LightingCubeType::medium) {
-						auto const expectedLight{ Config::propagationRule(startLight, fromDir, blockId, isCube) };
+						auto const expectedLight{ Config::propagationRule(startLight, fromDir, cube) };
 						if(cubeLight < expectedLight) {
 							cubeLight = expectedLight;
 							propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, cubeLight);	
@@ -58,16 +46,14 @@ namespace AddLighting {
 		iterateCubeNeighbours(
 			cubeChunk, cubeInChunkCoord, 
 			[&startLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-				auto const cube{ cubeChunk.data().cubeAt(cubeInChunkCoord) };
-				auto const blockId{ cube.block.id() };
-				auto const isCube{ cube.isSolid };
+				auto const cube{ cubeChunk.data().cubeAt2(pCube{cubeInChunkCoord}) };
 						
-				auto const type{ Config::getType(blockId, isCube) };
+				auto const type{ Config::getType(cube) };
 				if(type == LightingCubeType::wall) return;
 				
 				auto &cubeLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 				if(type == LightingCubeType::medium) {
-					auto const expectedLight{ Config::propagationRule(startLight, fromDir, blockId, isCube) };
+					auto const expectedLight{ Config::propagationRule(startLight, fromDir, cube) };
 					if(cubeLight < expectedLight) cubeLight = expectedLight;
 					propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, cubeLight); //update even if starting cube's expected neighbour lighting is not enough
 				}
@@ -89,18 +75,16 @@ namespace SubtractLighting {
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord,
 				[&endCubes, fromLight = cubeLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
-					auto const cube{ cubeChunk.data().cubeAt(cubeInChunkCoord) };
-					auto const blockId{ cube.block.id() };
-					auto const isCube{ cube.isSolid };
+					auto const cube{ cubeChunk.data().cubeAt2(cubeInChunkCoord) };
 					
-					auto const type{ Config::getType(blockId, isCube) };
+					auto const type{ Config::getType(cube) };
 					if(type == LightingCubeType::wall) return;
 					
 					auto &light{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 					auto const alreadyChecked{ light == 0 };
 					auto const hasLight{ light != 0 };
 					
-					auto const expectedLight{ Config::propagationRule(fromLight, fromDir, blockId, isCube) };
+					auto const expectedLight{ Config::propagationRule(fromLight, fromDir, cube) };
 					if(type == LightingCubeType::medium && expectedLight >= light && !alreadyChecked) {
 						cubeChunk.status().current.lighting = false;
 						light = 0;
@@ -138,10 +122,8 @@ namespace SubtractLighting {
 					[&endCubes, cubesChunk, cubesStartInChunkCoord, cubesEndInChunkCoord](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
 						if(cubeChunk == cubesChunk && cubeInChunkCoord.in(cubesStartInChunkCoord, cubesEndInChunkCoord).all()) return;//skip cubes inside of starting area
 						
-						auto const cube{ cubeChunk.data().cubeAt(cubeInChunkCoord) };
-						auto const blockId{ cube.block.id() };
-						auto const isCube{ cube.isSolid };
-						auto const type{ Config::getType(blockId, isCube) };
+						auto const cube{ cubeChunk.data().cubeAt2(pCube{cubeInChunkCoord}) };
+						auto const type{ Config::getType(cube) };
 						if(type == LightingCubeType::wall) return;
 						
 						auto &light{ Config::getLight(cubeChunk, cubeInChunkCoord) };

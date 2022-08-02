@@ -1,11 +1,13 @@
 #pragma once
 
+#include"Misc.h"
+
 #include<iostream>
 #include<cmath>
 #include<stdint.h>
 #include<type_traits>
-#include"Misc.h"
-#include <algorithm>
+#include<algorithm>
+#include<array>
 
 template<typename C>
 struct vec2 {
@@ -515,7 +517,33 @@ template<class C>
 inline constexpr vec2<C> vec2lerp(const vec2<C> a, const vec2<C> b, const vec2<C> f) noexcept {
 	return vec2<C>(misc::lerp(a.x, b.x, f.x), misc::lerp(a.y, b.y, f.y));
 }
+
+template<typename C>
+struct mat3 {
+	std::array<C, 9> values;
 	
+	mat3(std::array<C, 9> const &values_) : values{ values_ } {}
+	mat3(vec3<C> const a, vec3<C> const b, vec3<C> const c) : values{ 
+		a.x, b.x, c.x,
+		a.y, b.y, c.y,
+		a.z, b.z, c.z,
+	} {}
+	
+	vec3<C> operator*(vec3<C> const o) const {
+		return vec3<C>{
+			values[0] * o.x + values[1] * o.y + values[2] * o.z,
+			values[3] * o.x + values[4] * o.y + values[5] * o.z,
+			values[6] * o.x + values[7] * o.y + values[8] * o.z,
+		};
+	}
+};
+	
+using mat3f = mat3<float>;
+using mat3d = mat3<double>;
+using mat3i = mat3<int32_t>;
+using mat3l = mat3<int64_t>;
+using mat3b = mat3<bool>;
+
 using vec3f = vec3<float>;
 using vec3d = vec3<double>;
 using vec3i = vec3<int32_t>;

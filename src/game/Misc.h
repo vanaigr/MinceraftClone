@@ -109,7 +109,10 @@ namespace misc {
     inline constexpr int32_t roundDownIntTo(int32_t number, int32_t round) {
         return roundDownTo<int32_t>(number, round);
     }
-
+	
+	inline constexpr int positiveSign(bool const positive) { return (positive ? 1 : -1); }
+	inline constexpr int signPositive(int const sign) { assert(sign == 1 || sign == -1); return sign == 1; }
+	
     //inline constexpr uint32_t intDivCeil(uint32_t number, uint32_t round) {
     //    return roundUpIntTo(number, round) / round;
     //}
