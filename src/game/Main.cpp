@@ -1459,7 +1459,7 @@ bool performBlockAction() {
 		else {
 			auto &block{ chunk.data()[blockInChunkCoord] };
 				
-			if((useInCollision(block.id()) ? checkCanPlaceBlock(chunkPos + blockInChunkPos) : true) && placeThrough(block.id())) {
+			if((useInCollision(blockPlaceId) ? checkCanPlaceBlock(chunkPos + blockInChunkPos) : true) && placeThrough(block.id())) {
 				block = chunk::Block::fullBlock(blockPlaceId);
 				
 				if(!liquidThrough(blockPlaceId)) {
