@@ -683,13 +683,13 @@ const int rayTypeLightingEmitter = 4;
 
 struct Params {
 	Ray ray;
-	float distance;
+	float distance; //TODO: ray length can be stored as the length of the dirrection
 	int bias;
 	uint id; //16 bits
 	uint data; //only 12 bits!
-	
-	uint rayIndex; //0-8
+	uint rayId; //0-8 //there can be more than 8 rays, because duplicate ids are allowed. 
 	uint rayType;
+	
 	int parent; //0-255
 	bool last;
 };
@@ -699,9 +699,9 @@ struct Result {
 	float depth;
 	uint data;
 	uint surfaceId;
-	
-	uint rayIndex;
+	uint rayId;
 	uint rayType;
+	
 	int parent;
 	bool last;
 };
@@ -763,7 +763,7 @@ void writeParamsStack(const Params it, const int position) {
 	
 	stack[offset+6] = 
 		(packHalf2x16(vec2(it.distance, 0)) & 0xffffu)
-		| ((it.rayIndex & 7u) << 16)
+		| ((it.rayId & 7u) << 16)
 		| ((it.rayType & 7u) << 19)
 		| ((uint(it.parent) & 0xffu) << 22)
 		| (uint(it.last) << 30);
@@ -788,7 +788,7 @@ void writeParamsTrace(const Params it, const int position) {
 	
 	traceB.data[offset+6] = 
 		(packHalf2x16(vec2(it.distance, 0)) & 0xffffu)
-		| ((it.rayIndex & 7u) << 16)
+		| ((it.rayId & 7u) << 16)
 		| ((it.rayType & 7u) << 19)
 		| ((uint(it.parent) & 0xffu) << 22)
 		| (uint(it.last) << 30);
@@ -942,7 +942,7 @@ void writeResult(const Result it, const int position) {
 	stack[offset+1] = packHalf2x16(vec2(it.color.z, it.depth));
 	
 	stack[offset+2] = it.data;
-	stack[offset+3] = (it.surfaceId & 0xffffu) | ((it.rayIndex & 7u) << 16) | ((it.rayType & 7u) << 19) | ((uint(it.parent) & 0xffu) << 22) | (uint(it.last) << 30);
+	stack[offset+3] = (it.surfaceId & 0xffffu) | ((it.rayId & 7u) << 16) | ((it.rayType & 7u) << 19) | ((uint(it.parent) & 0xffu) << 22) | (uint(it.last) << 30);
 }
 Result readResult(const int position) {
 	const int offset = resultPosOffset(position);
@@ -1203,13 +1203,13 @@ void findIntersections(const int iteration, const int lowestNotUpdated) {
 					const uint data = uint(playerI.side);
 					writeEndParams(Params(
 						Ray(playerI.at, p.ray.dir), distance(p.ray.orig, playerI.at), playerI.bias, 1 | (1u << 15), data, 
-						p.rayIndex, p.rayType, p.parent, p.last), paramsPos
+						p.rayId, p.rayType, p.parent, p.last), paramsPos
 					);
 				}
 				else {
 					writeEndParams(Params(
 						Ray(curCoord, p.ray.dir), distance(p.ray.orig, curCoord), bias, dataAndId & 0xffu, dataAndId >> 16, 
-						p.rayIndex, p.rayType, p.parent, p.last), paramsPos
+						p.rayId, p.rayType, p.parent, p.last), paramsPos
 					);
 				}
 				
@@ -1414,8 +1414,8 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 				else continue;
 			}
 			
-			if(inner.rayIndex != 0 && inner.rayIndex != 1) discard;
-			const bool reflect = inner.rayIndex == 1;
+			if(inner.rayId != 0 && inner.rayId != 1) discard;
+			const bool reflect = inner.rayId == 1;
 			
 			const vec3 innerCol = inner.color * (both ? (reflect ? fresnel : 1 - fresnel) : 1.0) * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0);
 			const vec3 waterInnerCol = ( backside ^^ reflect ? innerCol : mix(current.color, innerCol, exp(-inner.depth)) );
@@ -1465,7 +1465,7 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 		if((surfaceId == 16 || surfaceId == 5) && i < childrenCount) {
 			const Result inner = readResult(currentIndex+1 + i);
 			
-			if(inner.rayIndex == 1) {
+			if(inner.rayId == 1) {
 				if(inner.rayType == rayTypeShadowSky) {
 					result.rayType = rayTypeShadowSky;
 					result.color += current.color * inner.color;
@@ -1583,7 +1583,7 @@ RayResult resolveIntersection(const int iteration) {
 	const Ray ray = p.ray;
 	const ivec3 dirSign = calcDirSign(ray.dir);
 	
-	const uint rayIndex = p.rayIndex;
+	const uint rayId = p.rayId;
 	const uint type = p.rayType;
 	const int bias = p.bias;
 	const int parent = p.parent;
@@ -1786,7 +1786,7 @@ RayResult resolveIntersection(const int iteration) {
 			
 			const uint data = (packHalf2x16(vec2(fresnel, 0.0)) & 0xffffu) | (uint(backside) << 16);
 			
-			pushResult(Result( color, t, data, blockId, rayIndex, type, parent, last ));			
+			pushResult(Result( color, t, data, blockId, rayId, type, parent, last ));			
 			
 			if(isRefracted && canPushParams()) {
 				const vec3 newDir = refracted;
@@ -1814,7 +1814,7 @@ RayResult resolveIntersection(const int iteration) {
 			const vec3 color = fade(color_, t);
 			
 			
-			pushResult(Result( color, t, 0u, blockId, rayIndex, type, parent, last));
+			pushResult(Result( color, t, 0u, blockId, rayId, type, parent, last));
 			if(canPushParams()) {
 				const vec3 reflected_ = reflect( ray.dir, normalize( normal + offset ) );
 				const vec3 reflected  = abs(reflected_) * normal + reflected_ * (1 - abs(normal));
@@ -1836,7 +1836,7 @@ RayResult resolveIntersection(const int iteration) {
 			const vec3 color = fade(color_, t);
 			
 
-			pushResult(Result( color, t, 0u, blockId, rayIndex, (isBlockEmitter && type == rayTypeLightingBlock) ? rayTypeLightingEmitter : type, parent, last));
+			pushResult(Result( color, t, 0u, blockId, rayId, (isBlockEmitter && type == rayTypeLightingBlock) ? rayTypeLightingEmitter : type, parent, last));
 			
 			if((blockId == 5 || blockId == 16) && shadow && canPushParams()) {
 				pushStartParams(Params( Ray(coord, ray.dir), 0.0, bias+1, 0u, 0u, 1u, type, curFrame, !pushed));
@@ -1869,7 +1869,7 @@ RayResult resolveIntersection(const int iteration) {
 		}
 	}
 	else { //sky
-		pushResult(Result(shadow ? vec3(1) : background(ray.dir), far, bias, 0u, rayIndex, type == rayTypeShadowBlock ? rayTypeShadowSky : type, parent, last));
+		pushResult(Result(shadow ? vec3(1) : background(ray.dir), far, bias, 0u, rayId, type == rayTypeShadowBlock ? rayTypeShadowSky : type, parent, last));
 	}
 	
 	return RayResult(pushed);

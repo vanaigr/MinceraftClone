@@ -349,7 +349,7 @@ static bool reloadTraceBuffer() {
 enum class Key : uint8_t { RELEASE = GLFW_RELEASE, PRESS = GLFW_PRESS, REPEAT = GLFW_REPEAT, NOT_PRESSED };
 static_assert(GLFW_RELEASE >= 0 && GLFW_RELEASE < 256 && GLFW_PRESS >= 0 && GLFW_PRESS < 256 && GLFW_REPEAT >= 0 && GLFW_REPEAT < 256);
 
-static bool alt{false}, shift{ false }, ctrl{ false };
+static bool alt{}, shift{}, ctrl{};
 static Key keys[GLFW_KEY_LAST+1];
 void handleKey(int const key) {
 	auto const action{ misc::to_underlying(keys[key]) };
@@ -1459,7 +1459,7 @@ bool performBlockAction() {
 		else {
 			auto &block{ chunk.data()[blockInChunkCoord] };
 				
-			if((useInCollision(blockPlaceId) ? checkCanPlaceBlock(chunkPos + blockInChunkPos) : true) && placeThrough(block.id())) {
+			if((useInCollision(blockPlaceId) ? checkCanPlaceBlock(chunkPos + blockInChunkPos) : true) && ((placeThrough(block.id()) && !ctrl) || block.id() == 0)) {
 				block = chunk::Block::fullBlock(blockPlaceId);
 				
 				if(!liquidThrough(blockPlaceId)) {
