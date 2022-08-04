@@ -8,15 +8,15 @@ A Minecraft clone rendered using ray tracing
 
 ### Basic features
 
-The game has quite a few features one can expect of a Minecraft clone to have, like:
+The game has quite a few features one can expect a Minecraft clone to have, namely:
 - ability to place and remove blocks and cubes (more on what cubes are later)
 - player and liquid physics
-- terrain and structures generation 
+- terrain and structures generation
 - loading and saving multiple worlds
 - ambient occlusion
 - sky and block lighting
 
-Athough the feature set is borrowed from the Minecraft, the implementation is quite different for a few reasons:
+Although the feature set is borrowed from Minecraft, the implementation is quite different for a few reasons:
 - fixed-point coordinates are used to represent positions
 - the basic unit of structure is not a block but a cube
 
@@ -24,7 +24,7 @@ Athough the feature set is borrowed from the Minecraft, the implementation is qu
 
 Cube is 1/2 the dimension of a block, so there are 8 cubes in a block.
 This subdivision allows for finer control of the shapes of the blocks.
-Cubes are used for the majority of the algorithms, like AO and lighting calculations, collision resolution, liquids and physics 
+Cubes are used for the majority of the algorithms, like AO and lighting calculations, collision resolution, liquids and physics
 (though block coordinates of the cubes are still used for the texture and id lookup for all the blocks excluding liquids).
 
 ### Rendering
@@ -32,11 +32,11 @@ Cubes are used for the majority of the algorithms, like AO and lighting calculat
 The rendering, as was mentioned above, is raytracing-based.
 This particular implementation allows multiple rays to be casted from a single intersection point.
 
-First, intersections are found, then resolved, and then new rays are created, after which the cycle is repeated until no more rays is created.
+First, intersections are found, then resolved, and then new rays are created, after which the cycle is repeated until no more rays are created.
 
-The intersection finding algorithm is a modification of a 
-[DDA](https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics_algorithm)) ray caster, 
-adapted for rendering with chunks, blocks, and cubes (with can have overlaping faces), 
+The intersection finding algorithm is a modification of a
+[DDA](https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics_algorithm)) ray caster,
+adapted for rendering with chunks, blocks, and cubes (which can have overlaping faces),
 and which also allows calculating intersections with arbitrary geometry inside the cubes.
 
 When there are multiple rays casted from a single intersection, they are calculated in depth-first manner.
@@ -57,7 +57,7 @@ Text is rendered using signed distance field bitmap.
 
 [Hiero](https://libgdx.com/wiki/tools/hiero) was used to create [original font image](./assets/font.png) and [characters info](./assets/font.fnt).
 [SDF font bitmap](./assets/sdfFont.bmp) is updated automatically whenever the [bitmap font image](./assets/font.bmp) or characters info is updated.
-It also can be caled manually via
+It also can be called manually via
 ```console
 make update_sdf
 ```
@@ -66,7 +66,7 @@ make update_sdf
 ## Controls
 
 - Interaction options
-  - `Grave accent` ( \` ) - toggle cursor mode (disabled when rotating the camera) 
+  - `Grave accent` ( \` ) - toggle cursor mode (disabled when rotating the camera)
   - `LMB` - break cube / block
   - `RMB` - place block / liquid
   - `WASDQE` - player / spectator camera movement
@@ -91,7 +91,7 @@ make update_sdf
   - `Numpad 0-9` - toggle various actions
 
 - Hot reloading
-`Ctrl + ` 
+`Ctrl + `
   - `F1` - configuration file
   - `F2` - textures
   - `F3` - buffers
@@ -103,7 +103,7 @@ make update_sdf
 
 ## Dependencies
 
-In order to build the project these programs are needed: 
+In order to build the project you need to have these programs:
 
 [GNU Make](https://www.gnu.org/software/make/)
 
@@ -115,20 +115,18 @@ In order to build the project these programs are needed:
 
 ```console
 setup
-
 ```
-
 #### Build and run the game
 
 ```console
 make build
 game
-
 ```
+
 or
+
 ```console
 br
-
 ```
 
 ## Libraries
