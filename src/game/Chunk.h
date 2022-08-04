@@ -20,8 +20,8 @@ static constexpr int chunkColumnChunkYMin = -16;
 static constexpr int chunksCoumnChunksCount{ chunkColumnChunkYMax - chunkColumnChunkYMin + 1 };
 
 namespace chunk {	
-	using BlockInChunkIndex = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uBlock>() - 1).val()) < (1 << 15) );
-	using CubeInChunkIndex  = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uCube >() - 1).val()) < (1 << 15) );
+	using BlockInChunkIndex = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uBlock>()).val() - 1) < (1 << 15) );
+	using CubeInChunkIndex  = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uCube >()).val() - 1) < (1 << 15) );
 	
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
@@ -106,8 +106,7 @@ namespace chunk {
 	template<typename Unit> struct PackedAABB;
 	
 	template<> struct PackedAABB<pBlock> { //used in main.frag
-		static constexpr int64_t cd = units::blocksInChunkDim;
-		static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two block indices must fit into 32 bits" );
+		static_assert( sizeof(BlockInChunkIndex) * 2 <= sizeof(uint32_t), "two block indices must fit into 32 bits" );
 	private:
 		uint32_t data;
 	public:
@@ -123,8 +122,7 @@ namespace chunk {
 	};
 	
 	template<> struct PackedAABB<pCube> { //used in main.frag
-		static constexpr int64_t cd = units::cubesInChunkDim;
-		static_assert( cd*cd*cd * cd*cd*cd < (1ll << 32), "two cube indices must fit into 32 bits" );
+		static_assert( sizeof(CubeInChunkIndex) * 2 <= sizeof(uint32_t), "two cube indices must fit into 32 bits" );
 	private:
 		uint32_t data;
 	public:
@@ -138,7 +136,6 @@ namespace chunk {
 		constexpr pCube first() const { return chunk::cubeIndexToCoord(int16_t(data&0xffff)); }
 		constexpr pCube last() const { return chunk::cubeIndexToCoord(int16_t(data>>16)); } 
 	};
-	
 	
 	template<typename Chunks>
 	struct Chunk_{
@@ -185,13 +182,13 @@ namespace chunk {
 	struct Chunks;
 	using Chunk = Chunk_<Chunks>;
 
-
-	struct Block { //used in main.shader
+	struct Block {
 		static_assert(pos::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
 		
 		using id_t = uint16_t;
 		using cubes_t = uint8_t;
 		
+		//used in main.frag
 		static constexpr bool checkCubeCoordValid(vec3i const coord) {
 			return checkCubeCoordInBlockValid(pCube{coord});
 		}
@@ -256,7 +253,7 @@ namespace chunk {
 		constexpr bool empty() const { return isEmpty(); }	
 	};
 	
-	struct OptionalChunkIndex { //used in main.shader
+	struct OptionalChunkIndex {
 	// -(chunkIndex) - 1	
 	private: int n;
 	public:
@@ -264,7 +261,6 @@ namespace chunk {
 		OptionalChunkIndex(int chunkIndex) : n{ -chunkIndex - 1 } {}
 		explicit operator int() const { return get(); }
 		
-		//operator bool() const { return is(); }
 		bool is() const {
 			return n != 0;
 		}
@@ -282,6 +278,7 @@ namespace chunk {
 		}
 	};
 	
+	/*3D Von Neumann neighbourhood containing chunks indices*/
 	struct Neighbours {
 		static constexpr int neighboursCount{ 6 };
 		
@@ -355,8 +352,8 @@ namespace chunk {
 		StatusFlags &operator&=(StatusFlags const s) { return *this = (*this & s); }
 	};
 	struct ChunkStatus {
-		StatusFlags loaded;
-		StatusFlags current;
+		StatusFlags loaded; //tells if the thing is even loaded on the GPU
+		StatusFlags current; //tells what to reload
 		
 		uint8_t updateAO : 1;
 		uint8_t updateNeighbouringEmitters : 1;
@@ -406,10 +403,11 @@ namespace chunk {
 		void reset() { data.fill(T()); }
 	};
 	
+	/*per-vertex information about presence of surrounding cubes*/
 	struct ChunkAO : CubesArray<uint8_t> {
 		using CubesArray::CubesArray;
 		
-		static constexpr int dirsCount = 8; //8 cubes share 1 vertex
+		static constexpr int dirsCount{ 8 }; //8 cubes share 1 vertex
 		
 		static vec3i dirsForIndex(const int index) { //used in main.shader
 			assert(index >= 0 && index < dirsCount); 
@@ -419,7 +417,8 @@ namespace chunk {
 			return vec3i{ x, y, z } * 2 - 1;
 		}
 	};
-
+	
+	/*lighting level of chunk's cubes*/
 	struct ChunkLighting : CubesArray<uint8_t> {
 		using CubesArray::CubesArray;
 		
@@ -486,13 +485,15 @@ namespace chunk {
 	
 	struct ChunkLiquid : CubesArray<LiquidCube> { using CubesArray::CubesArray; };
 	
+	/*information about the block and its Moore neighbour blocks.
+	  Used to make cube rendering possible and to speed up the rendering*/
 	struct BlockData { //used in main.frag
 		static_assert(pos::cubesInBlockCount == 8);
 		uint8_t solidCubes;
 		uint8_t liquidCubes;
 		
 		uint16_t noNeighbours : 1;
-		uint16_t fullSameLiquid : 1; //if no solid cubes and all liquid cubes have the same id and level == chunk::LiquidCube::maxLevel
+		uint16_t fullSameLiquid : 1; //if no solid cubes and all liquid cubes have the same id, and level == chunk::LiquidCube::maxLevel
 		uint16_t neighboursFullSameLiquid : 1;
 		
 		constexpr bool noCubes() const {
@@ -509,6 +510,7 @@ namespace chunk {
 	
 	struct BlocksData : BlocksArray<BlockData> { using BlocksArray::BlocksArray; };
 	
+	/*SET of certain blocks in a chunk*/
 	struct ChunkBlocksList {
 		using value_type = int16_t; static_assert(pos::blocksInChunkCount < std::numeric_limits<value_type>::max());
 	private:
@@ -547,7 +549,7 @@ namespace chunk {
 		}
 	};
 	
-	struct ChunkData : BlocksArray<Block> {
+	struct ChunkData /*ChunkBlocks*/ : BlocksArray<Block> {
 		using BlocksArray::BlocksArray;
 		using BlocksArray::operator[];
 		
@@ -574,10 +576,11 @@ namespace chunk {
 		}
 	};
 	
+	/*filled to max capacity with indices of certain blocks in 3D Moore neighbourhood*/
 	struct Chunk3x3BlocksList {
 		static int constexpr sidelength = 3 * units::blocksInChunkDim;
-		static_assert((sidelength-1)*(sidelength-1)*(sidelength-1) >= (1<<16), "sadly, we can't store block coords in 27 edjecent chunks in an unsigned short");
-		static_assert((sidelength-1)*(sidelength-1)*(sidelength-1) <  (1<<17), "but we can store the coordinate in 17 bits");
+		static_assert(pos::cubed(sidelength)-1 >= (1<<16), "sadly, we can't store block coords in 27 adjecent chunks in 16 bits");
+		static_assert(pos::cubed(sidelength)-1 <  (1<<17), "but we can store the coordinates in 17 bits");
 		
 		static int constexpr capacity = 30;
 		
@@ -598,9 +601,7 @@ namespace chunk {
 			) - units::blocksInChunkDim;
 		}
 	private:
-
-		
-		uint32_t bits; /*2 bits for capacity: 00 - empty, 01 - one emitter, 10 - 2+ emitters, 11 - nothing; 30 bits for the last bit of all the coords*/
+		uint32_t bits; /*2 bits for capacity: 00 - empty, 01 - one emitter, 10 - 2+ emitters, 11 - nothing; 30 bits for the last 17th bit of all the coords*/
 		std::array<uint16_t, capacity> coords16;
 	public:
 		bool isEmpty() const { return bool((bits & 1) == 0); }
@@ -657,6 +658,7 @@ namespace chunk {
 		}
 	};
 	
+	/*contains all the cubes that need to be updated and updates them*/
 	struct ChunksLiquidCubes {
 	private:
 		static constexpr int gensCount = 2;
@@ -714,6 +716,25 @@ namespace chunk {
 		Chunks(Chunks const&) = delete; //prevent accidental pass-by-value
 		Chunks &operator=(Chunks const&) = delete;
 		
+		size_t size() const { return used.size(); }
+		
+		void reserve(size_t const count) {
+			chunksPos.reserve(count);
+			chunksAABB.reserve(count);
+			chunksStatus.reserve(count);
+			modified.reserve(count);
+			blocksData.reserve(count);
+			chunksData.reserve(count);
+			chunksLiquid.reserve(count);
+			chunksAO.reserve(count);
+			chunksSkyLighting.reserve(count);
+			chunksBlockLighting.reserve(count);
+			chunksEmitters.reserve(count);
+			chunksNeighbours.reserve(count);
+			chunksNeighbouringEmitters.reserve(count);
+			chunksGPUIndex.reserve(count);
+		}
+		
 		//returns used[] position
 		inline index_t reserve() {
 			index_t index;
@@ -725,6 +746,8 @@ namespace chunk {
 			}
 			else { //TODO: avoid zero-init, allocate everything at once
 				index = usedSize;
+				
+				auto cap = chunksPos.capacity();
 				
 				chunksPos.resize(index+1);
 				chunksAABB.resize(index+1);
@@ -740,6 +763,8 @@ namespace chunk {
 				chunksNeighbours.resize(index+1);
 				chunksNeighbouringEmitters.resize(index+1);
 				chunksGPUIndex.resize(index+1);
+				
+				assert(cap >= chunksPos.size());
 			}
 			used.push_back(index);
 			

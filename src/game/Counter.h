@@ -51,10 +51,4 @@ public:
 			return max;
 		}
 	}
-
-	void printall(std::ostream &stream) const {
-		for (auto el : accumulator) {
-			stream << el << std::endl;
-		}
-	}
 };

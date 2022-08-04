@@ -67,11 +67,18 @@ public:
 	void reset() { data.fill(value_type()); }
 };
 
-static int nmoveDown = 4;
+static int nmoveDown = 4; /*
+	variable for applying gravity.
+	when == 0 liquid is allowed to move downwards.
+	
+	note: the variable should maybe be inside of chunk::ChunksLiquidCubes
+	but now there is only one instance of it and it doesn't change the behavour
+*/
 void chunk::ChunksLiquidCubes::update() {
-	nmoveDown--;
+	nmoveDown--; 
 	if(nmoveDown == -1) nmoveDown = 4;
 	
+	//setup the genarations
 	auto &chunks{ this->chunks() };
 	auto &gen{ gens[genIndex] };
 	auto &genNext{ gens[(genIndex+1) % gensCount] };
@@ -83,6 +90,7 @@ void chunk::ChunksLiquidCubes::update() {
 	
 	gen.assign(s.begin(), s.end());
 	std::sort(gen.begin(), gen.end());
+	
 	
 	chunk::OptionalChunkIndex prevChunk{}; //no index if previous chunk is not updated
 	static ChunkBlocksWithNeighbours<bool, 1> blocksUpdatedInPrevChunk{};
@@ -174,9 +182,7 @@ void chunk::ChunksLiquidCubes::update() {
 		blocksUpdatedInPrevChunk.reset();
 	};
 	
-	for(size_t i{}, size{ gen.size() }; i < size; i++) {
-		auto const cubePosData{ gen[i] };
-		
+	for(auto const cubePosData : gen) {		
 		if(chunk::OptionalChunkIndex{cubePosData.chunkIndex} != prevChunk) {
 			updatePrevChunkData();
 		}
@@ -221,7 +227,7 @@ void chunk::ChunksLiquidCubes::update() {
 						}
 						
 						auto diff{ std::min<int>(level, toMax) };
-						//if(diff > maxLiquidToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; } //limit on downward flow
+						//if(diff > maxLiquidToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; } no limit on downward flow
 						
 						level -= diff;		
 						neighbourLiquidCube = LiquidCube::liquid(liquidCube.id, neighbourLiquidCube.level + diff, true);
@@ -239,7 +245,7 @@ void chunk::ChunksLiquidCubes::update() {
 						}
 						
 						auto diff{ std::min<int>(level, toMax) };
-						//if(diff > maxLiquidToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; } //limit on downward flow
+						//if(diff > maxLiquidToNeighbour) { diff = maxLiquidToNeighbour; keepUpdating = true; } no limit on downward flow
 						
 						level -= diff;
 						keepUpdating |= level != 0;
@@ -419,7 +425,7 @@ void chunk::ChunksLiquidCubes::update() {
 						
 						auto cubeUpChunk{ chunks[neighbourCubePosData.chunkIndex] };
 						auto const cubeUpCoord{ chunk::cubeIndexToCoord(neighbourCubePosData.cubeIndex) };
-						if(!liquidThrough(cubeUpChunk.data().cubeAt2(cubeUpCoord))) return false ;
+						if(!liquidThrough(cubeUpChunk.data().cubeAt2(cubeUpCoord))) return false;
 						
 						auto &upLiquidCube{ cubeUpChunk.liquid()[neighbourCubePosData.cubeIndex] };
 						if(upLiquidCube.liquid() && upLiquidCube.level > 0 && upLiquidCube.id == liquidCube.id) {

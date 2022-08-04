@@ -25,11 +25,11 @@ TextRenderer::TextRenderer() {
 		glEnableVertexAttribArray(3);
 		glEnableVertexAttribArray(4);
 	
-		glVertexAttribPointer (0, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, startPos)); //startPos
-		glVertexAttribPointer (1, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, endPos)); //endPos
-		glVertexAttribPointer (2, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, startUV)); //startUV
-		glVertexAttribPointer (3, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, endUV)); //endUV
-		glVertexAttribIPointer(4, 1, GL_UNSIGNED_INT   , sizeof(TextParams), (void*)offsetof(TextParams, color)); //color
+		glVertexAttribPointer (0, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, startPos));
+		glVertexAttribPointer (1, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, endPos));
+		glVertexAttribPointer (2, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, startUV));
+		glVertexAttribPointer (3, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, endUV));
+		glVertexAttribIPointer(4, 1, GL_UNSIGNED_INT   , sizeof(TextParams), (void*)offsetof(TextParams, color));
 	
 		glVertexAttribDivisor(0, 1);
 		glVertexAttribDivisor(1, 1);
@@ -114,12 +114,12 @@ void TextRenderer::draw(
 		) };
 		assert(data != nullptr);
 		
-		int currentData = 0;
-		int currentLine = 0;
+		auto currentData{ 0 }; //index of curent TextParams in data
 		
 		auto currentPoint{ startPoint };
+		auto currentLine{ 0 };
 		auto const *currentCursor{ beginCursor };
-		int cursorCount{ 0 };
+		auto cursorCount{ 0 };
 		
 		for(auto const ch : text) {
 			if(cursorCount >= currentCursor->count) {
@@ -162,7 +162,7 @@ void TextRenderer::draw(
 				
 				currentPoint.x += fc.xAdvance * aspectRatio;
 			}		
-			cursorCount++; //spaces and newlines also count
+			cursorCount++; //note: spaces and newlines also count
 		}
 	} while(!glUnmapBuffer(GL_ARRAY_BUFFER));
 	glBindBuffer(GL_ARRAY_BUFFER, 0);

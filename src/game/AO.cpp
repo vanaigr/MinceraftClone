@@ -5,6 +5,7 @@
 #include"Units.h"
 #include"BlockProperties.h"
 
+//create mask containing info about 8 blocks around a vertex
 template<bool inChunk = false>
 static uint8_t calcAO(chunk::Chunk chunk, pCube const cubeCoordInChunk) {
 	auto &chunks{ chunk.chunks() };
@@ -14,7 +15,9 @@ static uint8_t calcAO(chunk::Chunk chunk, pCube const cubeCoordInChunk) {
 		auto const offsetCubePos{ cubeCoordInChunk + chunk::ChunkAO::dirsForIndex(j).min(0)/*-1, 0*/ };
 		
 		chunk::Chunk offsetCubeChunk;
-		if constexpr(inChunk) offsetCubeChunk = chunk;
+		if constexpr(inChunk) {
+			offsetCubeChunk = chunk;
+		} 
 		else {
 			auto const offsetCubeChunkIndex{ chunk::MovingChunk{chunk}.offseted(offsetCubePos.valAs<pChunk>()).getIndex() };
 			if(!offsetCubeChunkIndex.is()) continue;
@@ -73,7 +76,7 @@ static void updateAOInChunks(chunk::Chunk origChunk, pCube const firstRel, pCube
 	});
 }
 
-void updateAOInArea(chunk::Chunk origChunk, pCube const first, pCube const last) {
+void updateAOInArea(chunk::Chunk const origChunk, pCube const first, pCube const last) {
 	if(Area{first.val(), last.val()}.isEmpty()) return;
 	
 	auto const volume{ (last - first).val() };

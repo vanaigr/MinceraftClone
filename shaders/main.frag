@@ -4,6 +4,8 @@
 
 /**
 	TODO: figure out how to use multiple sources for shader and how and where to specify #version
+	if version is specified only in the first string passed for compilation, then one set of errors occur.
+	if version is specified for every string, then this happens:
 	
 	Compilation error in shader "main shader":
 	0(48) : error C0204: version directive must be first statement and may not be repeated
@@ -87,9 +89,8 @@ bool exit_ = false;
 vec3 exitVec3 = vec3(5,5,5);
 #endif
 
-const vec3 rgbToLum = vec3(0.2126, 0.7152, 0.0722);
-
-
+// blocks //
+//copied from BlockProperties.h
 const uint airBlock = 0u;
 const uint grassBlock = 1u;
 const uint dirtBlock = 2u;
@@ -136,7 +137,6 @@ const int cubesInChunkDimAsPow2 = cubesInBlockDimAsPow2 + blocksInChunkDimAsPow2
 const int cubesInChunkDim = 1 << cubesInChunkDimAsPow2;
 const int cubesInChunkCount = cubesInChunkDim*cubesInChunkDim*cubesInChunkDim;
 
-
 ivec3 shr3i(const ivec3 v, const int i) {
 	return ivec3(v.x >> i, v.y >> i, v.z >> i);
 }
@@ -169,6 +169,8 @@ ivec3 cubeLocalToChunk(const ivec3 cubeCoord) {
 	return and3i(cubeCoord, cubesInChunkDim-1);
 }
 
+
+const vec3 rgbToLum = vec3(0.2126, 0.7152, 0.0722);
 
 vec3 rgb2hsv(const vec3 c) {
     vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -214,7 +216,7 @@ int dot3i(const ivec3 a, const ivec3 b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-bvec3 and3b/*seems that glsl has no && for bvec_*/(const bvec3 a, const bvec3 b) { return bvec3(a.x && b.x, a.y && b.y, a.z && b.z); }
+bvec3 and3b/*seems that glsl has no && for bvecn*/(const bvec3 a, const bvec3 b) { return bvec3(a.x && b.x, a.y && b.y, a.z && b.z); }
 
 struct Ray {
     vec3 orig;
@@ -225,7 +227,7 @@ vec3 at(const Ray r, const float t) {
 }
 
 
-//copied from Main.cpp PackedAABB
+//copied from Chunk.h PackedAABB
 restrict readonly buffer ChunksBounds {
     uint data[];
 } aabb;
@@ -733,10 +735,10 @@ restrict buffer TraceTest {
 } traceB;
 const int maxParams = 20;
 
-//only one or none can be 1 at the same time
+//only one or none can be active at the same time
 #define TEST_RESOLVE_COMBINE 0
 #define TEST_FIND 0
-//only one or none can be 1 at the same time
+//only one or none can be active at the same time
 #define WRITE_TRACE 0
 #define READ_TRACE 0
 

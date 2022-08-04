@@ -56,14 +56,8 @@ GLenum glCheckError_(const char *file, int line) {
 }
 #define ce glCheckError_(__FILE__, __LINE__);
 
-//#define FULLSCREEN
 
-#ifdef FULLSCREEN
-static vec2i windowSize{ 1920, 1080 };
-#else
 static vec2i windowSize{ 1280, 720 };
-#endif // FULLSCREEN
-
 static vec2i newWindowSize{ windowSize };
 
 static vec2d windowSize_d() { return windowSize.convertedTo<double>(); };
@@ -77,12 +71,13 @@ GLFWwindow* window;
 static double       deltaTime{ 16.0/1000.0 };
 static double const fixedDeltaTime{ 16.0/1000.0 };
 
+
 static int  viewDistance{ 3 };
 static bool loadChunks{ true }, saveChunks{ false };
 static std::string worldName{ "demo" };
 
 static vec2d mouseSensitivity{ 0.8, -0.8 };
-static int chunkUpdatesPerFrame = 5;
+static int chunkUpdatesPerFrame = 30;
 
 
 static double const playerHeight{ 1.95 };
@@ -96,7 +91,7 @@ static int64_t const height_i{ units::posToFracRAway(playerHeight).value() };
 vec3l const playerOffsetMin{ -width_i/2, 0       , -width_i/2 };
 vec3l const playerOffsetMax{  width_i/2, height_i,  width_i/2 };
 
-static double speedModifier = 2.5;
+static double speedModifier{ 2.5 };
 static double playerSpeed{ 2.7 };
 static double spectatorSpeed{ 6 };
 
@@ -165,8 +160,8 @@ static Overlay::Overlay overlay{ Overlay::all };
 static bool debugInfo{ false };
 static bool numpad[10];
 
-static bool mouseCentered{ true };
 
+static bool mouseCentered{ true };
 
 enum class BlockAction {
 	NONE = 0,
@@ -234,16 +229,16 @@ static GLuint traceTest_ssbo;
 
 static GLuint ssbos[ssbosCount];
 static GLuint const	
-	&chunksIndices_ssbo     { ssbos[chunksIndices_b] },
-	&chunksBlocks_ssbo      { ssbos[chunksBlocks_b] },
-	&chunksLiquid_ssbo      { ssbos[chunksLiquid_b] },	
-	&chunksMesh_ssbo        { ssbos[chunksMesh_b] },
-	&chunksBounds_ssbo      { ssbos[chunksBounds_b] }, 
-	&chunksAO_ssbo          { ssbos[chunksAO_b]  },
-	&chunksLighting_ssbo    { ssbos[chunksLighting_b] },
-	&chunksEmittersGPU_ssbo { ssbos[chunksEmittersGPU_b] },
-	&atlasDescription_ssbo  { ssbos[atlasDescription_b] },
-	&luminance_ssbo         { ssbos[luminance_b] };
+	&chunksIndices_ssbo    { ssbos[chunksIndices_b] },
+	&chunksBlocks_ssbo     { ssbos[chunksBlocks_b] },
+	&chunksLiquid_ssbo     { ssbos[chunksLiquid_b] },	
+	&chunksMesh_ssbo       { ssbos[chunksMesh_b] },
+	&chunksBounds_ssbo     { ssbos[chunksBounds_b] }, 
+	&chunksAO_ssbo         { ssbos[chunksAO_b]  },
+	&chunksLighting_ssbo   { ssbos[chunksLighting_b] },
+	&chunksEmittersGPU_ssbo{ ssbos[chunksEmittersGPU_b] },
+	&atlasDescription_ssbo { ssbos[atlasDescription_b] },
+	&luminance_ssbo        { ssbos[luminance_b] };
 	
 static GLuint properties_ub;
 static int const ubosCount{ 1 };
@@ -346,7 +341,7 @@ static bool reloadTraceBuffer() {
 }
 
 
-enum class Key : uint8_t { RELEASE = GLFW_RELEASE, PRESS = GLFW_PRESS, REPEAT = GLFW_REPEAT, NOT_PRESSED };
+enum class Key : uint8_t { RELEASE = GLFW_RELEASE/*==0*/, PRESS = GLFW_PRESS, REPEAT = GLFW_REPEAT, NOT_PRESSED };
 static_assert(GLFW_RELEASE >= 0 && GLFW_RELEASE < 256 && GLFW_PRESS >= 0 && GLFW_PRESS < 256 && GLFW_REPEAT >= 0 && GLFW_REPEAT < 256);
 
 static bool alt{}, shift{}, ctrl{};
@@ -488,14 +483,15 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) noexce
 	newWindowSize = vec2i{ width, height }.max(1);
 }
 
+
 static int renderDiameter() {
 	return viewDistance*2 + 1;
 }
 static int gridChunksCount() {
 	return renderDiameter() * renderDiameter() * renderDiameter();
 }
-static bool checkChunkInView(vec3i const coord) {
-	return coord.clamp(-viewDistance, +viewDistance) == coord;
+static bool checkChunkInView(vec3i const offset) {
+	return offset.clamp(-viewDistance, +viewDistance) == offset;
 }
 
 struct GPUChunksIndex {
@@ -619,6 +615,7 @@ void gpuBuffersReseted() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 		
 }
+
 
 static Reload::Flags reloadConfig() {
 	Reload::Flags flags{};
@@ -1080,19 +1077,6 @@ static void reloadShaders() {
 	}
 }
 
-bool checkCanPlaceBlock(pBlock const blockPos) {
-	auto const relativeBlockPos{ blockPos - playerCoord };
-	vec3l const blockStart{ relativeBlockPos.value() };
-	vec3l const blockEnd{ (relativeBlockPos + pos::Block{1}).value() };
-	
-	/*static_*/assert(width_i % 2 == 0);
-	
-	return !(
-		misc::intersectsX(0ll       , height_i ,  blockStart.y, blockEnd.y) &&
-		misc::intersectsX(-width_i/2, width_i/2,  blockStart.x, blockEnd.x) &&
-		misc::intersectsX(-width_i/2, width_i/2,  blockStart.z, blockEnd.z)
-	);
-}
 
 void updateAOandBlocksWithoutNeighbours(chunk::Chunk chunk, pCube const first, pCube const last) {
 	updateAOInArea(chunk, first.val(), (last + pCube{1}).val() );
@@ -1226,14 +1210,16 @@ static void updateChunkNeighbouringEmitters(chunk::Chunks::index_t const index, 
 }
 
 
-static void updateChunks(chunk::Chunks &chunks) {
+static void updateVisibleArea(chunk::Chunks &chunks) {
 	if(numpad[1]) return;
 	
+	//in horisontal plane
 	static std::vector<bool> chunksPresent{};
-	auto const viewWidth = renderDiameter();
+	auto const viewWidth{ renderDiameter() };
+	auto const viewSize{ viewWidth*viewWidth };
 	chunksPresent.clear();
-	chunksPresent.resize(viewWidth*viewWidth);
-	size_t notPresentCount{};
+	chunksPresent.resize(viewSize);
+	size_t presentCount{};
 	
 	vec3i const currentChunk{ currentCoord().valAs<pos::Chunk>() };
 	chunks.filterUsed([&](int chunkIndex) -> bool { //should keep
@@ -1242,11 +1228,11 @@ static void updateChunks(chunk::Chunks &chunks) {
 			auto const relativeChunkPosPositive = relativeChunkPos + vec3i{viewDistance, 16, viewDistance};
 			auto const index{ relativeChunkPosPositive.x + relativeChunkPosPositive.z * viewWidth };
 			if(chunkInBounds) {
-				chunksPresent[index] = true;	
+				chunksPresent[index] = true;
+				presentCount++;
 				return true;
 			} 
 			else {
-				notPresentCount++;
 				return false;
 			}
 		}, 
@@ -1254,10 +1240,11 @@ static void updateChunks(chunk::Chunks &chunks) {
 			auto chunk{ chunks[chunkIndex] };
 			gpuChunksIndex.recycle(chunk.gpuIndex());
 			chunks.chunksIndex_position.erase( chunk.position() );
+			
 			if(chunk.modified() && saveChunks) writeChunk(chunk, worldName); /*
-				note: it is not 100% safe to write chunk whose column neighbours may be deleted.
-				WriteChunk goes through all of the chunks in the column without using neighbours info,
-				so it works for now.
+				note: it is not 100% safe to write chunk whose column neighbours may be freed, because their neighbours info is deleted.
+				writeChunk() goes through all of the chunks in the column when topmost chunk (first chunk created in a column) is freed, 
+				so the info from the lower chunks is still present
 			*/
 			
 			auto const &neighbours{ chunk.neighbours() };
@@ -1275,19 +1262,33 @@ static void updateChunks(chunk::Chunks &chunks) {
 			}
 		}
 	);
+	
+	chunks.reserve(chunks.size() + (viewSize * chunksCoumnChunksCount - presentCount));
 
 	for(int k = 0; k < viewWidth; k ++) 
 	for(int i = 0; i < viewWidth; i ++) {
-		auto const index{ chunksPresent[i+k*viewWidth] };
-		if(index == false) { //generate chunk
+		if(!chunksPresent[i+k*viewWidth]) {
 			auto const relativeChunksPos{ vec2i{i, k} - vec2i{viewDistance} };
 			auto const chunksPos{ currentChunk.xz() + relativeChunksPos };
 			
 			genChunksColumnAt(chunks, chunksPos, worldName, loadChunks);
-		}		
+		}
 	}
 }
 
+bool checkCanPlaceBlock(pBlock const blockPos) {
+	auto const relativeBlockPos{ blockPos - playerCoord };
+	vec3l const blockStart{ relativeBlockPos.value() };
+	vec3l const blockEnd{ (relativeBlockPos + pos::Block{1}).value() };
+	
+	/*static_*/assert(width_i % 2 == 0);
+	
+	return !(
+		misc::intersectsX(0ll       , height_i ,  blockStart.y, blockEnd.y) &&
+		misc::intersectsX(-width_i/2, width_i/2,  blockStart.x, blockEnd.x) &&
+		misc::intersectsX(-width_i/2, width_i/2,  blockStart.z, blockEnd.z)
+	);
+}
 
 bool performBlockAction() {
 	auto const viewport{ currentCameraPos() };
@@ -1612,7 +1613,7 @@ static void update(chunk::Chunks &chunks) {
 	newCamera.fov = misc::lerp( playerCamera.fov, desiredPlayerCamera.fov / curZoom, 0.1 );
 	playerCamera = newCamera;
 	
-	updateChunks(chunks);
+	updateVisibleArea(chunks);
 	if(!numpad[0]) chunks.liquidCubes.update();
 	
 	auto const diff{ pos::fracToPos(playerCoord+playerCameraOffset - playerCamPos) };
@@ -1659,14 +1660,8 @@ int main() {
 	auto const startupTime{ std::chrono::steady_clock::now() };
     if (!glfwInit()) return -1;
 
-    GLFWmonitor* monitor;
-#ifdef FULLSCREEN
-    monitor = glfwGetPrimaryMonitor();
-#else
-    monitor = NULL;
-#endif // !FULLSCREEN
 	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
-    window = glfwCreateWindow(windowSize.x, windowSize.y, "Minceraft clone", monitor, NULL);
+    window = glfwCreateWindow(windowSize.x, windowSize.y, "Minceraft clone", NULL, NULL);
 	
     if (!window) {
         glfwTerminate();
@@ -1681,12 +1676,10 @@ int main() {
         fprintf(stderr, "Error: %s\n", glewGetErrorString(err));
         glfwTerminate();
         return -1;
-    }
-
-    fprintf(stdout, "Using GLEW %s\n", glewGetString(GLEW_VERSION));
+    }	
 	
-	
-	int flags; glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+	int flags; 
+	glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
 	if (flags & GL_CONTEXT_FLAG_DEBUG_BIT) {
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); 
@@ -1703,9 +1696,9 @@ int main() {
 	glfwGetCursorPos(window, &pmousePos.x, &pmousePos.y);
     glfwSetScrollCallback(window, scroll_callback);
 	
-	TextRenderer textRenderer{};
-	
 	ce
+	
+	TextRenderer textRenderer{};
 	
 	assert(useTraceBuffer == false);//reloadTraceBuffer();
 	auto const a1{ std::chrono::steady_clock::now() };
@@ -1713,7 +1706,7 @@ int main() {
 	auto const a2{ std::chrono::steady_clock::now() };
 	loadFont(font, "./assets/font.txt");
 	auto const a3{ std::chrono::steady_clock::now() };
-	updateChunks(chunks);
+	updateVisibleArea(chunks);
 	auto const a4{ std::chrono::steady_clock::now() };
 	reload(Reload::everything & ~Reload::config);
 	auto const a5{ std::chrono::steady_clock::now() };
@@ -1726,6 +1719,8 @@ int main() {
     auto const completionTime = std::chrono::steady_clock::now();
 	std::cout << "Time to start (ms): " << ( double(std::chrono::duration_cast<std::chrono::microseconds>(completionTime - startupTime).count()) / 1000.0 ) << '\n';
 	bool firstFrame{ true };
+	
+	ce
 	
 	//in microseconds
 	Counter<150> frameTime{};
@@ -1929,7 +1924,7 @@ int main() {
 			if(numpad[3]) glFinish();
 			auto const startTraceTime{ std::chrono::steady_clock::now() };
 			
-			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3); //actual rendering
 			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 			
 			if(numpad[3]) glFinish();
@@ -1937,27 +1932,15 @@ int main() {
 			
 			glDrawBuffers(1, buffers);
 			
+			auto const diffMs{ std::chrono::duration_cast<std::chrono::microseconds>(endTraceTime - startTraceTime).count() / 1000.0 };
+			timeToTrace.add(diffMs);
+			
 			
 			uint32_t luminanceHistogram[256];
 			glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 256 * sizeof(uint32_t), (void*) &luminanceHistogram);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 			
 			//https://knarkowicz.wordpress.com/2016/01/09/automatic-exposure/
-			/*auto const curLum{ [&]() { //median
-				auto const total{ windowSize.x * windowSize.y };
-				
-				auto curCount{ 0 };
-				for(int n{0}; n < 256; n++) {
-					auto const count{ luminanceHistogram[n] };
-					curCount += count;
-					
-					auto const diff{ curCount - (total*3) / 4 };
-					if(diff >= 0) return misc::lerp( powf(2, (n)/x), powf(2, (n - 1)/x), float(diff) / count) * minExp;
-				}
-				
-				assert(false && "unreachable");
-				return 1.0f;
-			}() };*/
 			auto const curLum{ [&]() { //geometric mean
 				auto const total{ windowSize.x * windowSize.y };
 				
@@ -1970,18 +1953,6 @@ int main() {
 				
 				return expf(result / total);
 			}() };
-			/*auto const curLum{ [&]() { //arithmetic mean
-				auto const total{ windowSize.x * windowSize.y };
-				
-				double result{ 0.0 };
-				for(int n{0}; n < 256; n++) {
-					auto const count{ luminanceHistogram[n] };
-					
-					result += count * pow(2.0, double(n)/x);
-				}
-				
-				return float(result / total * minExp);
-			}() };*/
 			
 			static float prevLum{ curLum };
 			prevLum = prevLum + (curLum - prevLum) * (1 - exp(-deltaTime * 1.1));
@@ -2026,9 +1997,6 @@ int main() {
 			glUniform1i(ldr_blurSampler_u, pp1_it);
 			
 			glDrawArrays(GL_TRIANGLES, 0, 3);
-			
-			auto const diffMs{ std::chrono::duration_cast<std::chrono::microseconds>(endTraceTime - startTraceTime).count() / 1000.0 };
-			timeToTrace.add(diffMs);
 		}
 		
 		if(overlay >= Overlay::Overlay::important) { //draw block hitbox

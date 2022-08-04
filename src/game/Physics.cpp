@@ -151,7 +151,7 @@ void updateCollision(chunk::Chunks &chunks,pos::Fractional &origin, pFrac const 
 	if(dir.y != 0) {
 		MovementResult result;
 		do {
-			result = moveAlong(vec3b{0,1,0}, offset().y, vec3b{0,0,1},vec3b{1,0,0}, false);
+			 result = moveAlong(vec3b{0,1,0}, offset().y, vec3b{0,0,1},vec3b{1,0,0}, false);
 			
 			if(result.continueMovement) {
 				force -= (result.coord.value() - position) * vec3l{0,1,0};

@@ -5,18 +5,20 @@
 #include"Units.h"
 #include"MiscChunk.h"
 
-inline void updateNeighbouringEmitters(chunk::Chunk chunk) {
+inline void updateNeighbouringEmitters(chunk::Chunk const chunk) {
 	auto &chunks{ chunk.chunks() };
+	
 	struct NeighbourChunk {
 		vec3i dir;
 		int chunkIndex;
 		int emittersCount;
-	};
-				
+	};		
 	NeighbourChunk neighbours[3*3*3];
 	int neighboursCount{};
+	
 	int totalEmittersCount{};
 	
+	//fill emitters info from neighbouring chunks
 	iterate3by3Volume([&](vec3i const neighbourDir, int const i) {
 		auto const neighbourIndex{ chunk::Move_to_neighbour_Chunk{ chunk }.moveToNeighbour(neighbourDir) };
 		if(neighbourIndex.is()) {
@@ -31,6 +33,7 @@ inline void updateNeighbouringEmitters(chunk::Chunk chunk) {
 	auto &curChunkNeighbouringEmitters{ chunk.neighbouringEmitters() };
 	if(totalEmittersCount == 0) { curChunkNeighbouringEmitters.clear(); return; }
 	
+	//fill emitters from neighbouring chunks
 	std::array<vec3i, chunk::Chunk3x3BlocksList::capacity> neighbouringEmitters{};
 	int const neighbouringEmittersCount{ std::min<int>(neighbouringEmitters.size(), totalEmittersCount) };
 	int const emitterStep{ std::max<int>(totalEmittersCount / neighbouringEmitters.size(), 1) };
@@ -60,7 +63,7 @@ inline void updateNeighbouringEmitters(chunk::Chunk chunk) {
 
 
 
-inline void setChunksUpdateNeighbouringEmitters(chunk::Chunk chunk) {
+inline void setChunksUpdateNeighbouringEmitters(chunk::Chunk const chunk) {
 	auto &chunks{ chunk.chunks() };
 	iterate3by3Volume([&](vec3i const dir, int const i) {
 		auto const neighbourIndex{ chunk::Move_to_neighbour_Chunk{chunk}.moveToNeighbour(dir).get() };

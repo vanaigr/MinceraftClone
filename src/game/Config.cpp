@@ -63,6 +63,7 @@ struct get_index<T, std::variant<Ts...>>
     : std::integral_constant<size_t, std::variant<tag<Ts>...>(tag<T>()).index()>
 { };
 
+//note: this same function already exists in Misc.h
 //https://stackoverflow.com/a/8357462/18704284
 template <typename E>
 static constexpr typename std::underlying_type<E>::type indexOf(E e) noexcept {

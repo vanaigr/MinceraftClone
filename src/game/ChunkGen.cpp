@@ -34,6 +34,70 @@ static std::string chunkNewFilename(chunk::Chunk const chunk) {
 	return ss.str();
 }
 
+//old loading function
+bool tryReadChunk(chunk::Chunk const chunk) {
+	auto &data{ chunk.data() };
+	auto &emitters{ chunk.emitters() };
+	
+	auto &aabbLoc{ chunk.aabb() };
+	auto aabb{ aabbLoc };
+	
+	auto const filename2{ chunkNewFilename(chunk) };
+	std::ifstream chunkFileIn2{ filename2, std::ios::binary };	
+	if(!chunkFileIn2.fail()) {
+		for(int x{}; x < units::blocksInChunkDim; x++) 
+		for(int y{}; y < units::blocksInChunkDim; y++) 
+		for(int z{}; z < units::blocksInChunkDim; z++) 
+		{
+			vec3i const blockCoord{x,y,z};
+			//uint16_t &block = data[chunk::blockIndex(blockCoord)];
+			uint8_t blk[4];
+			
+			chunkFileIn2.read( reinterpret_cast<char *>(&blk[0]), 4 );
+			
+			uint32_t const block( 
+				  (uint32_t(blk[0]) << 0 )
+				| (uint32_t(blk[1]) << 8 )
+				| (uint32_t(blk[2]) << 16)
+				| (uint32_t(blk[3]) << 24)					
+			);
+			
+			data[chunk::blockIndex(blockCoord)] = chunk::Block(block);
+			if(block != 0) aabb += { blockCoord };
+			if(isBlockEmitter(block)) emitters.add(blockCoord);
+		}
+
+		aabbLoc = aabb;
+		return true;
+	}
+	chunkFileIn2.close();
+	
+	auto const filename{ chunkFilename(chunk) };
+	std::ifstream chunkFileIn{ filename, std::ios::binary };
+	if(!chunkFileIn.fail()) {
+		for(int x{}; x < units::blocksInChunkDim; x++) 
+		for(int y{}; y < units::blocksInChunkDim; y++) 
+		for(int z{}; z < units::blocksInChunkDim; z++) {
+			vec3i const blockCoord{x,y,z};
+			//uint16_t &block = data[chunk::blockIndex(blockCoord)];
+			uint8_t blk[2];
+			
+			chunkFileIn.read( reinterpret_cast<char *>(&blk[0]), 2 );
+			
+			uint16_t const block( blk[0] | (uint16_t(blk[1]) << 8) );
+			
+			data[chunk::blockIndex(blockCoord)] = chunk::Block::fullBlock(block);
+			if(block != 0) aabb += { blockCoord };
+			if(isBlockEmitter(block)) emitters.add(blockCoord);
+		}
+		
+		aabbLoc = aabb;
+		return true;
+	}
+	
+	return false;
+}
+
 
 static std::string chunkColumnFilename(vec2<pChunk::value_type::value_type> const xz) {
 	static constexpr auto lookupSizeAsPow2{ 6 };
@@ -59,6 +123,7 @@ static std::string chunkColumnFilename(vec2<pChunk::value_type::value_type> cons
 	ss << std::string_view{ &*std::begin(result), result.size() } << ".ccm";
 	return ss.str();
 }
+
 
 static void writeChunksColumn(chunk::Chunks &chunks, vec2<pChunk::value_type::value_type> const xz, std::string_view const worldName) {	
 	std::stringstream ss{};
@@ -133,70 +198,6 @@ struct ReadStatus {
 	bool all;
 	std::array<bool, chunksCoumnChunksCount> is;
 };
-
-//old loading function
-bool tryReadChunk(chunk::Chunk const chunk) {
-	auto &data{ chunk.data() };
-	auto &emitters{ chunk.emitters() };
-	
-	auto &aabbLoc{ chunk.aabb() };
-	auto aabb{ aabbLoc };
-	
-	auto const filename2{ chunkNewFilename(chunk) };
-	std::ifstream chunkFileIn2{ filename2, std::ios::binary };	
-	if(!chunkFileIn2.fail()) {
-		for(int x{}; x < units::blocksInChunkDim; x++) 
-		for(int y{}; y < units::blocksInChunkDim; y++) 
-		for(int z{}; z < units::blocksInChunkDim; z++) 
-		{
-			vec3i const blockCoord{x,y,z};
-			//uint16_t &block = data[chunk::blockIndex(blockCoord)];
-			uint8_t blk[4];
-			
-			chunkFileIn2.read( reinterpret_cast<char *>(&blk[0]), 4 );
-			
-			uint32_t const block( 
-				  (uint32_t(blk[0]) << 0 )
-				| (uint32_t(blk[1]) << 8 )
-				| (uint32_t(blk[2]) << 16)
-				| (uint32_t(blk[3]) << 24)					
-			);
-			
-			data[chunk::blockIndex(blockCoord)] = chunk::Block(block);
-			if(block != 0) aabb += { blockCoord };
-			if(isBlockEmitter(block)) emitters.add(blockCoord);
-		}
-
-		aabbLoc = aabb;
-		return true;
-	}
-	chunkFileIn2.close();
-	
-	auto const filename{ chunkFilename(chunk) };
-	std::ifstream chunkFileIn{ filename, std::ios::binary };
-	if(!chunkFileIn.fail()) {
-		for(int x{}; x < units::blocksInChunkDim; x++) 
-		for(int y{}; y < units::blocksInChunkDim; y++) 
-		for(int z{}; z < units::blocksInChunkDim; z++) {
-			vec3i const blockCoord{x,y,z};
-			//uint16_t &block = data[chunk::blockIndex(blockCoord)];
-			uint8_t blk[2];
-			
-			chunkFileIn.read( reinterpret_cast<char *>(&blk[0]), 2 );
-			
-			uint16_t const block( blk[0] | (uint16_t(blk[1]) << 8) );
-			
-			data[chunk::blockIndex(blockCoord)] = chunk::Block::fullBlock(block);
-			if(block != 0) aabb += { blockCoord };
-			if(isBlockEmitter(block)) emitters.add(blockCoord);
-		}
-		
-		aabbLoc = aabb;
-		return true;
-	}
-	
-	return false;
-}
 
 static ReadStatus readChunksColumn(
 	chunk::Chunks &chunks, int (&chunksIndices)[chunksCoumnChunksCount], vec2<pChunk::value_type::value_type> const xz, 
@@ -287,7 +288,7 @@ static ReadStatus readChunksColumn(
 	return { true, {true} };
 }
 
-void writeChunk(chunk::Chunk chunk, std::string_view const worldName) {
+void writeChunk(chunk::Chunk const chunk, std::string_view const worldName) {
 	writeChunksColumn(chunk.chunks(), chunk.position().xz(), worldName);
 }
 

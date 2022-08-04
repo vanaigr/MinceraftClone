@@ -183,13 +183,15 @@ static void propagateHorisontalLightingIn(
 	);
 }
 
+static /*constexpr*/ chunk::ChunkLighting const skyLighting{ chunk::ChunkLighting::maxValue };
+
 void calculateLighting(
 	chunk::Chunks &chunks, int (&chunkIndices)[chunksCoumnChunksCount], vec2i const columnPosition, 
 	int const lowestEmptyY
 ) {
 	int const lowestNotFullY{ chunkColumnChunkYMin };
 	
-	{//sky lighting
+	{ //sky lighting
 		static std::vector<chunk::CubeInChunkIndex> lightingUpdateCubes{};
 		lightingUpdateCubes.clear(); 
 		auto const updateLightingCubes = [&](chunk::Chunk const chunk) {
@@ -201,189 +203,184 @@ void calculateLighting(
 			lightingUpdateCubes.clear();
 		};
 		
-		{ //sky cuhnks
-			//propagate lighting from empty chunks with maximum sky lighting to its 4 horisontal neighbours
-			iterateFourNeighbours(
-				chunks, chunkIndices, 
-				chunkColumnChunkYMax, lowestEmptyY, 
-				[&](
-					int const chunkI, chunk::Chunk const chunk, chunk::Chunk const neighbourChunk, 
-					mat3i const axis, bool const positive, int const axisIndex
-				) {
-					auto const toNeighbourDir{ axis * vec3i{ misc::positiveSign(positive), 0, 0 } };
-					auto const &neighbourChunkBlocks{ neighbourChunk.data() };
-					auto &neighbourChunkLighting{ SkyLightingConfig::getLighting(neighbourChunk) };
-					
-					auto const &neighbourAabb{ neighbourChunk.aabb() };
-					auto const fBlock{ positive ? 0 : units::blocksInChunkDim-1 };
-					auto const testNeighbourBlocksArea{ intersectAreas3i(
-						neighbourAabb, 
-						{
-							axis * vec3i{fBlock, 0, 0}, 
-							axis * vec3i{fBlock, units::blocksInChunkDim-1, units::blocksInChunkDim-1} 
-						}
-					) };
-					
-					iterateChunkFace(axis, positive, [&](pCube const cubeCoord, pCube const neighbourCubeCoord) {
-						auto const toCube{ [&]() {
-							if(testNeighbourBlocksArea.contains(neighbourCubeCoord.valAs<pBlock>())) {
-								return neighbourChunkBlocks.cubeAt2(neighbourCubeCoord);   
-							}
-							else return chunk::Block::id_t{};
-						}() };
-						
-						if(SkyLightingConfig::getType(toCube) != LightingCubeType::medium) return;
-						
-						auto const cubeLight    { chunk::ChunkLighting::maxValue };
-						auto &neighbourCubeLight{ neighbourChunkLighting[neighbourCubeCoord] };
-						
-						auto const toNeighbourCubeLighting{ 
-							SkyLightingConfig::propagationRule(cubeLight, toNeighbourDir, toCube)
-						};
-						if(toNeighbourCubeLighting > neighbourCubeLight) {
-							neighbourCubeLight = toNeighbourCubeLighting;
-							lightingUpdateCubes.push_back(chunk::cubeCoordToIndex(neighbourCubeCoord));
-						}
-					});
-					
-					updateLightingCubes(neighbourChunk);			
-				}
-			);
-		}
-		
-		{ //downward lighting in chunks
-			//move lighting downwards in non-empty chunks until the first opaque cube
-			for(int chunkY{ lowestEmptyY-1 }; chunkY >= lowestNotFullY; chunkY--) {
-				auto chunk{ chunks[chunkIndices[chunkY - chunkColumnChunkYMin]] };
-				auto const aabb{ chunk.aabb() };
+		//sky cuhnks
+		//propagate lighting from empty chunks with maximum sky lighting to its 4 horisontal neighbours
+		iterateFourNeighbours(
+			chunks, chunkIndices, 
+			chunkColumnChunkYMax, lowestEmptyY, 
+			[&](
+				int const chunkI, chunk::Chunk const chunk, chunk::Chunk const neighbourChunk, 
+				mat3i const axis, bool const positive, int const axisIndex
+			) {
+				auto const toNeighbourDir{ axis * vec3i{ misc::positiveSign(positive), 0, 0 } };
+				auto const &neighbourChunkBlocks{ neighbourChunk.data() };
+				auto &neighbourChunkLighting{ SkyLightingConfig::getLighting(neighbourChunk) };
 				
-				auto &chunkLighting{ SkyLightingConfig::getLighting(chunk) };
-				auto const &chunkLightingBefore{ [&](){
-					if(chunkY == chunkColumnChunkYMax) return skyLighting;
-					else return SkyLightingConfig::getLighting(chunks[chunkIndices[chunkY - chunkColumnChunkYMin + 1]]);
-				}() }; //higher up
-				
-				auto const &chunkBlocks{ chunk.data() };
-				
-				vec2i layerLightingNot0First{ 0 };
-				vec2i layerLightingNot0Last { units::cubesInChunkDim-1 };
-				
-				auto const updateLayer = [&](
-					auto firstLayer_t/*templating on special case for better optimisation*/,
-					int const y, int const yBefore, 
-					chunk::ChunkLighting &lighting, chunk::ChunkLighting const &lightingBefore
-				) -> bool {
-					vec2i layerLightingNot0FirstNew{ units::cubesInChunkDim };
-					vec2i layerLightingNot0LastNew { -1 };
-					
-					for(int z{layerLightingNot0First.y}; z <= layerLightingNot0Last.y; z++)
-					for(int x{layerLightingNot0First.x}; x <= layerLightingNot0Last.x; x++) {
-						pCube const cubePos      { x, y      , z };
-						pCube const cubePosBefore{ x, yBefore, z };
-						
-						auto const cube{ [&]() {
-							if(aabb.contains(cubePos.valAs<pBlock>())) return chunkBlocks.cubeAt2(cubePos.val());
-							else return chunk::Block::id_t{};
-						}() };
-						
-						if(SkyLightingConfig::getType(cube) != LightingCubeType::medium) continue;
-						
-						auto const cubeLighting{ chunk::ChunkLighting::minValue }; //chunks' lighting values were not set by anything yet, so they are 0
-						auto const cubeBeforeLighting{ lightingBefore[cubePosBefore] };
-						auto const toCubeLighting{ 
-							SkyLightingConfig::propagationRule(cubeBeforeLighting, vec3i{0, -1, 0}, cube) 
-						};
-						if(toCubeLighting > cubeLighting) {
-							lighting[cubePos] = toCubeLighting;
-							layerLightingNot0FirstNew = layerLightingNot0FirstNew.min(vec2i{x, z});
-							layerLightingNot0LastNew  = layerLightingNot0LastNew .max(vec2i{x, z});
-						}
+				auto const &neighbourAabb{ neighbourChunk.aabb() };
+				auto const fBlock{ positive ? 0 : units::blocksInChunkDim-1 };
+				auto const testNeighbourBlocksArea{ intersectAreas3i(
+					neighbourAabb, 
+					{
+						axis * vec3i{fBlock, 0, 0}, 
+						axis * vec3i{fBlock, units::blocksInChunkDim-1, units::blocksInChunkDim-1} 
 					}
-					
-					layerLightingNot0First = layerLightingNot0FirstNew;
-					layerLightingNot0Last  = layerLightingNot0LastNew ;
-					
-					return (layerLightingNot0First <= layerLightingNot0Last).all(); 
-				};
+				) };
 				
-				auto continueProp{ false };
-				//first layer
-				continueProp = updateLayer(std::true_type{}, units::cubesInChunkDim-1, 0, chunkLighting, chunkLightingBefore);
+				iterateChunkFace(axis, positive, [&](pCube const cubeCoord, pCube const neighbourCubeCoord) {
+					auto const toCube{ [&]() {
+						if(testNeighbourBlocksArea.contains(neighbourCubeCoord.valAs<pBlock>())) {
+							return neighbourChunkBlocks.cubeAt2(neighbourCubeCoord);   
+						}
+						else return chunk::Block::id_t{};
+					}() };
+					
+					if(SkyLightingConfig::getType(toCube) != LightingCubeType::medium) return;
+					
+					auto const cubeLight    { chunk::ChunkLighting::maxValue };
+					auto &neighbourCubeLight{ neighbourChunkLighting[neighbourCubeCoord] };
+					
+					auto const toNeighbourCubeLighting{ 
+						SkyLightingConfig::propagationRule(cubeLight, toNeighbourDir, toCube)
+					};
+					if(toNeighbourCubeLighting > neighbourCubeLight) {
+						neighbourCubeLight = toNeighbourCubeLighting;
+						lightingUpdateCubes.push_back(chunk::cubeCoordToIndex(neighbourCubeCoord));
+					}
+				});
+				
+				updateLightingCubes(neighbourChunk);			
+			}
+		);
+		
+		//downward lighting in chunks
+		//move lighting downwards in non-empty chunks until the lighting 0 is achieved in every column of cubes
+		for(int chunkY{ lowestEmptyY-1 }; chunkY >= lowestNotFullY; chunkY--) {
+			auto chunk{ chunks[chunkIndices[chunkY - chunkColumnChunkYMin]] };
+			auto const aabb{ chunk.aabb() };
+			
+			auto &chunkLighting{ SkyLightingConfig::getLighting(chunk) };
+			auto const &chunkLightingBefore{ [&](){
+				if(chunkY == chunkColumnChunkYMax) return skyLighting;
+				else return SkyLightingConfig::getLighting(chunks[chunkIndices[chunkY - chunkColumnChunkYMin + 1]]);
+			}() }; //higher up
+			
+			auto const &chunkBlocks{ chunk.data() };
+			
+			vec2i layerLightingNot0First{ 0 };
+			vec2i layerLightingNot0Last { units::cubesInChunkDim-1 };
+			
+			auto const updateLayer = [&](
+				auto firstLayer_t/*templating on special case for better optimisation*/,
+				int const y, int const yBefore, 
+				chunk::ChunkLighting &lighting, chunk::ChunkLighting const &lightingBefore
+			) -> bool {
+				vec2i layerLightingNot0FirstNew{ units::cubesInChunkDim };
+				vec2i layerLightingNot0LastNew { -1 };
+				
+				for(int z{layerLightingNot0First.y}; z <= layerLightingNot0Last.y; z++)
+				for(int x{layerLightingNot0First.x}; x <= layerLightingNot0Last.x; x++) {
+					pCube const cubePos      { x, y      , z };
+					pCube const cubePosBefore{ x, yBefore, z };
+					
+					auto const cube{ [&]() {
+						if(aabb.contains(cubePos.valAs<pBlock>())) return chunkBlocks.cubeAt2(cubePos.val());
+						else return chunk::Block::id_t{};
+					}() };
+					
+					if(SkyLightingConfig::getType(cube) != LightingCubeType::medium) continue;
+					
+					auto const cubeLighting{ chunk::ChunkLighting::minValue }; //chunks' lighting values were not set by anything yet and they are min values by default
+					auto const cubeBeforeLighting{ lightingBefore[cubePosBefore] };
+					auto const toCubeLighting{ 
+						SkyLightingConfig::propagationRule(cubeBeforeLighting, vec3i{0, -1, 0}, cube) 
+					};
+					if(toCubeLighting > cubeLighting) {
+						lighting[cubePos] = toCubeLighting;
+						layerLightingNot0FirstNew = layerLightingNot0FirstNew.min(vec2i{x, z});
+						layerLightingNot0LastNew  = layerLightingNot0LastNew .max(vec2i{x, z});
+					}
+				}
+				
+				layerLightingNot0First = layerLightingNot0FirstNew;
+				layerLightingNot0Last  = layerLightingNot0LastNew ;
+				
+				return (layerLightingNot0First <= layerLightingNot0Last).all(); 
+			};
+			
+			auto continueProp{ false };
+			//first layer
+			continueProp = updateLayer(std::true_type{}, units::cubesInChunkDim-1, 0, chunkLighting, chunkLightingBefore);
+			if(!continueProp) break;
+			
+			//other layers
+			for(auto y{units::cubesInChunkDim-1 - 1}; y >= 0; y--) {
+				continueProp = updateLayer(std::false_type{}, y, y+1, chunkLighting, chunkLighting);
 				if(!continueProp) break;
-				
-				//other layers
-				for(auto y{units::cubesInChunkDim-1 - 1}; y >= 0; y--) {
-					continueProp = updateLayer(std::false_type{}, y, y+1, chunkLighting, chunkLighting);
-					if(!continueProp) break;
-				}
 			}
 		}
 		
-		{ //propagate borders lighting in
-			propagateHorisontalLightingIn(chunks, chunkIndices, lowestEmptyY-1, lowestNotFullY, true); 
-		}
+		//propagate borders lighting in
+		propagateHorisontalLightingIn(chunks, chunkIndices, lowestEmptyY-1, lowestNotFullY, true); 
 		
-		{ //propagate inside chunks
-			for(int chunkY{ lowestEmptyY-1 }; chunkY >= lowestNotFullY; chunkY--) {
-				for(int i{}; i < pos::cubesInChunkCount; i++) {
-					fromCubeInColumn<SkyLightingConfig>(chunks, chunkIndices, chunkY, chunk::cubeCoordInChunk(i));
-				}
+		//propagate inside chunks
+		for(int chunkY{ lowestEmptyY-1 }; chunkY >= lowestNotFullY; chunkY--) {
+			for(int i{}; i < pos::cubesInChunkCount; i++) {
+				fromCubeInColumn<SkyLightingConfig>(chunks, chunkIndices, chunkY, chunk::cubeCoordInChunk(i));
 			}
 		}
 		
-		{ //propagate borders lighting out
-			iterateFourNeighbours(
-				chunks, chunkIndices, 
-				lowestEmptyY-1, lowestNotFullY, 
-				[&](
-					int const chunkI, chunk::Chunk const chunk, chunk::Chunk const neighbourChunk, 
-					mat3i const axis, bool const positive, int const axisIndex
-				) {
-					auto const toNeighbourDir{ axis * vec3i{ misc::positiveSign(positive), 0, 0 } };
+		//propagate borders lighting out
+		iterateFourNeighbours(
+			chunks, chunkIndices, 
+			lowestEmptyY-1, lowestNotFullY, 
+			[&](
+				int const chunkI, chunk::Chunk const chunk, chunk::Chunk const neighbourChunk, 
+				mat3i const axis, bool const positive, int const axisIndex
+			) {
+				auto const toNeighbourDir{ axis * vec3i{ misc::positiveSign(positive), 0, 0 } };
 
-					auto &chunkLighting{ SkyLightingConfig::getLighting(chunk) };	
-					auto const &neighbourChunkBlocks{ neighbourChunk.data() };
-					auto &neighbourChunkLighting{ SkyLightingConfig::getLighting(neighbourChunk) };
-					
-					auto const &neighbourAabb{ neighbourChunk.aabb() };
-					auto const fBlock{ positive ? 0 : units::blocksInChunkDim-1 };
-					auto const testNeighbourBlocksArea{ intersectAreas3i(
-						neighbourAabb,
-						{
-							axis * vec3i{fBlock, 0, 0}, 
-							axis * vec3i{fBlock, units::blocksInChunkDim-1, units::blocksInChunkDim-1} 
+				auto &chunkLighting{ SkyLightingConfig::getLighting(chunk) };	
+				auto const &neighbourChunkBlocks{ neighbourChunk.data() };
+				auto &neighbourChunkLighting{ SkyLightingConfig::getLighting(neighbourChunk) };
+				
+				auto const &neighbourAabb{ neighbourChunk.aabb() };
+				auto const fBlock{ positive ? 0 : units::blocksInChunkDim-1 };
+				auto const testNeighbourBlocksArea{ intersectAreas3i(
+					neighbourAabb,
+					{
+						axis * vec3i{fBlock, 0, 0}, 
+						axis * vec3i{fBlock, units::blocksInChunkDim-1, units::blocksInChunkDim-1} 
+					}
+				) };
+				
+				iterateChunkFace(axis, positive, [&](pCube const cubeCoord, pCube const neighbourCubeCoord) {						
+					auto const neighbourCube{ [&]() {
+						if(testNeighbourBlocksArea.contains(neighbourCubeCoord.valAs<pBlock>())) {
+							return neighbourChunkBlocks.cubeAt2(neighbourCubeCoord);   
 						}
-					) };
+						else return chunk::Block::id_t{};
+					}() };
 					
-					iterateChunkFace(axis, positive, [&](pCube const cubeCoord, pCube const neighbourCubeCoord) {						
-						auto const neighbourCube{ [&]() {
-							if(testNeighbourBlocksArea.contains(neighbourCubeCoord.valAs<pBlock>())) {
-								return neighbourChunkBlocks.cubeAt2(neighbourCubeCoord);   
-							}
-							else return chunk::Block::id_t{};
-						}() };
-						
-						if(SkyLightingConfig::getType(neighbourCube) != LightingCubeType::medium) return;
-						
-						auto const &cubeLight   { chunkLighting         [cubeCoord         ] };
-						auto &neighbourCubeLight{ neighbourChunkLighting[neighbourCubeCoord] };
-						
-						auto const toNeighbourCubeLighting{ 
-							SkyLightingConfig::propagationRule(cubeLight, toNeighbourDir, neighbourCube)
-						};
-						if(toNeighbourCubeLighting > neighbourCubeLight) {
-							neighbourCubeLight = toNeighbourCubeLighting;
-							lightingUpdateCubes.push_back(chunk::cubeCoordToIndex(neighbourCubeCoord));
-						}
-					});
+					if(SkyLightingConfig::getType(neighbourCube) != LightingCubeType::medium) return;
 					
-					updateLightingCubes(neighbourChunk);
-				}
-			);
-		}
+					auto const &cubeLight   { chunkLighting         [cubeCoord         ] };
+					auto &neighbourCubeLight{ neighbourChunkLighting[neighbourCubeCoord] };
+					
+					auto const toNeighbourCubeLighting{ 
+						SkyLightingConfig::propagationRule(cubeLight, toNeighbourDir, neighbourCube)
+					};
+					if(toNeighbourCubeLighting > neighbourCubeLight) {
+						neighbourCubeLight = toNeighbourCubeLighting;
+						lightingUpdateCubes.push_back(chunk::cubeCoordToIndex(neighbourCubeCoord));
+					}
+				});
+				
+				updateLightingCubes(neighbourChunk);
+			}
+		);	
 	}
 
-	{//block lighting
+	{ //block lighting
 		Sides invalidated[chunksCoumnChunksCount] = {};
 		
 		//setup emitters
@@ -411,56 +408,55 @@ void calculateLighting(
 			&invalidated
 		);
 		
-		{ //propagate inside chunks
-			for(int chunkY{chunkColumnChunkYMax}; chunkY >= lowestNotFullY; chunkY--) {
-				auto const chunkI{ chunkY - chunkColumnChunkYMin };
+		//propagate inside chunks
+		for(int chunkY{chunkColumnChunkYMax}; chunkY >= lowestNotFullY; chunkY--) {
+			auto const chunkI{ chunkY - chunkColumnChunkYMin };
+			
+			auto const sidesInvalidated{ invalidated[chunkI] };
+			if(!sidesInvalidated.any()) continue;
+			
+			auto chunk{ chunks[chunkIndices[chunkI]] };
+			
+			for(int i{}; i < 4; i++) {
+				if(!sidesInvalidated[i]) continue;
 				
-				auto const sidesInvalidated{ invalidated[chunkI] };
-				if(!sidesInvalidated.any()) continue;
+				vec3i const axiss [] = { {1, 0, 0}, {0, 0, 1} };
+				vec3i const oAxiss[] = { {0, 0, 1}, {1, 0, 0} };
+				int   const signs [] = { -1, 1 };
 				
-				auto chunk{ chunks[chunkIndices[chunkI]] };
+				auto const axis    { axiss [i % 2]  };
+				auto const oAxis1  { vec3i{0, 1, 0} };
+				auto const oAxis2  { oAxiss[i % 2]  };
+				auto const sign    { signs [i / 2]  };
+				bool const positive(        i / 2   );
 				
-				for(int i{}; i < 4; i++) {
-					if(!sidesInvalidated[i]) continue;
+				for(int o1{}; o1 < units::cubesInChunkDim; o1++)
+				for(int o2{}; o2 < units::cubesInChunkDim; o2++) {
+					pCube const cubePos{
+						  oAxis1 * o1
+						+ oAxis2 * o2
+						+ axis   * (positive ? units::cubesInChunkDim-1 : 0)
+					};
 					
-					vec3i const axiss [] = { {1, 0, 0}, {0, 0, 1} };
-					vec3i const oAxiss[] = { {0, 0, 1}, {1, 0, 0} };
-					int   const signs [] = { -1, 1 };
-					
-					auto const axis    { axiss [i % 2]  };
-					auto const oAxis1  { vec3i{0, 1, 0} };
-					auto const oAxis2  { oAxiss[i % 2]  };
-					auto const sign    { signs [i / 2]  };
-					bool const positive(        i / 2   );
-					
-					for(int o1{}; o1 < units::cubesInChunkDim; o1++)
-					for(int o2{}; o2 < units::cubesInChunkDim; o2++) {
-						pCube const cubePos{
-							  oAxis1 * o1
-							+ oAxis2 * o2
-							+ axis   * (positive ? units::cubesInChunkDim-1 : 0)
-						};
+					AddLighting::fromCube<BlocksLightingConfig>(chunk, cubePos.val());
+				}
+				
+				auto const &blocks{ chunk.data() };
+				
+				for(auto const emitterBlockIndex : chunk.emitters()) {
+					pBlock const emitterBlockPos{ chunk::indexBlock(emitterBlockIndex) };
+					auto const block{ blocks[emitterBlockPos.val()] };
+					for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
+						if(!block.cube(cubeIndex)) continue;
 						
-						AddLighting::fromCube<BlocksLightingConfig>(chunk, cubePos.val());
-					}
-					
-					auto const &blocks{ chunk.data() };
-					
-					for(auto const emitterBlockIndex : chunk.emitters()) {
-						pBlock const emitterBlockPos{ chunk::indexBlock(emitterBlockIndex) };
-						auto const block{ blocks[emitterBlockPos.val()] };
-						for(int cubeIndex{}; cubeIndex < pos::cubesInBlockCount; cubeIndex++) {
-							if(!block.cube(cubeIndex)) continue;
-							
-							auto const cubePos{ emitterBlockPos + pCube{chunk::Block::cubeIndexPos(cubeIndex)} };
-							
-							AddLighting::fromCube<BlocksLightingConfig>(chunk, cubePos.valAs<pCube>());
-						}
+						auto const cubePos{ emitterBlockPos + pCube{chunk::Block::cubeIndexPos(cubeIndex)} };
+						
+						AddLighting::fromCube<BlocksLightingConfig>(chunk, cubePos.valAs<pCube>());
 					}
 				}
 			}
 		}
 		
-		//propagate borders lighting out is performed by AddLighting::fromCube
+		//note: propagate borders lighting out is performed by AddLighting::fromCube
 	}
 }

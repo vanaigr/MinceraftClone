@@ -30,6 +30,8 @@ void updateBlockDataWithoutNeighbours(chunk::Chunk const chunk, pBlock const blo
 	__m128i levels;
   #endif	
 	
+	/*insert needs compile-time index, so the macro is used.
+	  This same can be done with lambda, auto parameter and std::integral_constant*/
 	#define set(INDEX) {\
 		auto const &liquidCube{ liquid[startingCubeOffset + chunk::cubeCoordToIndex(chunk::cubeIndexInBlockToCoord(INDEX))] };\
 		ids    = _mm_insert_epi16(ids, liquidCube.id, INDEX);\
@@ -146,7 +148,6 @@ void updateBlockDataNeighboursInfo(chunk::Chunk chunk, pBlock const blockCoord) 
 	
 	blockDataLoc = blockData; 
 }
-
 
 void updateBlocksDataWithoutNeighboursInArea(chunk::Chunk startChunk, pBlock const firstRel, pBlock const lastRel) {
 	pChunk const startChunkPos{ startChunk.position() };

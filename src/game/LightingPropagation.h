@@ -11,7 +11,7 @@ enum class LightingCubeType {
 namespace AddLighting {
 	namespace {
 		template<typename Config>
-		inline void propagateAddLight(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const startLight) {
+		inline void propagateAddLight(chunk::Chunk const cubeChunk, vec3i const cubeInChunkCoord, uint8_t const startLight) {
 			cubeChunk.status().current.lighting = false;
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord, 
@@ -35,14 +35,14 @@ namespace AddLighting {
 	}
 	
 	template<typename Config>
-	inline void fromCube(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) {	
+	inline void fromCube(chunk::Chunk const cubeChunk, vec3i const cubeInChunkCoord) {	
 		auto const startLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 		propagateAddLight<Config>(cubeChunk, cubeInChunkCoord, startLight);
 	}
 	
 	//also causes first cube's neighbours to update their lighting
 	template<typename Config>
-	inline void fromCubeForcedFirst(chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) {
+	inline void fromCubeForcedFirst(chunk::Chunk const cubeChunk, vec3i const cubeInChunkCoord) {
 		auto const startLight{ Config::getLight(cubeChunk, cubeInChunkCoord) };
 		iterateCubeNeighbours(
 			cubeChunk, cubeInChunkCoord, 
@@ -69,7 +69,7 @@ namespace AddLighting {
 namespace SubtractLighting {
 	namespace {		
 		template<typename Config>
-		inline void propagateLightRemove(std::vector<chunk::ChunkAndCube> &endCubes, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord, uint8_t const cubeLight) {
+		inline void propagateLightRemove(std::vector<chunk::ChunkAndCube> &endCubes, chunk::Chunk const cubeChunk, vec3i const cubeInChunkCoord, uint8_t const cubeLight) {
 			iterateCubeNeighbours(
 				cubeChunk, cubeInChunkCoord,
 				[&endCubes, fromLight = cubeLight](vec3i const fromDir, chunk::Chunk cubeChunk, vec3i const cubeInChunkCoord) -> void {
@@ -97,7 +97,7 @@ namespace SubtractLighting {
 		
 		template<typename Config>
 		inline void removeLightInChunkCubes(
-			chunk::Chunk cubesChunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord, 
+			chunk::Chunk const cubesChunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord, 
 			std::vector<chunk::ChunkAndCube> &endCubes
 		) {
 			if((cubesEndInChunkCoord < cubesStartInChunkCoord).all()) return;
@@ -142,14 +142,12 @@ namespace SubtractLighting {
 	}
 	
 	template<typename Config>
-	inline void inChunkCubes(chunk::Chunk chunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord) {
+	inline void inChunkCubes(chunk::Chunk const chunk, vec3i const cubesStartInChunkCoord, vec3i const cubesEndInChunkCoord) {
 		static std::vector<chunk::ChunkAndCube> endCubes{};
 		endCubes.clear();
 		
 		auto &chunks{ chunk.chunks() };
-	
 		removeLightInChunkCubes<Config>(chunk, cubesStartInChunkCoord, cubesEndInChunkCoord, endCubes);
-		
 		for(auto const ci : endCubes) ::AddLighting::fromCube<Config>(chunks[ci.chunkIndex], ci.cubeCoord().val());
 	}
 }
