@@ -58,6 +58,7 @@ layout(std140) uniform Properties {
 	ivec2 windowSize;
 	float time;
 	mat4 projection; //from local space to screen space
+	uint flags;
 };
 
 uniform vec3 rightDir, topDir;
@@ -1962,8 +1963,8 @@ uint colorToBin(const vec3 hdrColor) {
 }
 
 void main() {
-	const vec2 uv = gl_FragCoord.xy / windowSize.xy;
-    const vec2 coord = (gl_FragCoord.xy - windowSize.xy / 2) * 2 / windowSize.xy;
+	const vec2 coordOffset = 0.25*vec2(rand(gl_FragCoord.xy), rand(-gl_FragCoord.xy));
+    const vec2 coord = (gl_FragCoord.xy + coordOffset - windowSize.xy / 2) * 2 / windowSize.xy;
 	
 	const vec3 forwardDir = cross(topDir, rightDir);
     const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;

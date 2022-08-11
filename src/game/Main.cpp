@@ -391,7 +391,7 @@ void handleKey(int const key) {
 	if(key == GLFW_KEY_MINUS && isPress) zoom = 1 + (zoom - 1) * 0.95;
 	else if(key == GLFW_KEY_EQUAL/*+*/ && isPress) zoom = 1 + (zoom - 1) * (1/0.95);
 	
-	if(GLFW_KEY_KP_0 <= key && key <= GLFW_KEY_KP_9  &&  !isPress) numpad[key - GLFW_KEY_KP_0] = !numpad[key - GLFW_KEY_KP_0];
+	if(GLFW_KEY_KP_0 <= key && key <= GLFW_KEY_KP_9 && !isPress) numpad[key - GLFW_KEY_KP_0] = !numpad[key - GLFW_KEY_KP_0];
 	
 	if(action == GLFW_RELEASE) {
 		if(ctrl) {
@@ -822,7 +822,7 @@ static void reloadShaderStorageBuffers() {
 		glGenBuffers   (ubosCount, &ubos[0]);
 		
 		glBindBuffer(GL_UNIFORM_BUFFER, properties_ubo);
-		glBufferData(GL_UNIFORM_BUFFER, 8 + 4 + 4 + 4*4*4, NULL, GL_DYNAMIC_DRAW);
+		glBufferData(GL_UNIFORM_BUFFER, 8 + 4 + 4 + 4*4*4 + 4, NULL, GL_DYNAMIC_DRAW);
 		glBindBufferBase(GL_UNIFORM_BUFFER, properties_ub, properties_ubo); 
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 	}
@@ -1050,6 +1050,8 @@ static void reloadShaders() {
 		ldr_sampler_u = glGetUniformLocation(toLDR_p, "sampler");
 		ldr_blurSampler_u = glGetUniformLocation(toLDR_p, "blurSampler");
 		ldr_exposure_u = glGetUniformLocation(toLDR_p, "exposure");
+		
+		bindProperties(fontProgram);
 		ce
 	}
 	
@@ -1774,11 +1776,18 @@ int main() {
 			lastTime = curTime;
 			GLfloat const time( offset / 1000.0 );
 			
+			//flags
+			auto const mf = [&](int const index) -> uint32_t { return uint32_t(numpad[index]) << index; };
+			uint32_t const flags{
+				mf(0) | mf(1) | mf(2) | mf(3) | mf(4) | mf(5) | mf(6) | mf(7) | mf(8) | mf(9)
+			};
+			
 			//
 			glBindBuffer(GL_UNIFORM_BUFFER, properties_ubo);
 			glBufferSubData(GL_UNIFORM_BUFFER, 0, 8, &windowSize);
 			glBufferSubData(GL_UNIFORM_BUFFER, 8, 4, &time);
 			glBufferSubData(GL_UNIFORM_BUFFER, 16, 4 * 4*4, &projectionT[0][0]);
+			glBufferSubData(GL_UNIFORM_BUFFER, 16 + 4 * 4*4, 4, &flags);
 			glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		}
 		
@@ -2224,10 +2233,10 @@ int main() {
 
 			static constexpr std::string_view names[]{
 				"physics", "chunk generation", "time update",
-				"world render timeing", "bloom"
+				"world render timeing", "bloom", "FXAA"
 			};
-			static constexpr int  negate[]{ 1, 1, 1, 0, 1 };
-			static constexpr int indices[]{ 0, 1, 2, 3, 5 };
+			static constexpr int  negate[]{ 1, 1, 1, 0, 1, 1 };
+			static constexpr int indices[]{ 0, 1, 2, 3, 5, 6 };
 			static constexpr auto count{ std::end(indices) - std::begin(indices) };
 			
 			ss << "Numpad flags:\n";
