@@ -23,7 +23,9 @@ GCB=$(shell git branch --show current)
 GCD=$(shell git log --format=%ad -n1 --date=iso)
 PPFLAGS+= -DCOMMIT_HASH="\"$(GCH)\"" -DCOMMIT_NAME="\"$(GCM)\"" -DCOMMIT_BRANCH="\"$(GCB)\"" -DCOMMIT_DATE="\"$(GCD)\""
 
-SOURCE_FILES=$(subst $(SOURCE_DIR)/,,$(wildcard $(SOURCE_DIR)/**/*.cpp))
+//https://stackoverflow.com/a/12959764/18704284
+rwildcard=$(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))
+SOURCE_FILES=$(subst $(SOURCE_DIR)/,,$(call rwildcard,$(SOURCE_DIR)/,*.cpp))
 
 
 define MAKE_EXECUTABLE=

@@ -169,7 +169,22 @@ ivec3 cubeLocalToChunk(const ivec3 cubeCoord) {
 	return and3i(cubeCoord, cubesInChunkDim-1);
 }
 
+//copied from Chunks.h 
+int cubeIndexInChunk(const ivec3 coord) {
+	return coord.x + coord.y*cubesInChunkDim + coord.z*cubesInChunkDim*cubesInChunkDim;
+}
 
+ivec3 testBounds(const ivec3 i) {
+	#define test(i) ( int(i >= 0) - int(i < blocksInChunkDim) )
+		return ivec3(test(i.x), test(i.y), test(i.z));
+	#undef ch16
+}
+
+bool checkBoundaries(const ivec3 i) {
+	return all(equal( testBounds(i), ivec3(0) ));
+}
+
+// misc //
 const vec3 rgbToLum = vec3(0.2126, 0.7152, 0.0722);
 
 vec3 rgb2hsv(const vec3 c) {
@@ -226,7 +241,7 @@ vec3 at(const Ray r, const float t) {
     return r.orig + r.dir * t;
 }
 
-
+// AABB //
 //copied from Chunk.h PackedAABB
 restrict readonly buffer ChunksBounds {
     uint data[];
@@ -256,34 +271,32 @@ bool emptyBounds(const int chunkIndex) {
 	return emptyBounds(start(bounds), onePastEnd(bounds));
 }
 
-
+// Chunks indices in the grid //
 restrict readonly buffer ChunksIndices {
     int data[];
 } chunksIndices;
 
-ivec3 chunkIndexPosition(const int index) {
+ivec3 chunkPositionIndexToPos(const int index) {
 	return ivec3(
 		 index                                    % renderDiameter,
 		(index / renderDiameter)                  % renderDiameter,
-		(index / renderDiameter / renderDiameter) % renderDiameter
-		
+		(index / renderDiameter / renderDiameter) % renderDiameter	
 	);
 }
-int chunkPositionIndex(const ivec3 coord) {
+int chunkPosToPositionIndex(const ivec3 coord) {
 	return coord.x + coord.y * renderDiameter + coord.z * renderDiameter * renderDiameter;
 }
 
-int chunkAtIndex(const int arrIndex) {	
-	const int index = chunksIndices.data[arrIndex];
-	return index;
+int chunkAtPositionIndex(const int positionIndex) {	
+	return chunksIndices.data[positionIndex];
 }
 
 int chunkAt(const ivec3 coord) {
 	if(clamp(coord, 0, renderDiameter-1) != coord) return 0;
-	return chunkAtIndex(chunkPositionIndex(coord));
+	return chunkAtPositionIndex(chunkPosToPositionIndex(coord));
 }
 
-
+// Textures //
 restrict readonly buffer AtlasDescription {
     uint positions[]; //16bit xSide, 16bit ySide; 16bit xTop, 16bit yTop; 16bit xBot, 16bit yBot; 16bit xAlpha, 16bit yAlpha
 } ad;
@@ -309,17 +322,7 @@ vec2 atlasAt(const uint id, const ivec3 side) {
 	return vec2( pos & 0xffffu, (pos>>16) & 0xffffu );
 }
 
-ivec3 testBounds(const ivec3 i) {
-	#define test(i) ( int(i >= 0) - int(i < blocksInChunkDim) )
-		return ivec3(test(i.x), test(i.y), test(i.z));
-	#undef ch16
-}
-
-bool checkBoundaries(const ivec3 i) {
-	return all(equal( testBounds(i), ivec3(0) ));
-}
-
-
+// chunks blocks' cubes and neighbours info //
 restrict readonly buffer ChunksMesh {
 	uint data[];
 } chunksMesh;
@@ -361,7 +364,7 @@ Cubes cubesAtBlock(const int chunkIndex, const ivec3 blockCoord) {
 	return Cubes(data);
 }
 
-
+// chunks blocks' id //
 restrict readonly buffer ChunksBlocks {
 	uint data[];
 } chunksBlocks;
@@ -375,7 +378,7 @@ uint blockIdAt(const int chunkIndex, const ivec3 blockCoord) {
 	return (chunksBlocks.data[arrayIndex] >> (arrayOffset * 16)) & 0xffffu;
 }
 
-
+// chunks liquid cubes //
 restrict readonly buffer ChunksLiquid {
 	uint data[];
 } chunksLiquid;
@@ -398,15 +401,10 @@ LiquidCube liquidAtCube(const int chunkIndex, const ivec3 cubeCoord) {
 	return LiquidCube(data);
 }
 
-
+////
 restrict readonly buffer ChunksAO {
     uint data[];
 } ao;
-
-//copied from Chunks.h chunk::cubeIndexInChunk 
-int cubeIndexInChunk(const ivec3 coord) {
-	return coord.x + coord.y*cubesInChunkDim + coord.z*cubesInChunkDim*cubesInChunkDim;
-}
   
 uint aoAt(const int chunkIndex, const ivec3 vertexCoord) {
 	const int startIndex = chunkIndex * cubesInChunkCount;
@@ -426,7 +424,7 @@ ivec3 vertexNeighbourOffset(const int index) {
 	return ivec3(x,y,z);
 }
 
-float lightForChunkVertexDir(const int chunkIndex, const ivec3 chunkCoord, const ivec3 vertex, const ivec3 dir) {
+float aoForChunkVertexDir(const int chunkIndex, const ivec3 chunkCoord, const ivec3 vertex, const ivec3 dir) {
 	const bvec3 dirMask = notEqual(dir, ivec3(0));
 	const int dirCount = int(dirMask.x) + int(dirMask.y) + int(dirMask.z);
 	if(dirCount == 0) return 0;
@@ -457,7 +455,7 @@ float lightForChunkVertexDir(const int chunkIndex, const ivec3 chunkCoord, const
 	return (maxLight - float(blocks)) / maxLight;
 }
 
-
+////
 restrict readonly buffer ChunksLighting {
     uint data[];
 } lighting;
@@ -531,7 +529,7 @@ NE neFromChunk(const int chunkIndex, const int someindex) {
 	return NE(ne_coord, first & 3u);
 }
 
-
+// player intersection //
 float intersectPlane(const Ray r, const vec3 center, const vec3 n) {
     return dot(n, center - r.orig) / dot(n, r.dir);
 }
@@ -611,7 +609,7 @@ Intersection intersectCube(const Ray ray, const int bias, const vec3 start, cons
 	}
 }
 
-
+////
 vec2 blockUv(const vec3 localBlockCoord, const vec3 intersectionSide, const vec3 dirSign) {
 	const float intersectionUSign = dot(dirSign, intersectionSide);
 	
@@ -659,7 +657,7 @@ bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, co
 	return sampleAtlas(alphaAt(blockId), mod(alphaUv, 1)).x > 0.5;
 }
 
-
+// bias //
 const int minBias = -2;
 const int maxBias = +2; /*
 	bias allowes to specify which surface is intersected
@@ -676,7 +674,7 @@ const int maxBias = +2; /*
    Bias also acts as backside/frontside indicator when there is only one surface.
 */
 
-
+// rays and results //
 const int rayTypeStandard = 0;
 const int rayTypeShadowBlock = 1;
 const int rayTypeShadowSky = 2;
@@ -708,6 +706,10 @@ struct Result {
 	bool last;
 };
 
+const int sizeofParams = 8;
+const int sizeofResult = 4;
+
+// params and results stack //
 int putResultPos = 0;
 int putParamsPos = 0;
 
@@ -716,9 +718,6 @@ uint stack[size];
 //add results ->              <- add params
 //result | result | 0 | 0 | params | params;
 //   putResultPos ^   ^ putParamsPos
-
-const int sizeofParams = 8;
-const int sizeofResult = 4;
 
 int curParamsPos() { return putParamsPos - 1; }
 void setCurParamsPos(const int pos) { putParamsPos = pos + 1; }
@@ -729,7 +728,7 @@ void setCurResultPos(const int pos) { putResultPos = pos + 1; }
 int paramsPosOffset(const int pos) { return size - (pos+1) * sizeofParams; }
 int resultPosOffset(const int pos) { return pos * sizeofResult; }
 
-
+////
 restrict buffer TraceTest {
 	uint data[];
 } traceB;
@@ -751,7 +750,7 @@ int paramsPosOffsetTrace(const int pos) { return int((fragCoord.x + fragCoord.y 
 int setParamsPos = 0;
 int getParamsPos = 0;
 
-
+////
 void writeParamsStack(const Params it, const int position) {
 	const int offset = paramsPosOffset(position);
 	
@@ -859,7 +858,6 @@ Params readParamsTrace(const int position) {
 		bool((traceB.data[offset+6] >> 30) & 1u)
 	);
 }
-
 
 void writeStartParams(const Params it, const int position);
 void writeEndParams(const Params it, const int position);
@@ -982,7 +980,7 @@ bool canPushResult() {
 	&& resultPosOffset(putResultPos+1)-1 < paramsPosOffset(putParamsPos-1); //resultEnd < paramsEnd
 }
 
-
+// intersectuion finding //
 struct BlocksIntersection {
 	vec3 coord;
 	uint id;
@@ -1157,7 +1155,6 @@ BlocksIntersection blocksIntersection(
 	return bc;
 	#undef dirSign
 }
-					
 
 void findIntersections(const int iteration, const int lowestNotUpdated) { 	
 	Ray ray;
@@ -1373,6 +1370,7 @@ void findIntersections(const int iteration, const int lowestNotUpdated) {
 }
 
 
+// intersection resolving //
 vec3 background(const vec3 dir) {
 	const float t = 0.5 * (dir.y + 1.0);
 	const vec3 res = mix(vec3(0.6, 0.7, 0.9), vec3(0.43, 0.7, 1.15), t);
@@ -1383,7 +1381,6 @@ vec3 fade(const vec3 color, const float depth) {
 	const float bw = 0.5 + dot(color, vec3(0.299, 0.587, 0.114)) * 0.5;
 	return mix(vec3(bw), color, inversesqrt(depth / 500 + 1));
 }
-
 
 void combineSteps(const int currentIndex, const int lastIndex) {
 	const int childrenCount = lastIndex - currentIndex;
@@ -1488,7 +1485,6 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 	
 	writeResult(result, currentIndex);
 }
-
 
 struct RayResult {
 	bool pushedRays;
@@ -1671,18 +1667,18 @@ RayResult resolveIntersection(const int iteration) {
 			ambient = 0;
 			if(!backside) {
 			  #if 0
-				ambient = lightForChunkVertexDir(cubeChunkIndex, chunkPosition, vertexCoord, normal);
+				ambient = aoForChunkVertexDir(cubeChunkIndex, chunkPosition, vertexCoord, normal);
 			  #else
 				for(int i = 0 ; i < 4; i++) {
 					const ivec2 offset_ = ivec2(i%2, i/2);
 					const ivec3 offset = offset_.x * otherAxis1 + offset_.y * otherAxis2;
 					const ivec3 curVertexCoord = vertexCoord + offset;
 										
-					const float vertexLight = lightForChunkVertexDir(cubeChunkIndex, chunkPosition, curVertexCoord, normal);
+					const float vertexAO = aoForChunkVertexDir(cubeChunkIndex, chunkPosition, curVertexCoord, normal);
 					
 					const float diffX = abs(offset_.x - mod(dot(localSpaceCoord, otherAxis1)*2, 1));
 					const float diffY = abs(offset_.y - mod(dot(localSpaceCoord, otherAxis2)*2, 1));
-					ambient += mix(mix(vertexLight, 0, diffY), 0, diffX);
+					ambient += mix(mix(vertexAO, 0, diffY), 0, diffX);
 				}
 			  #endif
 			}
@@ -1877,7 +1873,7 @@ RayResult resolveIntersection(const int iteration) {
 	return RayResult(pushed);
 }
 
-
+// tracing //
 vec3 trace(const Ray startRay) {  
   #if TEST_FIND && READ_TRACE
 	setCurParamsPos(int(getMaxGetPos()) - 1);
