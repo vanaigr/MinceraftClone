@@ -67,9 +67,10 @@ static bool lockFramerate{ false };
 
 GLFWwindow* window;
 
-
-static double       deltaTime{ 16.0/1000.0 };
-static double const fixedDeltaTime{ 16.0/1000.0 };
+using Duration_t = std::chrono::duration<float>;
+using Time_t = std::chrono::time_point<std::chrono::steady_clock, Duration_t>;
+static Duration_t const fixedDeltaTime{ 1.0 / 60.0 };
+static Duration_t       deltaTime     { 1.0 / 60.0 };
 
 
 static int  viewDistance{ 3 };
@@ -177,7 +178,7 @@ namespace LiquidPlaceType { enum LiquidPlaceType {
 */
 static LiquidPlaceType::LiquidPlaceType liquidPlaceType{ LiquidPlaceType::liquid };
 static bool breakFullBlock{ false };
-static double const blockActionCD{ 150.0 / 1000.0 };
+static Duration_t const blockActionCD{ 150.0 / 1000.0 };
 
 
 static Font font{};
@@ -1123,7 +1124,8 @@ static void updateChunkBlocks(chunk::Chunks::index_t const index, chunk::Chunks:
 	status.current.blocks &= status.loaded.blocks;
 	
 	if(!status.current.blocks) {
-		chunk::PackedAABB<pBlock> const aabbData{ chunk.aabb() };
+		auto const aabb{ chunk.aabb() };
+		chunk::PackedAABB<pBlock> const aabbData{ aabb.isEmpty() ? chunk::PackedAABB<pBlock>{pBlock{units::blocksInChunkDim-1}, pBlock{0}} : aabb };
 		
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunksBounds_ssbo); 
 		glBufferSubData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t) * gpuIndex, sizeof(uint32_t), &aabbData);
@@ -1516,12 +1518,8 @@ bool performBlockAction() {
 }
 
 static void update(chunk::Chunks &chunks) {	
-	static std::chrono::time_point<std::chrono::steady_clock> lastPhysicsUpdate{std::chrono::steady_clock::now()};
-	static std::chrono::time_point<std::chrono::steady_clock> lastBlockUpdate{std::chrono::steady_clock::now()};
-	auto const now{std::chrono::steady_clock::now()};
-
-	auto const diffBlockMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBlockUpdate).count() };
-	auto const diffPhysicsMs{ std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPhysicsUpdate).count() };	
+	static Time_t lastUpdate{std::chrono::steady_clock::now()};
+	Time_t const thisUpdate{std::chrono::steady_clock::now()};	
 	
 	for(size_t i{}; i < sizeof(keys)/sizeof(keys[0]); ++i) {
 		auto &key{ keys[i] };
@@ -1536,10 +1534,13 @@ static void update(chunk::Chunks &chunks) {
 			key = Key::NOT_PRESSED;
 		}
 	}
-
-	if(diffBlockMs >= blockActionCD * 1000 && blockAction != BlockAction::NONE) {
+	
+	static Duration_t diffBlock{};	
+	diffBlock += thisUpdate - lastUpdate;
+	
+	if(diffBlock >= blockActionCD && blockAction != BlockAction::NONE) {
 		bool const isPerformed = performBlockAction();
-		if(isPerformed) lastBlockUpdate = now;
+		if(isPerformed) diffBlock = Duration_t{};
 	}
 	
 	auto const curZoom{ currentZoom() };
@@ -1553,7 +1554,7 @@ static void update(chunk::Chunks &chunks) {
 			* spectatorSpeed / curZoom
 			* (shift ? 1.0*speedModifier : 1)
 			* (ctrl  ? 1.0/speedModifier : 1)
-			* deltaTime
+			* deltaTime.count()
 		};
 		
 		spectatorCoord += pos::posToFrac(movement);
@@ -1571,17 +1572,20 @@ static void update(chunk::Chunks &chunks) {
 		    * playerSpeed
 			* (shift ? 1.0*speedModifier : 1)
 			* (ctrl  ? 1.0/speedModifier : 1)
-		) * deltaTime; 
+		) * std::min(deltaTime.count(), 2*fixedDeltaTime.count()); 
+		
+		static Duration_t physicsDiff{};
+		physicsDiff += thisUpdate - lastUpdate;
 			
-		if(diffPhysicsMs > fixedDeltaTime * 1000) {
-			lastPhysicsUpdate += std::chrono::microseconds{int64_t(fixedDeltaTime*1000000.0)};
-
+		if(physicsDiff > fixedDeltaTime) {
+			physicsDiff = decltype(physicsDiff)(misc::mod(physicsDiff.count(), fixedDeltaTime.count()));
+			
 			if(!numpad[0]) {
-				playerForce += vec3d{0,-1,0} * fixedDeltaTime; 
+				playerForce += vec3d{0,-1,0} * fixedDeltaTime.count(); 
 				if(isOnGround) {
 					playerForce += (
 						vec3d{0,1,0}*14*double(playerInput.jump)	
-					) * fixedDeltaTime + playerMovement;
+					) * fixedDeltaTime.count() + playerMovement;
 				}
 				else {
 					auto const movement{ playerMovement * 0.5 };
@@ -1625,6 +1629,7 @@ static void update(chunk::Chunks &chunks) {
 			//'width / 3' is arbitrary value less than width/2
 	};
 	
+	lastUpdate = thisUpdate; 
 }
 
 
@@ -1964,7 +1969,7 @@ int main() {
 			}() };
 			
 			static float prevLum{ curLum };
-			prevLum = prevLum + (curLum - prevLum) * (1 - exp(-deltaTime * 1.1));
+			prevLum = prevLum + (curLum - prevLum) * (1 - exp(-deltaTime.count() * 1.1));
 			auto const exposure{ 0.16 / (misc::clamp(prevLum, 0.1f, 5.0f) + 0.07) };
 
 			
@@ -2387,9 +2392,8 @@ int main() {
 		
         update(chunks);
 		
-		auto const dTime{ std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - startFrame).count() };
-		frameTime.add(dTime);
-		deltaTime = double(dTime) / 1000000.0;
+		deltaTime = std::chrono::steady_clock::now() - startFrame;
+		frameTime.add(std::chrono::duration_cast<std::chrono::microseconds>(deltaTime).count());
 		
 		if(firstFrame) {
 			firstFrame = false;
