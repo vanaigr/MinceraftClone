@@ -21,9 +21,11 @@ enum class CF {
 	mouseSensitivityY,
 	chunkUpdatesPerFrame,
 	lockFramerate,
-	worldName
+	worldName,
+	groupSizeX,
+	groupSizeY
 };
-static constexpr int fieldCount = 11;
+static constexpr int fieldCount = 13;
 
 //Config field names
 static constexpr char const *CFN[] = {
@@ -35,7 +37,9 @@ static constexpr char const *CFN[] = {
 	"mouseSensitivity_y",
 	"chunkUpdatesPerFrame",
 	"lockFramerate",
-	"worldName"
+	"worldName",
+	"groupSizeX",
+	"groupSizeY"
 };
 
 //Config field types
@@ -48,7 +52,9 @@ static constexpr FT CFT[] = {
 	FT::REAL,
 	FT::INT ,
 	FT::BOOL,
-	FT::STRING
+	FT::STRING,
+	FT::INT,
+	FT::INT
 };
 
 
@@ -139,6 +145,8 @@ void parseConfigFromFile(Config &dst) {
 				break; case CF::chunkUpdatesPerFrame : dst.chunkUpdatesPerFrame = result(CF::chunkUpdatesPerFrame);
 				break; case CF::lockFramerate        : dst.lockFramerate        = result(CF::lockFramerate);
 				break; case CF::worldName            : dst.worldName            = result(CF::worldName);
+				break; case CF::groupSizeX           : dst.groupSize.x          = result(CF::groupSizeX);
+				break; case CF::groupSizeY           : dst.groupSize.y          = result(CF::groupSizeY);
 			}
 			#undef result
 		}

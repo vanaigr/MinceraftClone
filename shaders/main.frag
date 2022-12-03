@@ -50,9 +50,9 @@ ivec3 calcDirSign(const vec3 dir) {
 }
 
 
-in vec4 gl_FragCoord;
-layout(location = 0) out vec4 color;
-layout(location = 1) out vec4 brightColor;
+//in vec4 gl_FragCoord;
+//layout(location = 0) out vec4 color;
+//layout(location = 1) out vec4 brightColor;
 
 layout(std140) uniform Properties {
 	ivec2 windowSize;
@@ -244,7 +244,7 @@ vec3 at(const Ray r, const float t) {
 
 // AABB //
 //copied from Chunk.h PackedAABB
-restrict readonly buffer ChunksBounds {
+buffer ChunksBounds {
     uint data[];
 } aabb;
 
@@ -730,28 +730,6 @@ int paramsPosOffset(const int pos) { return size - (pos+1) * sizeofParams; }
 int resultPosOffset(const int pos) { return pos * sizeofResult; }
 
 ////
-restrict buffer TraceTest {
-	uint data[];
-} traceB;
-const int maxParams = 20;
-
-//only one or none can be active at the same time
-#define TEST_RESOLVE_COMBINE 0
-#define TEST_FIND 0
-//only one or none can be active at the same time
-#define WRITE_TRACE 0
-#define READ_TRACE 0
-
-//ERROR: global const initializers must be constant
-/*const*/ ivec3 fragCoord = ivec3(floor(gl_FragCoord));
-/*const*/ int maxPosOffset = int((fragCoord.x + fragCoord.y * windowSize.x) * (maxParams * sizeofParams + 1) + maxParams * sizeofParams);
-uint getMaxGetPos() { return traceB.data[maxPosOffset]; }
-int paramsPosOffsetTrace(const int pos) { return int((fragCoord.x + fragCoord.y * windowSize.x) * (maxParams * sizeofParams + 1) + pos * sizeofParams); }
-
-int setParamsPos = 0;
-int getParamsPos = 0;
-
-////
 void writeParamsStack(const Params it, const int position) {
 	const int offset = paramsPosOffset(position);
 	
@@ -771,34 +749,6 @@ void writeParamsStack(const Params it, const int position) {
 		| (uint(it.last) << 30);
 		
 	stack[offset+7] = (it.id & 0xffffu) | (((it.bias - minBias) & 0xfu) << 16) | (it.data << 24);
-}
-
-void writeParamsTrace(const Params it, const int position) {
-	if(setParamsPos < 0 || setParamsPos >= maxParams) discard;
-	
-	const int offset = paramsPosOffsetTrace(setParamsPos);
-	
-	if(offset < 0 || offset >= traceB.data.length()) discard;
-
-	traceB.data[offset+0] = floatBitsToUint(it.ray.orig.x);
-	traceB.data[offset+1] = floatBitsToUint(it.ray.orig.y);
-	traceB.data[offset+2] = floatBitsToUint(it.ray.orig.z);
-	
-	traceB.data[offset+3] = floatBitsToUint(it.ray.dir.x);
-	traceB.data[offset+4] = floatBitsToUint(it.ray.dir.y);
-	traceB.data[offset+5] = floatBitsToUint(it.ray.dir.z);
-	
-	traceB.data[offset+6] = 
-		(packHalf2x16(vec2(it.distance, 0)) & 0xffffu)
-		| ((it.rayId & 7u) << 16)
-		| ((it.rayType & 7u) << 19)
-		| ((uint(it.parent) & 0xffu) << 22)
-		| (uint(it.last) << 30);
-		
-	traceB.data[offset+7] = (it.id & 0xffffu) | (((it.bias - minBias) & 0xfu) << 16) | (it.data << 24);
-
-	setParamsPos++;
-	traceB.data[maxPosOffset] = setParamsPos;
 }
 
 Params readParamsStack(const int position) {
@@ -828,113 +778,21 @@ Params readParamsStack(const int position) {
 	);
 }
 
-Params readParamsTrace(const int position) {
-	if(getParamsPos < 0 || getParamsPos >= getMaxGetPos()) discard;
-	
-	const int offset = paramsPosOffsetTrace(getParamsPos);
-	
-	if(offset < 0 || offset >= traceB.data.length()) discard;
-
-	getParamsPos++;
-	return Params(
-		Ray(
-			vec3(
-				uintBitsToFloat(traceB.data[offset+0]),
-				uintBitsToFloat(traceB.data[offset+1]),
-				uintBitsToFloat(traceB.data[offset+2])
-			),
-			vec3(
-				uintBitsToFloat(traceB.data[offset+3]),
-				uintBitsToFloat(traceB.data[offset+4]),
-				uintBitsToFloat(traceB.data[offset+5])
-			)
-		),
-		unpackHalf2x16(traceB.data[offset+6]).x,
-		int((traceB.data[offset+7] >> 16) & 0xfu) + minBias,
-		(traceB.data[offset+7]) & 0xffffu,
-		(traceB.data[offset+7] >> 24),
-		(traceB.data[offset+6] >> 16) & 7u,
-		(traceB.data[offset+6] >> 19) & 7u,
-		(int(traceB.data[offset+6] << 2) >> (22+2)), //sign extended shift
-		bool((traceB.data[offset+6] >> 30) & 1u)
-	);
+void writeStartParams(const Params it, const int position) {
+	writeParamsStack(it, position);
 }
 
-void writeStartParams(const Params it, const int position);
-void writeEndParams(const Params it, const int position);
+void writeEndParams(const Params it, const int position) {
+	writeParamsStack(it, position);
+}
 
-Params readStartParams(const int position);
-Params readEndParams(const int position);
+Params readStartParams(const int position) {
+	return readParamsStack(position);
+}
 
-#if TEST_RESOLVE_COMBINE
-	void writeStartParams(const Params it, const int position) {
-		writeParamsStack(it, position);
-	}
-	
-	void writeEndParams(const Params it, const int position) {
-		writeParamsStack(it, position);
-	}
-
-	Params readStartParams(const int position) {
-		return readParamsStack(position);
-	}
-
-	Params readEndParams(const int position) {
-		#if READ_TRACE
-		  const Params it = readParamsTrace(position);
-		#else
-		  const Params it = readParamsStack(position);
-		#endif
-		
-		#if WRITE_TRACE
-		  writeParamsTrace(it, position);
-		#endif
-		
-		return it;
-	}
-#elif TEST_FIND
-	void writeStartParams(const Params it, const int position) {
-		writeParamsStack(it, position);
-		#if WRITE_TRACE
-		  writeParamsTrace(it, position);
-		#endif
-	}
-	
-	void writeEndParams(const Params it, const int position) {
-		#if !(READ_TRACE) //we can read more Params than fits in stack[], so when they are written back position may be out of bounds
-		writeParamsStack(it, position);
-		#endif
-	}
-
-	Params readStartParams(const int position) {
-		#if READ_TRACE
-		  getParamsPos = position;
-		  return readParamsTrace(position);
-		#else
-		  return readParamsStack(position);
-		#endif
-	}
-
-	Params readEndParams(const int position) {
-		return readParamsStack(position);	
-	}
-#else
-	void writeStartParams(const Params it, const int position) {
-		writeParamsStack(it, position);
-	}
-	
-	void writeEndParams(const Params it, const int position) {
-		writeParamsStack(it, position);
-	}
-	
-	Params readStartParams(const int position) {
-		return readParamsStack(position);
-	}
-	
-	Params readEndParams(const int position) {
-		return readParamsStack(position);
-	}
-#endif
+Params readEndParams(const int position) {
+	return readParamsStack(position);
+}
 
 void writeResult(const Result it, const int position) {
 	const int offset = resultPosOffset(position);
@@ -1414,7 +1272,7 @@ void combineSteps(const int currentIndex, const int lastIndex) {
 				else continue;
 			}
 			
-			if(inner.rayId != 0 && inner.rayId != 1) discard;
+			//if(inner.rayId != 0 && inner.rayId != 1) discard;
 			const bool reflect = inner.rayId == 1;
 			
 			const vec3 innerCol = inner.color * (both ? (reflect ? fresnel : 1 - fresnel) : 1.0) * (isLighting ? 1.0 / (1 + inner.depth*inner.depth) : 1.0);
@@ -1962,13 +1820,90 @@ uint colorToBin(const vec3 hdrColor) {
 	return clamp(int((log2(lum) - minLogLum) * x), 0, 255);
 }
 
+const uint local_size_x = 8, local_size_y = 8;
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba16f, binding = 0) uniform image2D colorT;
+layout(rgba16f, binding = 1) uniform image2D brightColorT;
+
+uniform ivec2 groupOffset;
+
+layout(binding = 0) uniform atomic_uint one;
+
+uniform uint a;
+
+
 void main() {
-	const vec2 coordOffset = 0.25*vec2(rand(gl_FragCoord.xy), rand(-gl_FragCoord.xy));
-    const vec2 coord = (gl_FragCoord.xy + coordOffset - windowSize.xy / 2) * 2 / windowSize.xy;
+	const uint blockGroupDimX = 1;
+	const uint blockGroupDimY = 1;
+	const uint blockGroupCount = blockGroupDimX * blockGroupDimY;
+	
+	const uint workGroupIndex0 = gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x;
+	const uint subdiv = 1;
+	const uint inSubdivIndex = workGroupIndex0 / subdiv;
+	const uint   subdivIndex = workGroupIndex0 % subdiv;
+	//const uint workGroupIndex = (workGroupIndex0 / subdiv) + (workGroupIndex0 / subdiv / blockGroupCount) * blockGroupCount + (workGroupIndex0 % subdiv) * blockGroupCount;
+	const uint workGroupIndex = (inSubdivIndex / blockGroupCount) * blockGroupCount * subdiv + subdivIndex * blockGroupCount + (inSubdivIndex % blockGroupCount);
+	
+	const uint blockIndex       = workGroupIndex / blockGroupCount;
+	const uint workgroupInBlock = workGroupIndex % blockGroupCount;
+	
+	const uint blocksInGridX = gl_NumWorkGroups.x / blockGroupDimX;
+	
+	const uvec2 workGroupId = uvec2(
+		(workgroupInBlock % blockGroupDimX) + blockGroupDimX * (blockIndex % blocksInGridX),
+		(workgroupInBlock / blockGroupDimX) + blockGroupDimY * (blockIndex / blocksInGridX)
+	);
+	
+	const uint halfY = local_size_y/2u;
+	
+	const uvec2 localInvocationId = 
+	gl_LocalInvocationID.xy;
+	//uvec2(
+	//	(gl_LocalInvocationIndex / halfY) % local_size_x,
+	//	(gl_LocalInvocationIndex % halfY) + halfY * (gl_LocalInvocationIndex / (halfY * local_size_x))
+	//);
+	//gl_WorkGroupID * gl_WorkGroupSize + gl_LocalInvocationID;
+	const uvec2 globalInvocationID = workGroupId * gl_WorkGroupSize.xy + localInvocationId;
+	//const uvec2 globalInvocationID = gl_GlobalInvocationID.xy;
+	
+	const ivec2 fragCoord = groupOffset + ivec2(globalInvocationID.xy);
+	
+	const vec2 coordOffset = 0.25*vec2(rand(fragCoord.xy), rand(-fragCoord.xy));
+    const vec2 coord = (fragCoord.xy + coordOffset - windowSize.xy / 2) * 2 / windowSize.xy;
+	
 	
 	const vec3 forwardDir = cross(topDir, rightDir);
     const vec3 rayDir_ = rightDir * coord.x / projection[0].x + topDir * coord.y / projection[1].y + forwardDir;
     const vec3 rayDir = normalize(rayDir_);
+	
+#if 0
+	aabb.data[0] = floatBitsToUint(rayDir.x);
+	aabb.data[1] = floatBitsToUint(rayDir.y);
+	aabb.data[2] = floatBitsToUint(rayDir.z);
+	
+	for(int i = 0; i < 64; i++) {
+		aabb.data[i%3] += (gl_SubGroupInvocationARB % (a+1) == 0 ? 3 : 2) * i * a;
+	}
+	
+	vec3 color;
+	color.x = uintBitsToFloat(aabb.data[0]) + fragCoord.x * a;
+	color.y = uintBitsToFloat(aabb.data[1]) + fragCoord.y * a;
+	color.z = uintBitsToFloat(aabb.data[2]) + (fragCoord.x + fragCoord.y) * a;
+	
+	imageStore(colorT, fragCoord, vec4(color, 1));
+	
+	return;
+
+#elif 0
+	
+	const uint val = atomicCounterIncrement(one);
+	//imageStore(colorT, fragCoord, vec4((val % (windowSize.x * windowSize.y * 4)) * 4 / float(windowSize.x * windowSize.y)));
+	//imageStore(colorT, fragCoord, vec4(val / float(windowSize.x * windowSize.y)));
+	//imageStore(colorT, fragCoord, vec4(val % (blockGroupCount * 16 * 16)) / (blockGroupCount * 16 * 16));
+	imageStore(colorT, fragCoord, vec4(val % (16 * 16)) / (16 * 16));
+	return;
+	
+#else
 	
 	const Ray ray = Ray(startCoord, rayDir);
 
@@ -1979,14 +1914,19 @@ void main() {
 	const float b = 11;
 	const float x = (brightness - offset) * b;
 	
+	vec4 brightColor;
     if(x >= 0) brightColor = vec4(col * (log(x+1)*offset + offset), 1.0);
 	else brightColor = vec4(col * exp(x) * offset, 1.0);
 	
+	imageStore(brightColorT, fragCoord, brightColor);
+	
 	atomicAdd(luminance.data[colorToBin(col)], 1);
 	
-	color = vec4(col, 1);
+	imageStore(colorT, fragCoord, vec4(col, 1));
 	
 	#if DEBUG
-	if(anyInvocationARB(exit_)) { color = vec4(exitVec3, 1.0); return; }
+	//if(anyInvocationARB(exit_)) { color = vec4(exitVec3, 1.0); return; }
 	#endif
+
+#endif
 }

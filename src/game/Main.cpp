@@ -228,6 +228,7 @@ enum SSBOs : GLuint {
 static constexpr GLuint traceTest_b{ 10 };
 static GLuint traceTest_ssbo;
 
+
 static GLuint ssbos[ssbosCount];
 static GLuint const	
 	&chunksIndices_ssbo    { ssbos[chunksIndices_b] },
@@ -617,6 +618,7 @@ void gpuBuffersReseted() {
 		
 }
 
+static vec2i groupSize{ 4, 8 };
 
 static Reload::Flags reloadConfig() {
 	Reload::Flags flags{};
@@ -630,10 +632,12 @@ static Reload::Flags reloadConfig() {
 		cfg.chunkUpdatesPerFrame = chunkUpdatesPerFrame;
 		cfg.lockFramerate = lockFramerate;
 		cfg.worldName = worldName;
+		cfg.groupSize = groupSize;
 		
 	parseConfigFromFile(cfg);
 	
 	if(viewDistance != cfg.viewDistance) flags |= Reload::ssbo;
+	if(groupSize != cfg.groupSize) flags |= Reload::shader;
 	
 	viewDistance = cfg.viewDistance;
 	loadChunks = cfg.loadChunks;
@@ -643,6 +647,7 @@ static Reload::Flags reloadConfig() {
 	chunkUpdatesPerFrame = cfg.chunkUpdatesPerFrame;
 	lockFramerate = cfg.lockFramerate;
 	worldName = cfg.worldName;
+	groupSize = cfg.groupSize;
 	
 	return flags;
 }
@@ -876,8 +881,9 @@ static void reloadShaders() {
 		mainProgram = glCreateProgram();
 		ShaderLoader sl{};
 
-		sl.addShaderFromCode(triangleVertex, GL_VERTEX_SHADER  , "main vertex");
-		sl.addShaderFromProjectFileName("shaders/main.frag", GL_FRAGMENT_SHADER, "main shader");
+		//sl.addShaderFromCode(triangleVertex, GL_VERTEX_SHADER  , "main vertex");
+		//sl.addShaderFromProjectFileName("shaders/main.frag", GL_FRAGMENT_SHADER, "main shader");
+		sl.addShaderFromProjectFileName("shaders/main.frag", GL_COMPUTE_SHADER, "main shader");
 	
 		sl.attachShaders(mainProgram);
 	
@@ -921,7 +927,6 @@ static void reloadShaders() {
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksAO"), chunksAO_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksLighting"), chunksLighting_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "ChunksNeighbourngEmitters"), chunksEmittersGPU_b);
-		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "TraceTest"), traceTest_b);
 		glShaderStorageBlockBinding(mainProgram, glGetProgramResourceIndex(mainProgram, GL_SHADER_STORAGE_BLOCK, "Luminance"), luminance_b);
 		ce
 	}
@@ -1707,7 +1712,8 @@ int main() {
 	
 	TextRenderer textRenderer{};
 	
-	assert(useTraceBuffer == false);//reloadTraceBuffer();
+	//assert(useTraceBuffer == false);//reloadTraceBuffer();
+	reloadTraceBuffer();
 	auto const a1{ std::chrono::steady_clock::now() };
 	reloadConfig();
 	auto const a2{ std::chrono::steady_clock::now() };
@@ -1730,8 +1736,8 @@ int main() {
 	ce
 	
 	//in microseconds
-	Counter<150> frameTime{};
-	Counter<150> timeToTrace{};
+	Counter<30> frameTime{};
+	Counter<30> timeToTrace{};
 	
     while (!glfwWindowShouldClose(window)) {
 		auto const startFrame{ std::chrono::steady_clock::now() };
@@ -1938,7 +1944,30 @@ int main() {
 			if(numpad[3]) glFinish();
 			auto const startTraceTime{ std::chrono::steady_clock::now() };
 			
-			glDrawArrays(GL_TRIANGLE_STRIP, 0, 3); //actual rendering
+			glBindImageTexture(0, render_t, 0, false, 0, GL_WRITE_ONLY, GL_RGBA16F);
+			glBindImageTexture(1, pp1_t   , 0, false, 0, GL_WRITE_ONLY, GL_RGBA16F);
+			
+			auto const groupOffset_u = glGetUniformLocation(mainProgram, "groupOffset");
+			
+			//glDrawArrays(GL_TRIANGLE_STRIP, 0, 3); //actual rendering
+			//for(int y = 0; y < windowSize.y; y += 256) 
+			//for(int x = 0; x < windowSize.x; x += 256) {
+			//	glUniform2i(groupOffset_u, x, y);
+			//	glDispatchCompute(256 / groupSize.x, 256 / groupSize.y, 1);
+			//}
+			
+			unsigned int oneData = 0;
+			GLuint one;
+			glGenBuffers(1, &one);
+			glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, one);
+			glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, &oneData, GL_DYNAMIC_DRAW);
+			glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, one);
+			
+			glDispatchCompute(windowSize.x / groupSize.x, windowSize.y / groupSize.y, 1);
+			glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_ATOMIC_COUNTER_BARRIER_BIT);
+			
+			glDeleteBuffers(1, &one);
+			
 			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 			
 			if(numpad[3]) glFinish();

@@ -1,5 +1,7 @@
 #pragma once
 
+#include<cassert>
+
 template<size_t size>
 class Counter {
 private:
