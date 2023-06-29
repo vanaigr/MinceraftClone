@@ -38,7 +38,7 @@ namespace Blocks {
 		
 		blocksCount,
 	};
-};
+}
 
 namespace {
 	

@@ -103,7 +103,9 @@ make update_sdf
 
 ## Dependencies
 
-In order to build the project you need to have these programs:
+(LINUX) g++, make, pkg-config, libglfw, libglfw-dev, libglew2.1, libglew-dev
+
+(WINDOWS) In order to build the project you need to have these programs:
 
 [GNU Make](https://www.gnu.org/software/make/)
 
@@ -113,11 +115,20 @@ In order to build the project you need to have these programs:
 
 #### Setup the libraries and other utilities
 
+(LINUX) ---
+
+(WINDWS)
 ```console
 setup
 ```
 #### Build and run the game
 
+(LINUX) 
+```console
+./br.sh
+```
+
+(WINDOWS)
 ```console
 make build
 game

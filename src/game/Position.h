@@ -25,20 +25,19 @@ namespace pos {
 	using Chunk      = unit::Unit<UnitsHierarchy, UnitChunk     , vec3i>;
 	using Block      = unit::Unit<UnitsHierarchy, UnitBlock     , vec3i>;
 	using Cube       = unit::Unit<UnitsHierarchy, UnitCube      , vec3i>;
-}
 
-//type conversions
-struct pos::UnitsHierarchy {	
-	using hierarchy = typename unit::ConstructList<Chunk, Block, Cube, Fractional>::type;
-			
-	template<typename T> struct UnitInfo;
-	template<> struct UnitInfo<Chunk>      { static constexpr Fractional::value_type baseFactor = units::fracInChunkDimAsPow2; };
-	template<> struct UnitInfo<Block>      { static constexpr Fractional::value_type baseFactor = units::fracInBlockDimAsPow2; };
-	template<> struct UnitInfo<Cube>       { static constexpr Fractional::value_type baseFactor = units::fracInCubeDimAsPow2;  };
-	template<> struct UnitInfo<Fractional> { static constexpr Fractional::value_type baseFactor = 0;                           };
-};
+    //type conversions
+    struct UnitsHierarchy {	
+        using hierarchy = typename unit::ConstructList<Chunk, Block, Cube, Fractional>::type;
+                
+        template<typename T> struct UnitInfo;
+    };
 
-namespace pos {
+    template<> struct UnitsHierarchy::UnitInfo<Chunk>      { static constexpr Fractional::value_type baseFactor = units::fracInChunkDimAsPow2; };
+    template<> struct UnitsHierarchy::UnitInfo<Block>      { static constexpr Fractional::value_type baseFactor = units::fracInBlockDimAsPow2; };
+    template<> struct UnitsHierarchy::UnitInfo<Cube>       { static constexpr Fractional::value_type baseFactor = units::fracInCubeDimAsPow2;  };
+    template<> struct UnitsHierarchy::UnitInfo<Fractional> { static constexpr Fractional::value_type baseFactor = 0;                           };
+
 	//copies from Units.h, but for positions
 	static constexpr inline Fractional posToFrac(vec3d value) { return Fractional::create((value*units::fracInBlockDim).floor()); }
 	static constexpr inline Fractional posToFracTrunk(vec3d value) { return Fractional::create((value*units::fracInBlockDim).trunc()); }

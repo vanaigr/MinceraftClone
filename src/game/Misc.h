@@ -1,8 +1,9 @@
 #pragma once
 
-#include <type_traits>
-#include <stdint.h>
-#include <cassert>
+#include<type_traits>
+#include<stdint.h>
+#include<cmath>
+#include<cassert>
 #include<iostream>
 
 namespace misc {

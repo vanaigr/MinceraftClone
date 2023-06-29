@@ -32,7 +32,6 @@ namespace units {
 	constexpr int fracInCubeDimAsPow2 = fracInChunkDimAsPow2 - cubesInChunkDimAsPow2; static_assert(fracInCubeDimAsPow2 >= 0);
 	constexpr int fracInCubeDim = 1 << fracInCubeDimAsPow2;
 	
-	
 	struct UnitsHierarchy;
 
 	//units ID
@@ -46,20 +45,18 @@ namespace units {
 	using Chunk      = unit::Unit<UnitsHierarchy, UnitChunk     , int32_t>;
 	using Block      = unit::Unit<UnitsHierarchy, UnitBlock     , int32_t>;
 	using Cube       = unit::Unit<UnitsHierarchy, UnitCube      , int32_t>;
-}
 
-//type conversions
-struct units::UnitsHierarchy {	
-	using hierarchy = typename unit::ConstructList<Chunk, Block, Cube, Fractional>::type;
-			
-	template<typename T> struct UnitInfo;
-	template<> struct UnitInfo<Chunk>      { static constexpr Fractional::value_type baseFactor = fracInChunkDimAsPow2; };
-	template<> struct UnitInfo<Block>      { static constexpr Fractional::value_type baseFactor = fracInBlockDimAsPow2; };
-	template<> struct UnitInfo<Cube>       { static constexpr Fractional::value_type baseFactor = fracInCubeDimAsPow2;  };
-	template<> struct UnitInfo<Fractional> { static constexpr Fractional::value_type baseFactor = 0;                    };
-};
+    struct UnitsHierarchy {	
+        using hierarchy = typename unit::ConstructList<Chunk, Block, Cube, Fractional>::type;
+        template<typename T> struct UnitInfo;
+    };
 
-namespace units {
+    //type conversions
+    template<> struct UnitsHierarchy::UnitInfo<units::Chunk>      { static constexpr Fractional::value_type baseFactor = fracInChunkDimAsPow2; };
+    template<> struct UnitsHierarchy::UnitInfo<units::Block>      { static constexpr Fractional::value_type baseFactor = fracInBlockDimAsPow2; };
+    template<> struct UnitsHierarchy::UnitInfo<units::Cube>       { static constexpr Fractional::value_type baseFactor = fracInCubeDimAsPow2;  };
+    template<> struct UnitsHierarchy::UnitInfo<units::Fractional> { static constexpr Fractional::value_type baseFactor = 0;                    };
+
 	//helpers
 	template<typename Unit, typename Other> constexpr bool fitsIn(Unit const unit, Other const other) {
 		return other <= unit && unit < (other + 1);

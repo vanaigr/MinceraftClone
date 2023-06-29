@@ -1,6 +1,7 @@
 #include"TextRenderer.h"
 
 #include<vector>
+#include<cstring>
 
 #pragma pack(push, 1)
 struct TextParams {
@@ -31,11 +32,11 @@ TextRenderer::TextRenderer() {
 		glVertexAttribPointer (3, 2, GL_FLOAT, GL_FALSE, sizeof(TextParams), (void*)offsetof(TextParams, endUV));
 		glVertexAttribIPointer(4, 1, GL_UNSIGNED_INT   , sizeof(TextParams), (void*)offsetof(TextParams, color));
 	
-		glVertexAttribDivisor(0, 1);
-		glVertexAttribDivisor(1, 1);
-		glVertexAttribDivisor(2, 1);
-		glVertexAttribDivisor(3, 1);
-		glVertexAttribDivisor(4, 1);
+		glVertexAttribDivisorARB(0, 1);
+		glVertexAttribDivisorARB(1, 1);
+		glVertexAttribDivisorARB(2, 1);
+		glVertexAttribDivisorARB(3, 1);
+		glVertexAttribDivisorARB(4, 1);
 	glBindVertexArray(0);
 }
 

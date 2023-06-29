@@ -1,9 +1,13 @@
-﻿#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlanguage-extension-token"
-	#include <GLEW/glew.h>
-#pragma clang diagnostic pop
+﻿#ifdef __clang__
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wlanguage-extension-token"
+      #include <GL/glew.h>
+  #pragma clang diagnostic pop
+#else
+    #include <GL/glew.h>
+#endif
 
-#include <GLFW/glfw3.h>
+#include<GLFW/glfw3.h>
 
 #include"Units.h"
 #include"Position.h"
@@ -60,8 +64,8 @@ GLenum glCheckError_(const char *file, int line) {
 static vec2i windowSize{ 1280, 720 };
 static vec2i newWindowSize{ windowSize };
 
-static vec2d windowSize_d() { return windowSize.convertedTo<double>(); };
-static double aspect() { return windowSize_d().y / windowSize_d().x; };
+static vec2d windowSize_d() { return windowSize.convertedTo<double>(); }
+static double aspect() { return windowSize_d().y / windowSize_d().x; }
 
 static bool lockFramerate{ false };
 
@@ -1284,9 +1288,11 @@ bool checkCanPlaceBlock(pBlock const blockPos) {
 	vec3l const blockEnd{ (relativeBlockPos + pos::Block{1}).value() };
 	
 	/*static_*/assert(width_i % 2 == 0);
+
+    static constexpr decltype(height_i) zero_O_o{}; //not the same as 0ll   (c) GCC
 	
 	return !(
-		misc::intersectsX(0ll       , height_i ,  blockStart.y, blockEnd.y) &&
+		misc::intersectsX(zero_O_o, height_i ,  blockStart.y, blockEnd.y) &&
 		misc::intersectsX(-width_i/2, width_i/2,  blockStart.x, blockEnd.x) &&
 		misc::intersectsX(-width_i/2, width_i/2,  blockStart.z, blockEnd.z)
 	);
@@ -1660,14 +1666,14 @@ void drawBlockHitbox(vec3f const blockRelativePos, float const size, float const
 
 int main() {
 	auto const startupTime{ std::chrono::steady_clock::now() };
-    if (!glfwInit()) return -1;
+    if (!glfwInit()) return 1;
 
 	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
     window = glfwCreateWindow(windowSize.x, windowSize.y, "Minceraft clone", NULL, NULL);
 	
     if (!window) {
         glfwTerminate();
-        return -1;
+        return 2;
     }
 	
     glfwMakeContextCurrent(window);
@@ -1677,9 +1683,9 @@ int main() {
     if (err != GLEW_OK) {
         fprintf(stderr, "Error: %s\n", glewGetErrorString(err));
         glfwTerminate();
-        return -1;
+        return 3;
     }	
-	
+
 	int flags; 
 	glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
 	if (flags & GL_CONTEXT_FLAG_DEBUG_BIT) {

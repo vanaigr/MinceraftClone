@@ -38,8 +38,12 @@ void updateBlockDataWithoutNeighbours(chunk::Chunk const chunk, pBlock const blo
 		levels = _mm_insert_epi16(levels, liquidCube.level, INDEX);\
 	}
 	
+  #ifdef __GNUG__
+    //g++ doesn't recognize that 'ids and 'levels aren't initialized?
+  #elif defined(__clang__)
 	#pragma clang diagnostic push
 	#pragma clang diagnostic ignored "-Wuninitialized"
+  #endif
 	
 	static_assert(pos::cubesInBlockCount == 8);
 	set(0)
@@ -50,12 +54,15 @@ void updateBlockDataWithoutNeighbours(chunk::Chunk const chunk, pBlock const blo
 	set(5)
 	set(6)
 	set(7)
-	
+
+  #ifdef __clang__
 	#pragma clang diagnostic pop
+  #endif
+
 	#undef set
 	
 	auto const areZ{ _mm_cmpeq_epi16(ids, _mm_setzero_si128()) };
-	auto const areZ_{ _mm_shuffle_epi8(areZ, _mm_setr_epi8(0,2,4,6,8,10,12,14, 0,0,0,0,0,0,0,0)) }; //move 16 bit results for 8 bit movemask
+	auto const areZ_{ _mm_shuffle_epi8(areZ, _mm_setr_epi8(0,2,4,6,8,10,12,14, 0,0,0,0,0,0,0,0)) }; //move lower 8 bits from 16 bit results for 8 bit movemask
 	auto const isZ( _mm_movemask_epi8(areZ_) );
 	blockData.liquidCubes = ~isZ;
 		
@@ -63,9 +70,18 @@ void updateBlockDataWithoutNeighbours(chunk::Chunk const chunk, pBlock const blo
 		auto const areAllSame{ _mm_cmpeq_epi16(ids, _mm_set1_epi16(_mm_cvtsi128_si32(ids))) };
 		auto const areFull{ _mm_cmpeq_epi16(levels, _mm_set1_epi16(chunk::LiquidCube::maxLevel)) };
 		auto const areFullSame{ _mm_and_si128(areAllSame, areFull) };
-		/*no shuffling prior to movemask_epi8 because the result is just compared with 0
-		  so the fact that individual cubes' results are duplicated in the mask is not important*/
-		blockData.fullSameLiquid = ~uint16_t(_mm_movemask_epi8(areFullSame)) == 0;
+		/*
+        no shuffling prior to movemask_epi8 because the result is just compared with 0
+	    so the fact that individual cubes' results (16 bit) are duplicated twice 
+        in the mask (1 mask bit == 8 register bits) is not important
+        -----------------
+        g++:
+        error: promoted bitwise complement of an unsigned value is always nonzero [-Werror=sign-compare]
+            blockData.fullSameLiquid = ~uint16_t(_mm_movemask_epi8(areFullSame)) == 0;
+
+        thanks c++
+        */
+		blockData.fullSameLiquid = uint16_t(~_mm_movemask_epi8(areFullSame)) == 0;
 	}
 
 	chunk.blocksData()[blockCoord] = blockData;

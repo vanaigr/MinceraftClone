@@ -101,9 +101,7 @@ void parseConfigFromFile(Config &dst) {
 				std::cout << "ERROR: no value for `" << name << "`\n";
 				return;
 			}
-			#pragma clang diagnostic push
-			#pragma clang diagnostic ignored "-Winvalid-token-paste"
-			#define result(FUNCTION) [&](){ size_t count; decltype(auto) res{ std::##FUNCTION##(value, &count) }; if(count != value.size()) throw int(); else return res; }()
+			#define result(FUNCTION) [&](){ size_t count; decltype(auto) res{ std:: FUNCTION (value, &count) }; if(count != value.size()) throw int(); else return res; }()
 				
 			switch(CFT[field]) {
 				break; case FT::NO_VALUE : parsedValue.emplace<indexOf(FT::NO_VALUE)>(NoValue{});
@@ -115,11 +113,10 @@ void parseConfigFromFile(Config &dst) {
 					else if(res == 0) return false;
 					else throw int();
 				}() );
-				break; case FT::STRING   : parsedValue.emplace<indexOf(FT::STRING  )>(value       );
+				break; case FT::STRING   : parsedValue.emplace<indexOf(FT::STRING  )>(value);
 			}
 			
 			#undef result
-			#pragma clang diagnostic pop
 		} 
 		catch(...) {
 			std::cout << "ERROR: cannot parse value `" << value << "` for property `" << name << "`\n";

@@ -1,12 +1,9 @@
 #include "ShaderLoader.h"
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlanguage-extension-token"
-	#include <GLEW/glew.h>
-#pragma clang diagnostic pop
 #include<vector>
 #include<string>
-#include <iostream>
-#include <fstream>
+#include<iostream>
+#include<fstream>
+#include<memory>
 
 GLuint ShaderLoader::addShaderFromCode(std::string_view const shaderCode, unsigned int const shaderType, std::string_view const name) {
 	auto const shaderId{ glCreateShader(shaderType) };

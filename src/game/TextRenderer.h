@@ -1,8 +1,13 @@
 #pragma once
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlanguage-extension-token"
-	#include "GLEW/glew.h"
-#pragma clang diagnostic pop
+
+#ifdef __clang__
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wlanguage-extension-token"
+      #include<GL/glew.h>
+  #pragma clang diagnostic pop
+#else
+      #include <GL/glew.h>
+#endif
 
 #include"font/Font.h"
 #include"Vector.h"

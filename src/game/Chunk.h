@@ -23,8 +23,6 @@ namespace chunk {
 	using BlockInChunkIndex = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uBlock>()).val() - 1) < (1 << 15) );
 	using CubeInChunkIndex  = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uCube >()).val() - 1) < (1 << 15) );
 	
-  #pragma clang diagnostic push
-  #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
 	inline constexpr bool checkBlockCoordInChunkValid(vec3i const coord) {
 		return coord.inMMX(vec3i{0}, vec3i{units::blocksInChunkDim}).all();
 	}
@@ -32,7 +30,7 @@ namespace chunk {
 		return checkBlockCoordInChunkValid(coord.val());
 	}
 	inline constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
-		return index >= 0 && index < pos::blocksInChunkCount;
+		return index < pos::blocksInChunkCount;
 	}
 	
 	inline constexpr bool checkCubeCoordInChunkValid(vec3i const coord) {
@@ -42,7 +40,7 @@ namespace chunk {
 		return checkCubeCoordInChunkValid(coord.val());
 	}
 	inline constexpr bool checkCubeIndexInChunkValid(uint16_t const index) {
-		return index >= 0 && index < pos::cubesInChunkCount;
+		return index < pos::cubesInChunkCount;
 	}
 	
 	inline constexpr bool checkCubeCoordInBlockValid(pCube const coord) {
@@ -52,7 +50,6 @@ namespace chunk {
 	inline constexpr bool checkCubeIndexInBlockValid(uint8_t const index) {
 		return index < pos::cubesInBlockCount;
 	}
-  #pragma clang diagnostic pop
 	  
 	//used in main.shader
 	  inline constexpr int16_t blockIndex(vec3i const coord) {
@@ -238,8 +235,8 @@ namespace chunk {
 		constexpr Block(id_t const id, cubes_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
 			if(id == 0 || cubes == 0) data_ = 0;
 		}
-		uint32_t data() const { return data_; }
-		cubes_t cubes() const { return cubes_t(data_ >> 24); }
+		constexpr uint32_t data() const { return data_; }
+		constexpr cubes_t cubes() const { return cubes_t(data_ >> 24); }
 		constexpr id_t id() const { return id_t(data_ & ((1 << 16) - 1)); }
 		
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
@@ -248,7 +245,7 @@ namespace chunk {
 		constexpr bool cubeAtCoord(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cubeAtIndex(uint8_t const index) const { return blockCube(cubes(), index); }
 		
-		explicit operator bool() const { return id() != 0; }
+		constexpr explicit operator bool() const { return id() != 0; }
 		constexpr bool isEmpty() const { return id() == 0; }
 		constexpr bool empty() const { return isEmpty(); }	
 	};
@@ -332,21 +329,19 @@ namespace chunk {
 		
 		bool isInvalidated() const { return !ao || !blocks || !lighting || !neighbouringEmitters; }
 		
-	#pragma clang diagnostic push
-	#pragma clang diagnostic ignored "-Winvalid-token-paste"
-	
-		#define o(field) static_cast<uint8_t>(f.##field | s.##field)
+	  #define op(OPERATION, FIELD) static_cast<uint8_t>(f. FIELD  OPERATION  s. FIELD)
 		friend StatusFlags operator|(StatusFlags const f, StatusFlags const s) {
+          #define o(FIELD) op(bitor, FIELD)
 			return { o(ao), o(blocks), o(lighting), o(neighbouringEmitters) };
+          #undef o
 		}
-		#undef o
 		
-		#define o(field) static_cast<uint8_t>(f.field & s.##field)
 		friend StatusFlags operator&(StatusFlags const f, StatusFlags const s) {
+          #define o(FIELD) op(bitand, FIELD)
 			return { o(ao), o(blocks), o(lighting), o(neighbouringEmitters) };
+          #undef o
 		}
-		#undef o
-	#pragma clang diagnostic pop
+      #undef op
 		
 		StatusFlags &operator|=(StatusFlags const s) { return *this = (*this | s); }	
 		StatusFlags &operator&=(StatusFlags const s) { return *this = (*this & s); }

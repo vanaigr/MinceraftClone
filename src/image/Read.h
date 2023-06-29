@@ -1,12 +1,34 @@
 #pragma once
 
 #include<memory>
+#include<cstdio>
+#include<cerrno>
 
 struct Image {
     unsigned long sizeX;
     unsigned long sizeY;
     std::unique_ptr<char[]> data;
 };
+
+
+#ifdef __linux__
+#include<cassert> 
+#include<cstring>
+#include<cstdlib>
+
+using errno_t = int;
+
+errno_t fopen_s(FILE **f, const char *name, const char *mode) {
+    errno_t ret = 0;
+    assert(f);
+    *f = fopen(name, mode);
+    /* Can't be sure about 1-to-1 mapping of errno and MS' errno_t */
+    if (!*f)
+        ret = errno;
+    return ret;
+}
+#endif
+
 
 //https://stackoverflow.com/a/42043320/15291447
 inline int ImageLoad(char const* filename, Image* image) {

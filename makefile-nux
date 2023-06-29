@@ -1,0 +1,97 @@
+INCLUDES=-I ./src
+SOURCE_DIR=src
+SHADERS_DIR=shaders
+OBJECT_DIR=obj
+WS= -Wall -Werror -Wextra -Wno-unused-parameter -Wno-unused-variable\
+	-Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-label\
+	-Wno-empty-body
+
+
+CFLAGS= -O3 -std=c++17 -pedantic -c $(WS) -mssse3
+PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU -D _CRT_SECURE_NO_WARNINGS
+
+LIBS= -lGLEW `pkg-config --cflags glfw3` `pkg-config --static --libs glfw3` -lGL
+UPDATE_FONT_EXECUTABLE=updateFont.exe
+SDF_EXECUTABLE=sdf.exe
+
+GAME_EXECUTABLE=game.exe
+UPDATE_FONT_EXECUTABLE=updateFont.exe
+SDF_EXECUTABLE=sdf.exe
+
+CC=g++
+
+
+GCH:=$(shell git log --format=%H -n1)
+GCM=$(shell git log --format=%s -n1)
+GCB=$(shell git branch --show current)
+GCD=$(shell git log --format=%ad -n1 --date=iso)
+PPFLAGS+= -DCOMMIT_HASH="\"$(GCH)\"" -DCOMMIT_NAME="\"$(GCM)\"" -DCOMMIT_BRANCH="\"$(GCB)\"" -DCOMMIT_DATE="\"$(GCD)\""
+
+//https://stackoverflow.com/a/12959764/18704284
+rwildcard=$(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))
+SOURCE_FILES=$(subst $(SOURCE_DIR)/,,$(call rwildcard,$(SOURCE_DIR)/,*.cpp))
+
+
+define MAKE_EXECUTABLE=
+$(1)_OBJECT_FILES=$(subst .cpp,.o,$(addprefix $(OBJECT_DIR)/,$(2)))
+$(1): $$($(1)_OBJECT_FILES)
+	@echo building $(1)
+	@ $(CC) $$($(1)_OBJECT_FILES) -o "$(1)" $(LIBS)
+
+	$(3)
+endef
+
+
+./assets/font.fnt:
+	@echo ERROR: could not find font description file: $@
+	@exit -1
+./assets/font.bmp:
+	@echo ERROR: could not find font bitmap
+	@if exist "./assets/font.png" @echo bitmap can be made from the "./assets/font.png" file
+	@exit -1
+
+.PHONY: update_font update_sdf
+
+update_font ./assets/font.txt:$(eval $(call MAKE_EXECUTABLE,$(UPDATE_FONT_EXECUTABLE),UpdateFont.cpp,))\
+								./assets/font.fnt $(UPDATE_FONT_EXECUTABLE)
+	@echo updating font file						
+	@./$(UPDATE_FONT_EXECUTABLE)
+	
+update_sdf ./assets/sdfFont.bmp:$(eval $(call MAKE_EXECUTABLE,$(SDF_EXECUTABLE),$(filter SDF/% font/% image/%,$(SOURCE_FILES))))\
+								./assets/font.txt ./assets/font.bmp $(SDF_EXECUTABLE)
+	@echo updating SDF font image
+	@./$(SDF_EXECUTABLE)
+	
+build_game:: $(eval $(call MAKE_EXECUTABLE,$(GAME_EXECUTABLE),$(filter game/% font/% image/%,$(SOURCE_FILES))))\
+			./assets/font.txt ./assets/sdfFont.bmp $(GAME_EXECUTABLE)
+
+
+build-run:: build
+	./$(GAME_EXECUTABLE)
+
+build:: build_game
+
+$(OBJECT_DIR)/%.o: $(SOURCE_DIR)/%.cpp
+	@echo compiling $<
+	@mkdir -p "$(dir $@)"
+	@ $(CC) $(PPFLAGS) $(INCLUDES) $(CFLAGS) "$<" -o "$@"
+
+clear::
+	@rm -rf $(OBJECT_DIR)
+	@rm -f $(GAME_EXECUTABLE)
+	@rm -f $(UPDATE_FONT_EXECUTABLE)
+	@rm -f $(SDF_EXECUTABLE)
+	@rm -f ".\assets\font.txt"
+	@rm -f ".\assets\sdfFont.bmp"
+
+
+SHADERS_10=$(wildcard $(SHADERS_DIR)/*.frag)
+SHADERS_20=$(wildcard $(SHADERS_DIR)/*.vert)
+SHADERS=$(SHADERS_10) $(SHADERS_20)
+
+.FORCE:
+$(SHADERS_DIR)/%: .FORCE
+	@echo validating $@
+	@ dependencies/glslangValidator.exe "$@"
+
+glslValidate:: $(SHADERS)

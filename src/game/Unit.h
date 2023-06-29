@@ -1,6 +1,7 @@
 #pragma once
 
 #include<type_traits>
+#include<utility>
 
 namespace unit {
 	template<typename... Args>
@@ -185,23 +186,20 @@ namespace unit {
 			return this->val() == this->in<Other>().val();
 		}
 		
-		#define comp(OPERATOR) constexpr friend auto operator##OPERATOR (This const c1, This const c2) { return c1.val() OPERATOR c2.val(); } \
+		#define comp(OPERATOR) constexpr friend auto operator OPERATOR (This const c1, This const c2) { return c1.val() OPERATOR c2.val(); } \
 		\
-		template<typename Other, typename = std::enable_if_t<HaveCommon<Hierarchy, This, Other>::value>> constexpr friend auto operator##OPERATOR (This const c1, Other const c2) { \
+		template<typename Other, typename = std::enable_if_t<HaveCommon<Hierarchy, This, Other>::value>> constexpr friend auto operator OPERATOR (This const c1, Other const c2) { \
 			using common = typename CommonType<Hierarchy, This, Other>::type; \
 			\
 			return Cast<Hierarchy, This , common>::castUnit(c1) OPERATOR Cast<Hierarchy, Other, common>::castUnit(c2); \
 		}
 		
-		#pragma clang diagnostic push
-		#pragma clang diagnostic ignored "-Winvalid-token-paste"
-		  comp(<)
-		  comp(<=)
-		  comp(>)
-		  comp(>=)
-		  comp(==)
-		  comp(!=)
-		#pragma clang diagnostic pop
+		comp(<)
+		comp(<=)
+		comp(>)
+		comp(>=)
+		comp(==)
+		comp(!=)
 		
 		#undef comp
 		
