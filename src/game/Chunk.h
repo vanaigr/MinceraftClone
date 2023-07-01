@@ -233,13 +233,13 @@ namespace chunk {
 	private:
 		uint32_t data_;
 	public:
-		Block() = default;
-		explicit constexpr Block(uint32_t const data__) : data_{ data__ } {}
+		constexpr Block() = default;
+		constexpr explicit Block(uint32_t const data__) : data_{ data__ } {}
 		constexpr Block(id_t const id, cubes_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
 			if(id == 0 || cubes == 0) data_ = 0;
 		}
-		uint32_t data() const { return data_; }
-		cubes_t cubes() const { return cubes_t(data_ >> 24); }
+		constexpr uint32_t data() const { return data_; }
+		constexpr cubes_t cubes() const { return cubes_t(data_ >> 24); }
 		constexpr id_t id() const { return id_t(data_ & ((1 << 16) - 1)); }
 		
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
@@ -248,13 +248,15 @@ namespace chunk {
 		constexpr bool cubeAtCoord(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cubeAtIndex(uint8_t const index) const { return blockCube(cubes(), index); }
 		
-		explicit operator bool() const { return id() != 0; }
+		constexpr explicit operator bool() const { return id() != 0; }
 		constexpr bool isEmpty() const { return id() == 0; }
 		constexpr bool empty() const { return isEmpty(); }	
 	};
 	
 	struct OptionalChunkIndex {
 	// -(chunkIndex) - 1	
+	// everything here can be simplified because  -x-1 == ~x
+	// also every function can be marked constexpr
 	private: int n;
 	public:
 		OptionalChunkIndex() = default;
@@ -290,6 +292,7 @@ namespace chunk {
 			return vec3i(dir.notEqual(0)).dot(1) == 1 && dir.abs().equal(1).any();
 		}
 		
+		//constexpr?
 		//used in main.shader
 			static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
 				assert(checkIndexValid(neighbourIndex));
@@ -300,10 +303,7 @@ namespace chunk {
 			static uint8_t dirAsIndex(vec3i const dir) {
 				assert(checkDirValid(dir));
 				auto const result{ (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) };
-				if(indexAsDir(result) != dir) {
-					std::cerr << "err: " << dir << ' ' << result << '\n';
-					assert(false);
-				}
+				assert(indexAsDir(result) == dir);
 				return result; 
 			}
 			static uint8_t mirror(uint8_t index) {
@@ -576,11 +576,11 @@ namespace chunk {
 		}
 	};
 	
-	/*filled to max capacity with indices of certain blocks in 3D Moore neighbourhood*/
+	/*filled to max capacity with indices of certain blocks in 3D Moore neighbourhood of a chunk*/
 	struct Chunk3x3BlocksList {
 		static int constexpr sidelength = 3 * units::blocksInChunkDim;
-		static_assert(pos::cubed(sidelength)-1 >= (1<<16), "sadly, we can't store block coords in 27 adjecent chunks in 16 bits");
-		static_assert(pos::cubed(sidelength)-1 <  (1<<17), "but we can store the coordinates in 17 bits");
+		static_assert(pos::cubed(sidelength) >  (1<<16), "sadly, we can't store block coords of 27 adjecent chunks in 16 bits");
+		static_assert(pos::cubed(sidelength) <= (1<<17), "but we can store the coordinates in 17 bits");
 		
 		static int constexpr capacity = 30;
 		
@@ -804,6 +804,7 @@ namespace chunk {
 		}
 	};
 	
+	//old version
 	struct Move_to_neighbour_Chunk {
 	public:
 		static bool diagonalNeighbourDirValid(vec3i const dir) {
@@ -816,7 +817,7 @@ namespace chunk {
 		Move_to_neighbour_Chunk() = delete;
 		
 		Move_to_neighbour_Chunk(Chunks &chunks, OptionalChunkIndex oci) :
-			chunk{ chunks[oci.get()] }, /*index -1 may be out of bounds but we need to keep Chunks&*/
+			chunk{ chunks[oci.get()] }, /*optional index may be invalid but we need to keep Chunks&*/
 			valid{ oci.is() }
 		{}
 		Move_to_neighbour_Chunk(Chunks &chunks) : chunk{chunks[0]}, valid{ false } {}/*index 0 may be out of bounds but we need to keep Chunks&*/

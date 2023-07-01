@@ -9,6 +9,11 @@
 #define USE_SIMD 1
 
 #if USE_SIMD
+//Why is this code faster? it looks like it would be slower, because it does all of the reads close together, and then performs operations on the values read.
+//The calculations in this function must be performed after all of the reads are completed.
+//
+//Maybe it is faster because there is a bug in how 'fullSameLiquid is calculated (g++ werning: it is always 1), 
+//and the compiler just removes the part of the code responsible for updating the value
 void updateBlockDataWithoutNeighbours(chunk::Chunk const chunk, pBlock const blockCoord) {
 	assert(chunk::checkBlockCoordInChunkValid(blockCoord));
 
@@ -55,16 +60,19 @@ void updateBlockDataWithoutNeighbours(chunk::Chunk const chunk, pBlock const blo
 	#undef set
 	
 	auto const areZ{ _mm_cmpeq_epi16(ids, _mm_setzero_si128()) };
-	auto const areZ_{ _mm_shuffle_epi8(areZ, _mm_setr_epi8(0,2,4,6,8,10,12,14, 0,0,0,0,0,0,0,0)) }; //move 16 bit results for 8 bit movemask
-	auto const isZ( _mm_movemask_epi8(areZ_) );
+	auto const low8areZ{ _mm_shuffle_epi8(areZ, _mm_setr_epi8(0,2,4,6,8,10,12,14, 0,0,0,0,0,0,0,0)) }; //move lower byte from 16 bit results for 8 bit movemask
+	auto const isZ( _mm_movemask_epi8(low8areZ) );
 	blockData.liquidCubes = ~isZ;
-		
+	
+	//                      V _mm_movemask_epi8(areZ) would probalby be faster in this case
 	if(block.isEmpty() && isZ == 0/*all ids != 0*/) {
-		auto const areAllSame{ _mm_cmpeq_epi16(ids, _mm_set1_epi16(_mm_cvtsi128_si32(ids))) };
+		auto const areAllSame{ _mm_cmpeq_epi16(ids, _mm_set1_epi16(_mm_cvtsi128_si32(ids))) }; //convert to i32 and set1 could probaly be swapped for _mm_shuffle_epi32(ids, 0)
 		auto const areFull{ _mm_cmpeq_epi16(levels, _mm_set1_epi16(chunk::LiquidCube::maxLevel)) };
 		auto const areFullSame{ _mm_and_si128(areAllSame, areFull) };
 		/*no shuffling prior to movemask_epi8 because the result is just compared with 0
 		  so the fact that individual cubes' results are duplicated in the mask is not important*/
+		/*bug:   promoted bitwise complement of an unsigned value is always nonzero (g++)
+		  the code should be: .. = uint16_t(~_mm_movemask_epi8(areFullSame)) == 0;*/
 		blockData.fullSameLiquid = ~uint16_t(_mm_movemask_epi8(areFullSame)) == 0;
 	}
 
@@ -121,11 +129,13 @@ void updateBlockDataNeighboursInfo(chunk::Chunk chunk, pBlock const blockCoord) 
 			auto const neighbourBlockChunk  { neighbourBlockCoord.as<pChunk>() };
 			auto const neighbourBlockInChunk{ neighbourBlockCoord.in<pChunk>() };
 	
+			//looks like it could be const
 			auto chunkIndex{ chunk::MovingChunk{chunk}.offseted(neighbourBlockChunk.val()).getIndex() };
 			if(!chunkIndex.is()) {
 				blockData.neighboursFullSameLiquid = false;
 				return false;
 			}
+			//should probably return this condition instead of returning false in other return statements (except for the first one with neightboutDir==0)
 			if(!blockData.noNeighbours && !blockData.neighboursFullSameLiquid) return true; //break
 			
 			auto const neighbourChunk{ chunks[chunkIndex.get()] };
@@ -136,10 +146,10 @@ void updateBlockDataNeighboursInfo(chunk::Chunk chunk, pBlock const blockCoord) 
 			}
 			
 			if(blockData.neighboursFullSameLiquid) {
-				blockData.neighboursFullSameLiquid &= 
-					neighbourBlockData.neighboursFullSameLiquid
-					&& neighbourChunk.liquid()[neighbourBlockInChunk.as<pCube>()].id //we can pick any cube in block
-					   == blockLiquidId;
+				//							  V   shouldn't is be just .fullSameLiquid ?
+				blockData.neighboursFullSameLiquid &= neighbourBlockData.neighboursFullSameLiquid
+					&& (neighbourChunk.liquid()[neighbourBlockInChunk.as<pCube>()].id //we can pick any cube in block
+						== blockLiquidId);
 			}
 			
 			return false;

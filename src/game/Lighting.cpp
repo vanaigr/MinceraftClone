@@ -31,6 +31,7 @@ inline void iterateCubeNeighboursInColumn(
 		
 		pCube const neighbourCoord{ cubeCoord + neighbourDir };
 		auto const neighbourOffsetChunk{ neighbourCoord.valAs<pChunk>() };
+		//neighbourOffsetChunk .x != 0 && .z != 0
 		if(neighbourOffsetChunk * vec3i{1, 0, 1} != 0) continue;
 		
 		auto const neighbourInChunkCoord{ neighbourCoord - pChunk{neighbourOffsetChunk} };
