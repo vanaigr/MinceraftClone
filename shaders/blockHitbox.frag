@@ -17,5 +17,5 @@ vec3 sampleAtlas(const vec2 offset, const vec2 coord) { //copied from main.frag
 void main() {
 	const vec3 value = sampleAtlas(vec2(31), uv);
 	if(dot(value, vec3(1)) / 3 > 0.9) discard;
-	color = vec4(value, 0.8);
+	color = vec4(value, 0.1);
 }
