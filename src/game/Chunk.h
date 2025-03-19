@@ -19,10 +19,10 @@ static constexpr int chunkColumnChunkYMin = -16;
 
 static constexpr int chunksCoumnChunksCount{ chunkColumnChunkYMax - chunkColumnChunkYMin + 1 };
 
-namespace chunk {	
+namespace chunk {
 	using BlockInChunkIndex = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uBlock>()).val() - 1) < (1 << 15) );
 	using CubeInChunkIndex  = uint16_t; static_assert( pos::cubed((uChunk{1}.as<uCube >()).val() - 1) < (1 << 15) );
-	
+
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
 	inline constexpr bool checkBlockCoordInChunkValid(vec3i const coord) {
@@ -34,7 +34,7 @@ namespace chunk {
 	inline constexpr bool checkBlockIndexInChunkValid(uint16_t const index) {
 		return index >= 0 && index < pos::blocksInChunkCount;
 	}
-	
+
 	inline constexpr bool checkCubeCoordInChunkValid(vec3i const coord) {
 		return coord.inMMX(vec3i{0}, vec3i{units::cubesInChunkDim}).all();
 	}
@@ -44,16 +44,16 @@ namespace chunk {
 	inline constexpr bool checkCubeIndexInChunkValid(uint16_t const index) {
 		return index >= 0 && index < pos::cubesInChunkCount;
 	}
-	
+
 	inline constexpr bool checkCubeCoordInBlockValid(pCube const coord) {
 		return coord.val().inMMX(vec3i{0}, vec3i{units::cubesInBlockDim}).all();
 	}
-	
+
 	inline constexpr bool checkCubeIndexInBlockValid(uint8_t const index) {
 		return index < pos::cubesInBlockCount;
 	}
   #pragma clang diagnostic pop
-	  
+
 	//used in main.shader
 	  inline constexpr int16_t blockIndex(vec3i const coord) {
 		  assert(checkBlockCoordInChunkValid(coord));
@@ -61,82 +61,82 @@ namespace chunk {
 	  }
 	  inline constexpr vec3i indexBlock(uint16_t index) {
 		  assert(checkBlockIndexInChunkValid(index));
-		  return vec3i{ 
-		 	 index % units::blocksInChunkDim, 
-		 	 (index / units::blocksInChunkDim) % units::blocksInChunkDim, 
-		 	 (index / units::blocksInChunkDim / units::blocksInChunkDim) 
+		  return vec3i{
+		 	 index % units::blocksInChunkDim,
+		 	 (index / units::blocksInChunkDim) % units::blocksInChunkDim,
+		 	 (index / units::blocksInChunkDim / units::blocksInChunkDim)
 		  };
 	  }
-	  
+
 	  inline constexpr vec3i cubeCoordInChunk(uint16_t const index) {
 		  assert(checkCubeIndexInChunkValid(index));
 		  return vec3i{
-		  	  index % units::cubesInChunkDim, 
-		  	  (index / units::cubesInChunkDim) % units::cubesInChunkDim, 
-		  	  (index / units::cubesInChunkDim / units::cubesInChunkDim) 
+		  	  index % units::cubesInChunkDim,
+		  	  (index / units::cubesInChunkDim) % units::cubesInChunkDim,
+		  	  (index / units::cubesInChunkDim / units::cubesInChunkDim)
 		  };
 	  }
 	  inline constexpr uint32_t cubeIndexInChunk(vec3i const coord) {
 		  assert(checkCubeCoordInChunkValid(coord));
 		  return coord.x + coord.y*units::cubesInChunkDim + coord.z*units::cubesInChunkDim*units::cubesInChunkDim;
 	  }
-	  
+
 	inline constexpr BlockInChunkIndex blockCoordToIndex(pBlock const coord) { return blockIndex(coord.val()); }
 	inline constexpr pBlock blockIndexToCoord(BlockInChunkIndex const index) { return pBlock{indexBlock(index)}; }
-	
+
 	inline constexpr CubeInChunkIndex cubeCoordToIndex(pCube const coord) { return cubeIndexInChunk(coord.val()); }
 	inline constexpr pCube cubeIndexToCoord(CubeInChunkIndex const index) { return pCube{cubeCoordInChunk(index)}; }
-	
+
 	inline constexpr uint8_t cubeCoordInBlockToIndex(pCube const pos) {
 		assert(checkCubeCoordInBlockValid(pos));
 		auto const coord{ pos.val() };
 		return coord.x + (coord.y << units::cubesInBlockDimAsPow2) + (coord.z << (units::cubesInBlockDimAsPow2*2));
 	}
-	
+
 	inline constexpr pCube cubeIndexInBlockToCoord(uint8_t const index) {
 		assert(checkCubeIndexInBlockValid(index));
 		return pCube(
-			 index                                      % units::cubesInBlockDim, 
-			(index >>  units::cubesInBlockDimAsPow2   ) % units::cubesInBlockDim, 
+			 index                                      % units::cubesInBlockDim,
+			(index >>  units::cubesInBlockDimAsPow2   ) % units::cubesInBlockDim,
 			(index >> (units::cubesInBlockDimAsPow2*2)) % units::cubesInBlockDim
 		);
 	}
-	
-	
+
+
 	template<typename Unit> struct PackedAABB;
-	
+
 	template<> struct PackedAABB<pBlock> { //used in main.frag
 		static_assert( sizeof(BlockInChunkIndex) * 2 <= sizeof(uint32_t), "two block indices must fit into 32 bits" );
 	private:
 		uint32_t data;
 	public:
 		PackedAABB() = default;
-		PackedAABB(pBlock const start, pBlock const end) : data{ 
+		PackedAABB(pBlock const start, pBlock const end) : data{
 			uint32_t(chunk::blockCoordToIndex(start))
-			| (uint32_t(chunk::blockCoordToIndex(end)) << 16) 
+			| (uint32_t(chunk::blockCoordToIndex(end)) << 16)
 		} {}
 		PackedAABB(Area const a) : PackedAABB{ a.first, a.last } {}
-		
+
 		constexpr pBlock first() const { return chunk::blockIndexToCoord(int16_t(data&0xffff)); }
-		constexpr pBlock last() const { return chunk::blockIndexToCoord(int16_t(data>>16)); } 
+		constexpr pBlock last() const { return chunk::blockIndexToCoord(int16_t(data>>16)); }
 	};
-	
+
 	template<> struct PackedAABB<pCube> { //used in main.frag
 		static_assert( sizeof(CubeInChunkIndex) * 2 <= sizeof(uint32_t), "two cube indices must fit into 32 bits" );
 	private:
 		uint32_t data;
 	public:
 		PackedAABB() = default;
-		PackedAABB(pCube const start, pCube const end) : data{ 
+		PackedAABB(pCube const start, pCube const end) : data{
 			uint32_t(chunk::cubeCoordToIndex(start))
-			| (uint32_t(chunk::cubeCoordToIndex(end)) << 16) 
+			| (uint32_t(chunk::cubeCoordToIndex(end)) << 16)
 		} {}
 		PackedAABB(Area const a) : PackedAABB{ a.first, a.last } {}
-		
+
 		constexpr pCube first() const { return chunk::cubeIndexToCoord(int16_t(data&0xffff)); }
-		constexpr pCube last() const { return chunk::cubeIndexToCoord(int16_t(data>>16)); } 
+		constexpr pCube last() const { return chunk::cubeIndexToCoord(int16_t(data>>16)); }
 	};
-	
+
 	template<typename Chunks>
 	struct Chunk_{
 	private:
@@ -144,23 +144,23 @@ namespace chunk {
 		int chunk_index;
 	public:
 		Chunk_() = default;
-		
-		Chunk_(Chunks &chunks, int const chunkIndex) : chunks_{ &chunks }, chunk_index{ chunkIndex } {}	
-		
+
+		Chunk_(Chunks &chunks, int const chunkIndex) : chunks_{ &chunks }, chunk_index{ chunkIndex } {}
+
 		bool operator==(Chunk_<Chunks> const other) const {
 			return chunks_ == other.chunks_ && chunk_index == other.chunk_index;
 		}
-		
+
 		bool operator!=(Chunk_<Chunks> const other) const {
 			return !(*this == other);
-		}	
-		
+		}
+
 		auto &chunks() const { return *chunks_; }
-		
-		auto &chunkIndex() { return chunk_index; }	
-		auto const &chunkIndex() const { return chunk_index; }	
-			
-		#define gs(name, accessor) decltype(auto) name () { return chunks(). accessor [chunk_index]; } decltype(auto) name () const { return chunks(). accessor [chunk_index]; }	
+
+		auto &chunkIndex() { return chunk_index; }
+		auto const &chunkIndex() const { return chunk_index; }
+
+		#define gs(name, accessor) decltype(auto) name () { return chunks(). accessor [chunk_index]; } decltype(auto) name () const { return chunks(). accessor [chunk_index]; }
 			gs(position, chunksPos)
 			gs(aabb, chunksAABB)
 			gs(status, chunksStatus)
@@ -178,62 +178,62 @@ namespace chunk {
 			gs(gpuIndex, chunksGPUIndex)
 		#undef gs
 	};
-	
+
 	struct Chunks;
 	using Chunk = Chunk_<Chunks>;
 
 	struct Block {
 		static_assert(pos::cubesInBlockCount <= 8, "cubes state must fit into 8 bits");
-		
+
 		using id_t = uint16_t;
 		using cubes_t = uint8_t;
-		
+
 		//used in main.frag
 		static constexpr bool checkCubeCoordValid(vec3i const coord) {
 			return checkCubeCoordInBlockValid(pCube{coord});
 		}
-		
+
 		static constexpr bool checkCubeIndexValid(uint8_t const index) {
 			return checkCubeIndexInBlockValid(index);
 		}
-		
+
 		static constexpr uint8_t cubePosIndex(vec3i const pos) {
 			return cubeCoordInBlockToIndex(pCube{pos});
 		}
-		
+
 		static constexpr vec3i cubeIndexPos(uint8_t const index) {
 			return cubeIndexInBlockToCoord(index).val();
 		}
-		
+
 		static constexpr uint8_t blockCubeMask(uint8_t const index) {
 			assert(checkCubeIndexValid(index));
 			return 1 << index;
 		}
-		
+
 		static constexpr uint8_t blockCubeMask(vec3i const coord) {
 			const auto index{ cubePosIndex(coord) };
 			return 1 << index;
 		}
-		
+
 		static constexpr bool blockCube(uint8_t const cubes, uint8_t const index) {
 			assert(checkCubeIndexValid(index));
 			return (cubes >> index) & 1;
 		}
-		
+
 		static constexpr bool blockCube(uint8_t const cubes, vec3i const coord) {
 			const auto index{ cubePosIndex(coord) };
 			return (cubes >> index) & 1;
 		}
-		
+
 		static constexpr Block fullBlock(id_t const id) { return Block(id, 0b1111'1111); }
 		static constexpr Block emptyBlock() { return Block(0, 0); }
-		
+
 		static constexpr Block idChanged(Block const it, id_t const id) { return Block{id, it.cubes()}; }
 		static constexpr Block cubesChanged(Block const it, uint8_t const cubes) { return Block{it.id(), cubes}; }
 	private:
 		uint32_t data_;
 	public:
-		constexpr Block() = default;
+		Block() = default;
 		constexpr explicit Block(uint32_t const data__) : data_{ data__ } {}
 		constexpr Block(id_t const id, cubes_t const cubes) : data_{ uint32_t(id) | (uint32_t(cubes) << 24) } {
 			if(id == 0 || cubes == 0) data_ = 0;
@@ -241,20 +241,20 @@ namespace chunk {
 		constexpr uint32_t data() const { return data_; }
 		constexpr cubes_t cubes() const { return cubes_t(data_ >> 24); }
 		constexpr id_t id() const { return id_t(data_ & ((1 << 16) - 1)); }
-		
+
 		constexpr bool cube(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cube(uint8_t const index) const { return blockCube(cubes(), index); }
-		
+
 		constexpr bool cubeAtCoord(vec3i const coord) const { return blockCube(cubes(), coord); }
 		constexpr bool cubeAtIndex(uint8_t const index) const { return blockCube(cubes(), index); }
-		
+
 		constexpr explicit operator bool() const { return id() != 0; }
 		constexpr bool isEmpty() const { return id() == 0; }
-		constexpr bool empty() const { return isEmpty(); }	
+		constexpr bool empty() const { return isEmpty(); }
 	};
-	
+
 	struct OptionalChunkIndex {
-	// -(chunkIndex) - 1	
+	// -(chunkIndex) - 1
 	// everything here can be simplified because  -x-1 == ~x
 	// also every function can be marked constexpr
 	private: int n;
@@ -262,36 +262,36 @@ namespace chunk {
 		OptionalChunkIndex() = default;
 		OptionalChunkIndex(int chunkIndex) : n{ -chunkIndex - 1 } {}
 		explicit operator int() const { return get(); }
-		
+
 		bool is() const {
 			return n != 0;
 		}
-		
+
 		int32_t get() const { //return -1 if invalid
 			return int32_t(int64_t(n + 1) * -1); //-n - 1 is UB if n is integer min?
 		}
-		
+
 		bool operator==(OptionalChunkIndex const it) const {
 			return it.n == n;
-		}		
-		
+		}
+
 		bool operator!=(OptionalChunkIndex const it) const {
 			return it.n != n;
 		}
 	};
-	
+
 	/*3D Von Neumann neighbourhood containing chunks indices*/
 	struct Neighbours {
 		static constexpr int neighboursCount{ 6 };
-		
+
 		static constexpr bool checkIndexValid(uint8_t const index) {
 			return index < neighboursCount;
 		}
-		
+
 		static constexpr bool checkDirValid(vec3i const dir) {
 			return vec3i(dir.notEqual(0)).dot(1) == 1 && dir.abs().equal(1).any();
 		}
-		
+
 		//constexpr?
 		//used in main.shader
 			static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
@@ -299,12 +299,12 @@ namespace chunk {
 				vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
 				return dirs[neighbourIndex];
 			}
-			
+
 			static uint8_t dirAsIndex(vec3i const dir) {
 				assert(checkDirValid(dir));
 				auto const result{ (dir.x+1)/2 + (dir.y+1)/2+abs(dir.y*2) + (dir.z+1)/2+abs(dir.z*4) };
 				assert(indexAsDir(result) == dir);
-				return result; 
+				return result;
 			}
 			static uint8_t mirror(uint8_t index) {
 				return dirAsIndex(-indexAsDir(index));
@@ -316,125 +316,125 @@ namespace chunk {
 		std::array<OptionalChunkIndex, neighboursCount> n;
 	public:
 		Neighbours() = default;
-		
+
 		OptionalChunkIndex &operator[](uint8_t index) { assert(checkIndexValid(index)); return n[index]; }
 		OptionalChunkIndex const &operator[](uint8_t index) const { assert(checkIndexValid(index)); return n[index]; }
-		
+
 		OptionalChunkIndex &operator[](vec3i dir) { return n[dirAsIndex(dir)]; }
 		OptionalChunkIndex const &operator[](vec3i dir) const { return n[dirAsIndex(dir)]; }
 	};
-	
+
 	struct StatusFlags {
 		uint8_t ao : 1;
 		uint8_t blocks : 1;
 		uint8_t lighting : 1;
 		uint8_t neighbouringEmitters : 1;
-		
+
 		bool isInvalidated() const { return !ao || !blocks || !lighting || !neighbouringEmitters; }
-		
+
 	#pragma clang diagnostic push
 	#pragma clang diagnostic ignored "-Winvalid-token-paste"
-	
+
 		#define o(field) static_cast<uint8_t>(f.##field | s.##field)
 		friend StatusFlags operator|(StatusFlags const f, StatusFlags const s) {
 			return { o(ao), o(blocks), o(lighting), o(neighbouringEmitters) };
 		}
 		#undef o
-		
+
 		#define o(field) static_cast<uint8_t>(f.field & s.##field)
 		friend StatusFlags operator&(StatusFlags const f, StatusFlags const s) {
 			return { o(ao), o(blocks), o(lighting), o(neighbouringEmitters) };
 		}
 		#undef o
 	#pragma clang diagnostic pop
-		
-		StatusFlags &operator|=(StatusFlags const s) { return *this = (*this | s); }	
+
+		StatusFlags &operator|=(StatusFlags const s) { return *this = (*this | s); }
 		StatusFlags &operator&=(StatusFlags const s) { return *this = (*this & s); }
 	};
 	struct ChunkStatus {
 		StatusFlags loaded; //tells if the thing is even loaded on the GPU
 		StatusFlags current; //tells what to reload
-		
+
 		uint8_t updateAO : 1;
 		uint8_t updateNeighbouringEmitters : 1;
 	public:
 		ChunkStatus() = default;
-		
-		bool needsUpdate() const { return updateAO || updateNeighbouringEmitters; }	
+
+		bool needsUpdate() const { return updateAO || updateNeighbouringEmitters; }
 	};
-	
+
 	template<typename T>
 	struct CubesArray {
 		static constexpr int size = pos::cubesInChunkCount;
 		using value_type = T;
 	private:
 		std::array<value_type, size> data;
-	public:		
+	public:
 		CubesArray() = default;
 		explicit CubesArray(T const value) { fill(value); }
-	
+
 		value_type       &operator[](int const index)       { assert(checkCubeIndexInChunkValid(index)); return data[index]; }
 		value_type const &operator[](int const index) const { assert(checkCubeIndexInChunkValid(index)); return data[index]; }
-		
+
 		value_type       &operator[](pCube const coord)       { assert(checkCubeCoordInChunkValid(coord)); return (*this)[cubeCoordToIndex(coord)]; }
 		value_type const &operator[](pCube const coord) const { assert(checkCubeCoordInChunkValid(coord)); return (*this)[cubeCoordToIndex(coord)]; }
-		
+
 		void fill(T const value) { data.fill(value); }
 		void reset() { data.fill(T()); }
 	};
-	
+
 	template<typename T>
 	struct BlocksArray {
 		static constexpr int size = pos::blocksInChunkCount;
 		using value_type = T;
 	private:
 		std::array<value_type, size> data;
-	public:		
+	public:
 		BlocksArray() = default;
 		explicit BlocksArray(T const value) { fill(value); }
-	
+
 		value_type       &operator[](int const index)       { assert(checkBlockIndexInChunkValid(index)); return data[index]; }
 		value_type const &operator[](int const index) const { assert(checkBlockIndexInChunkValid(index)); return data[index]; }
-		
+
 		value_type       &operator[](pBlock const coord)       { assert(checkBlockCoordInChunkValid(coord)); return (*this)[blockCoordToIndex(coord)]; }
 		value_type const &operator[](pBlock const coord) const { assert(checkBlockCoordInChunkValid(coord)); return (*this)[blockCoordToIndex(coord)]; }
-		
+
 		void fill(T const value) { data.fill(value); }
 		void reset() { data.fill(T()); }
 	};
-	
+
 	/*per-vertex information about presence of surrounding cubes*/
 	struct ChunkAO : CubesArray<uint8_t> {
 		using CubesArray::CubesArray;
-		
+
 		static constexpr int dirsCount{ 8 }; //8 cubes share 1 vertex
-		
+
 		static vec3i dirsForIndex(const int index) { //used in main.shader
-			assert(index >= 0 && index < dirsCount); 
+			assert(index >= 0 && index < dirsCount);
 			const int x = int((index % 2)       != 0); //0, 2, 4, 6 - 0; 1, 3, 5, 7 - 1
 			const int y = int(((index / 2) % 2) != 0); //0, 1, 4, 5 - 0; 2, 3, 6, 7 - 1
 			const int z = int((index / 4)       != 0); //0, 1, 2, 3 - 0; 4, 5, 6, 7 - 1
 			return vec3i{ x, y, z } * 2 - 1;
 		}
 	};
-	
+
 	/*lighting level of chunk's cubes*/
 	struct ChunkLighting : CubesArray<uint8_t> {
 		using CubesArray::CubesArray;
-		
+
 		static constexpr value_type maxValue = std::numeric_limits<value_type>::max();
 		static constexpr value_type minValue = std::numeric_limits<value_type>::lowest();
-		
+
 		static constexpr int dirsCount{ 6 };
-		
+
 		static constexpr bool checkIndexValid(uint8_t const index) {
 			return index < dirsCount;
 		}
-		
+
 		static constexpr bool checkDirValid(vec3i const dir) {
 			return vec3i(dir.notEqual(0)).dot(1) == 1 && dir.abs().equal(1).any();
 		}
-		
+
 		static constexpr vec3i indexAsDir(uint8_t neighbourIndex) {
 			assert(checkIndexValid(neighbourIndex));
 			vec3i const dirs[] = { vec3i{-1,0,0},vec3i{1,0,0},vec3i{0,-1,0},vec3i{0,1,0},vec3i{0,0,-1},vec3i{0,0,1} };
@@ -447,23 +447,23 @@ namespace chunk {
 				std::cerr << "err: " << dir << ' ' << result << '\n';
 				assert(false);
 			}
-			return result; 
+			return result;
 		}
 	};
-	
+
 	struct LiquidCube {
 		using level_t = uint8_t;
 		static constexpr level_t maxLevel = std::numeric_limits<level_t>::max();
 		static constexpr level_t minLevel = std::numeric_limits<level_t>::lowest();
-		
+
 		static LiquidCube liquid(Block::id_t const id, int const level, bool const falling) {
-			assert(level >= minLevel && level <= maxLevel); 
+			assert(level >= minLevel && level <= maxLevel);
 			if(level == 0 || id == 0) return {};
 			else return { id, level_t(level), falling, false, false };
 		}
-		
+
 		static LiquidCube special(Block::id_t const id, int const level, bool const inflow, bool const outflow) {
-			assert(level >= minLevel && level <= maxLevel); 
+			assert(level >= minLevel && level <= maxLevel);
 			return { id, level_t(level), false, inflow, outflow }; //allows level to be equal to 0
 		}
 	public:
@@ -474,7 +474,7 @@ namespace chunk {
 		uint8_t outflow : 1;
 	public:
 		constexpr bool liquid() const { return !inflow && !outflow; }
-		
+
 		friend bool operator==(LiquidCube const f, LiquidCube const s) {
 			return f.id == s.id && f.level == s.level && f.falling == s.falling
 				&& f.inflow == s.inflow && f.outflow == s.outflow;
@@ -482,34 +482,34 @@ namespace chunk {
 		friend bool operator!=(LiquidCube const f, LiquidCube const s) { return !(f == s); }
 	};
 	static_assert(sizeof(LiquidCube) == 4);
-	
+
 	struct ChunkLiquid : CubesArray<LiquidCube> { using CubesArray::CubesArray; };
-	
+
 	/*information about the block and its Moore neighbour blocks.
 	  Used to make cube rendering possible and to speed up the rendering*/
 	struct BlockData { //used in main.frag
 		static_assert(pos::cubesInBlockCount == 8);
 		uint8_t solidCubes;
 		uint8_t liquidCubes;
-		
+
 		uint16_t noNeighbours : 1;
 		uint16_t fullSameLiquid : 1; //if no solid cubes and all liquid cubes have the same id, and level == chunk::LiquidCube::maxLevel
 		uint16_t neighboursFullSameLiquid : 1;
-		
+
 		constexpr bool noCubes() const {
 			return solidCubes == 0 && liquidCubes == 0;
-		}		
+		}
 		constexpr bool isEmpty() const {
 			return noCubes();
-		}		
+		}
 		constexpr bool isFull() const {
 			return solidCubes == 0xffu && liquidCubes == 0xffu;
 		}
 	};
 	static_assert(sizeof(BlockData) == 4);
-	
+
 	struct BlocksData : BlocksArray<BlockData> { using BlocksArray::BlocksArray; };
-	
+
 	/*SET of certain blocks in a chunk*/
 	struct ChunkBlocksList {
 		using value_type = int16_t; static_assert(pos::blocksInChunkCount < std::numeric_limits<value_type>::max());
@@ -517,77 +517,77 @@ namespace chunk {
 		std::vector<value_type> list;
 	public:
 		ChunkBlocksList() = default;
-		
+
 		int size() const { return list.size(); }
 		bool inRange(int const index) const { return index >= 0 && index < size(); }
-		
+
 		value_type       &operator[](int const index)       { assert(inRange(index)); return list[index]; }
-		value_type const &operator[](int const index) const { assert(inRange(index)); return list[index]; }	
-		
+		value_type const &operator[](int const index) const { assert(inRange(index)); return list[index]; }
+
 		vec3i operator()(int const index) const { assert(inRange(index)); return indexBlock(list[index]); }
-		
-		decltype(auto) begin() { return list.begin(); } 
+
+		decltype(auto) begin() { return list.begin(); }
 		decltype(auto) end  () { return list.end();   }
-		
+
 		decltype(auto) cbegin() const { return list.cbegin(); }
 		decltype(auto) cend  () const { return list.cend();   }
-		
+
 		void add(vec3i const blockCoord) {
 			auto const newElement{ blockIndex(blockCoord) };
 			assert(std::find(begin(), end(), newElement) == end());
 			list.push_back(newElement);
 		}
-		
+
 		void remove(vec3i const blockCoord) {
 			auto const result{ std::find(begin(), end(), blockIndex(blockCoord)) };
 			assert(result != end());
 			list.erase(result);
 		}
-		
+
 		void clear() {
 			list.clear();
 		}
 	};
-	
+
 	struct ChunkData /*ChunkBlocks*/ : BlocksArray<Block> {
 		using BlocksArray::BlocksArray;
 		using BlocksArray::operator[];
-		
+
 		struct Cube{ Block block; bool isSolid; };
-		
+
 		value_type       &operator[](vec3i const coord)       { return (*this)[pBlock{coord}]; }
 		value_type const &operator[](vec3i const coord) const { return (*this)[pBlock{coord}]; }
-		
+
 		Cube cubeAt(vec3i const cubeCoord) const {
 			auto const blockInChunkCoord{ cubeCoord / units::cubesInBlockDim };
 			auto const cubeInBlockCoord { cubeCoord % units::cubesInBlockDim };
-			
+
 			auto const block{ (*this)[blockInChunkCoord] };
 			auto const isCube{ block.cube(cubeInBlockCoord) };
-			
+
 			return { block, isCube };
 		}
-		
+
 		Cube cubeAt(pCube const cubeCoord) const { return cubeAt(cubeCoord.val()); }
-		
-		Block::id_t cubeAt2(pCube const coord) const { 
-			auto const cube{ cubeAt(coord) }; 
+
+		Block::id_t cubeAt2(pCube const coord) const {
+			auto const cube{ cubeAt(coord) };
 			return cube.block.id() * cube.isSolid;
 		}
 	};
-	
+
 	/*filled to max capacity with indices of certain blocks in 3D Moore neighbourhood of a chunk*/
 	struct Chunk3x3BlocksList {
 		static int constexpr sidelength = 3 * units::blocksInChunkDim;
 		static_assert(pos::cubed(sidelength) >  (1<<16), "sadly, we can't store block coords of 27 adjecent chunks in 16 bits");
 		static_assert(pos::cubed(sidelength) <= (1<<17), "but we can store the coordinates in 17 bits");
-		
+
 		static int constexpr capacity = 30;
-		
+
 		bool checkCoordValid(vec3i const coord) {
 			return coord.in(-units::blocksInChunkDim, units::blocksInChunkDim + units::blocksInChunkDim-1).all();
 		}
-		
+
 		static uint32_t coordToIndex(vec3i const coord) {
 			return (coord.x + units::blocksInChunkDim)
 				 + (coord.y + units::blocksInChunkDim) * sidelength
@@ -605,30 +605,30 @@ namespace chunk {
 		std::array<uint16_t, capacity> coords16;
 	public:
 		bool isEmpty() const { return bool((bits & 1) == 0); }
-		
+
 		int32_t operator[](int const position) const { return int32_t(coords16[position]) | (int32_t((bits >> (position+2)) & 1) << 16); }
 		vec3i operator()(int const position) const { return indexToCoord((*this)[position]); }
-		
+
 		void clear() { bits = 0; }
 		void fillRepeated(std::array<vec3i, capacity> const &coords, int const count) {
 			assert(count >= 0);
 			if(count == 0) { clear(); return; }
-			
+
 			uint32_t const bitsCap{ count == 1 ? 0b01u : 0b10u };
-			
+
 			uint32_t coordsBits{ 0 };
 			for(int i{}; i < capacity; i++) {
 				auto const blockIndex{ coordToIndex(coords[i % count]) };
 				coords16[i] = uint16_t(blockIndex);
 				coordsBits = coordsBits | (((blockIndex >> 16)&1) << i);
 			}
-			
+
 			bits = bitsCap | (coordsBits << 2);
 		}
 	};
 	static_assert(sizeof(Chunk3x3BlocksList) == sizeof(uint16_t) * 32);
-	
-	using chunkIndex_t = int32_t;	
+
+	using chunkIndex_t = int32_t;
 	struct ChunkAndCube {
 		static ChunkAndCube fromCoord(chunk::chunkIndex_t const chunkIndex, pCube const cubeCoord) {
 			return ChunkAndCube{ chunkIndex, cubeCoordToIndex(cubeCoord) };
@@ -636,28 +636,28 @@ namespace chunk {
 	public:
 		chunk::CubeInChunkIndex cubeIndex;
 		chunk::chunkIndex_t chunkIndex;
-		
+
 		ChunkAndCube() noexcept = default;
 		ChunkAndCube(chunk::chunkIndex_t const chunkIndex_, chunk::CubeInChunkIndex const cubeIndex_) noexcept
 		: cubeIndex{ cubeIndex_ }, chunkIndex{ chunkIndex_ } {}
-		
+
 		pCube cubeCoord() const {
 			return cubeIndexToCoord(cubeIndex);
 		}
-		
+
 		friend constexpr bool operator==(ChunkAndCube const f, ChunkAndCube const s)  noexcept {
 			return f.chunkIndex == s.chunkIndex && f.cubeIndex == s.cubeIndex;
-		}	
-		
+		}
+
 		friend constexpr bool operator<(ChunkAndCube const f, ChunkAndCube const s) noexcept {
 			static_assert(sizeof(cubeIndex) <= 4);
 			auto const fValue{ f.cubeIndex | (uint64_t(f.chunkIndex) << 32) };
 			auto const sValue{ s.cubeIndex | (uint64_t(s.chunkIndex) << 32) };
-			
+
 			return fValue < sValue;
 		}
 	};
-	
+
 	/*contains all the cubes that need to be updated and updates them*/
 	struct ChunksLiquidCubes {
 	private:
@@ -665,31 +665,31 @@ namespace chunk {
 		chunk::Chunks *chunks_;
 		std::vector<chunk::ChunkAndCube> gens[gensCount];
 		int genIndex;
-		
-		chunk::Chunks &chunks() { return *chunks_; } 
+
+		chunk::Chunks &chunks() { return *chunks_; }
 	public:
-		ChunksLiquidCubes(chunk::Chunks &chunks) : 
+		ChunksLiquidCubes(chunk::Chunks &chunks) :
 			chunks_{ &chunks }, gens{}, genIndex{} {}
-		
+
 		void update();
-		
+
 		void add(chunk::ChunkAndCube const cube) {
 			gens[genIndex].push_back(cube);
 		}
 	};
-	
-	struct Chunks {	
+
+	struct Chunks {
 		using index_t = chunkIndex_t;
 	private:
 		std::vector<index_t> vacant{};
 		std::vector<index_t> used_{};
-		
-		struct PosHash { 
-			inline std::size_t operator()(vec3i const &it) const noexcept { 
+
+		struct PosHash {
+			inline std::size_t operator()(vec3i const &it) const noexcept {
 				return  (std::hash<int32_t>{}(it.x) ^ (std::hash<int32_t>{}(it.x) << 1)) ^ (std::hash<int32_t>{}(it.z) << 1);
-			} 
+			}
 		};
-		
+
 		std::vector<index_t> used{};
 	public:
 		std::vector<vec3i> chunksPos{};
@@ -707,17 +707,17 @@ namespace chunk {
 		std::vector<Chunk3x3BlocksList> chunksNeighbouringEmitters;
 		std::vector<index_t> chunksGPUIndex{};
 		std::unordered_map<vec3i, index_t, PosHash> chunksIndex_position{};
-		
+
 		ChunksLiquidCubes liquidCubes{ *this };
-	
+
 		std::vector<index_t> const &usedChunks() const { return used; }
-		
+
 		Chunks() = default;
 		Chunks(Chunks const&) = delete; //prevent accidental pass-by-value
 		Chunks &operator=(Chunks const&) = delete;
-		
+
 		size_t size() const { return used.size(); }
-		
+
 		void reserve(size_t const count) {
 			chunksPos.reserve(count);
 			chunksAABB.reserve(count);
@@ -734,21 +734,21 @@ namespace chunk {
 			chunksNeighbouringEmitters.reserve(count);
 			chunksGPUIndex.reserve(count);
 		}
-		
+
 		//returns used[] position
 		inline index_t reserve() {
 			index_t index;
 			auto usedSize = used.size();
-	
-			if(!vacant.empty()) { 
+
+			if(!vacant.empty()) {
 				index = vacant[vacant.size()-1];
 				vacant.pop_back();
 			}
 			else { //TODO: avoid zero-init, allocate everything at once
 				index = usedSize;
-				
+
 				auto cap = chunksPos.capacity();
-				
+
 				chunksPos.resize(index+1);
 				chunksAABB.resize(index+1);
 				chunksStatus.resize(index+1);
@@ -763,47 +763,47 @@ namespace chunk {
 				chunksNeighbours.resize(index+1);
 				chunksNeighbouringEmitters.resize(index+1);
 				chunksGPUIndex.resize(index+1);
-				
+
 				assert(cap >= chunksPos.size());
 			}
 			used.push_back(index);
-			
+
 			return usedSize;
 		}
-	
+
 		inline void recycle(index_t const index) {
 			auto chunkIndex = used[index];
 			used.erase(used.begin()+index);
 			vacant.push_back(chunkIndex);
 		}
-	
-		
+
+
 		template<typename Action>
 		inline void forEachUsed(Action &&action) const {
 			for(auto const chunkIndex : used) {
 				action(chunkIndex);
 			}
 		}
-		
+
 		template<typename Predicate, typename Free>
 		inline void filterUsed(Predicate&& keep, Free &&free) {
 			auto const sz = used.size();
-			
+
 			for(size_t i = 0; i < sz; ++i) {
 				auto const &chunkIndex = used[i];
 				if(keep(chunkIndex)) used_.push_back(chunkIndex);
 				else { free(chunkIndex); vacant.push_back(chunkIndex); }
 			}
-			
+
 			used.clear();
 			used.swap(used_);
 		}
-		
+
 		inline Chunk operator[](index_t chunkIndex) {
 			return Chunk{ *this, chunkIndex };
 		}
 	};
-	
+
 	//old version
 	struct Move_to_neighbour_Chunk {
 	public:
@@ -815,28 +815,28 @@ namespace chunk {
 		bool valid;
 	public:
 		Move_to_neighbour_Chunk() = delete;
-		
+
 		Move_to_neighbour_Chunk(Chunks &chunks, OptionalChunkIndex oci) :
 			chunk{ chunks[oci.get()] }, /*optional index may be invalid but we need to keep Chunks&*/
 			valid{ oci.is() }
 		{}
 		Move_to_neighbour_Chunk(Chunks &chunks) : chunk{chunks[0]}, valid{ false } {}/*index 0 may be out of bounds but we need to keep Chunks&*/
 		Move_to_neighbour_Chunk(Chunk const src) : chunk{src}, valid{ true } {}
-			
+
 		Move_to_neighbour_Chunk(Chunks &chunks, vec3i const chunkCoord) {
 			auto const chunkIndexP{ chunks.chunksIndex_position.find(chunkCoord) };
-			
+
 			valid = chunkIndexP != chunks.chunksIndex_position.end();
-			
+
 			if(valid) chunk = chunks[chunkIndexP->second];
 			else chunk = chunks[0]; //index 0 may be out of bounds but we need to keep Chunks&
 		}
-		
+
 		OptionalChunkIndex optChunk() const {
 			if(valid) return OptionalChunkIndex{ chunk.chunkIndex() };
 			return {};
 		}
-		
+
 		OptionalChunkIndex move(vec3i const otherChunk) {
 			if(valid) {
 				auto const dir{ otherChunk - chunk.position() };
@@ -847,7 +847,7 @@ namespace chunk {
 			*this = Move_to_neighbour_Chunk(chunk.chunks(), otherChunk);
 			return optChunk();
 		}
-		
+
 		OptionalChunkIndex moveToNeighbour/*offset to neighbour*/(vec3i const neighbour) {
 			if(!valid) return {};
 			if(neighbour == 0) return optChunk();
@@ -856,23 +856,23 @@ namespace chunk {
 			*this = Move_to_neighbour_Chunk(chunk.chunks(), chunk.position() + neighbour);
 			return optChunk();
 		}
-		
+
 
 		OptionalChunkIndex offset/*to immediate neighbour*/(vec3i const dir) {
 			if(!valid) return {};
 			if(dir == 0) return optChunk();
-			
+
 			auto const optChunkIndex{ chunk.neighbours()[dir] };
 			valid = optChunkIndex.is();
 			if(valid) chunk = chunk.chunks()[optChunkIndex.get()];
 			return optChunkIndex;
 		}
-		
+
 		OptionalChunkIndex offsetDiagonal(vec3i const dir) {
 			if(dir == 0) return { chunk.chunkIndex() };
 			if(!valid) return {};
 			assert(diagonalNeighbourDirValid(dir));
-			
+
 			OptionalChunkIndex outChunkIndex{ chunk.chunkIndex() };
 			auto &chunks{ chunk.chunks() };
 			if(dir.x != 0) outChunkIndex = Move_to_neighbour_Chunk{ chunks, outChunkIndex }.offset(vec3i(dir.x,0,0));
@@ -880,10 +880,10 @@ namespace chunk {
 			if(dir.z != 0) outChunkIndex = Move_to_neighbour_Chunk{ chunks, outChunkIndex }.offset(vec3i(0,0,dir.z));
 			return outChunkIndex;
 		}
-		
+
 		bool is() const { return valid; }
 	};
-	
+
 	//same as Move_to_neighbour_Chunk but better
 	struct MovingChunk {
 	public:
@@ -895,23 +895,23 @@ namespace chunk {
 		OptionalChunkIndex chunkIndex;
 	public:
 		MovingChunk() = delete;
-		
+
 		MovingChunk(Chunks &chunks__, OptionalChunkIndex chunkIndex_ = {}) : chunks_{ &chunks__ }, chunkIndex{ chunkIndex_ } {}
 		MovingChunk(Chunk src) : chunks_{ &src.chunks() }, chunkIndex{ src.chunkIndex() } {}
 		MovingChunk(Chunks &chunks__, vec3i const chunkCoord) : chunks_{ &chunks__ } {
 			auto const chunkIndexP{ chunks_->chunksIndex_position.find(chunkCoord) };
-			
+
 			bool const valid{ chunkIndexP != chunks_->chunksIndex_position.end() };
-			
+
 			if(valid) chunkIndex = { chunkIndexP->second };
 			else chunkIndex = {};
 		}
-		
+
 		Chunks &chunks() const { return *chunks_; }
 		OptionalChunkIndex getIndex() const { return chunkIndex; }
 		bool is() const { return chunkIndex.is(); }
 		Chunk get() const { assert(is()); return chunks()[chunkIndex.get()]; }
-		
+
 		MovingChunk moved(vec3i const otherChunkCoord) const {
 			if(is()) {
 				auto const dir{ otherChunkCoord - get().position() };
@@ -921,7 +921,7 @@ namespace chunk {
 			}
 			return MovingChunk(chunks(), otherChunkCoord);
 		}
-		
+
 		MovingChunk offseted(vec3i const dir) const {
 			if(!is()) return { chunks() };
 			if(dir == 0) return { *this };
@@ -933,20 +933,20 @@ namespace chunk {
 		MovingChunk offsetedToImmediate(vec3i const dir) const {
 			if(!is()) return { chunks() };
 			if(dir == 0) return { *this };
-			
+
 			return { chunks(), get().neighbours()[dir] };
 		}
-		
+
 		MovingChunk offsetedDiagonal(vec3i const dir) const {
 			if(!is()) return { chunks() };
 			if(dir == 0) return { *this };
 			assert(diagonalNeighbourDirValid(dir));
-			
+
 			auto  outChunk{ *this };
 			if(dir.x != 0) outChunk = outChunk.offsetedToImmediate(vec3i(dir.x,0,0));
 			if(dir.y != 0) outChunk = outChunk.offsetedToImmediate(vec3i(0,dir.y,0));
 			if(dir.z != 0) outChunk = outChunk.offsetedToImmediate(vec3i(0,0,dir.z));
 			return outChunk;
-		}		
+		}
 	};
 }
