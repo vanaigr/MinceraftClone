@@ -4,6 +4,12 @@ A Minecraft clone rendered using ray tracing
 
 ![](./screenshots/screenshot.jpg)
 
+For a demo, see:
+https://www.youtube.com/watch?v=xjYQW5gW2bc
+
+And the full playlist:
+https://www.youtube.com/playlist?list=PLFPkZTnelkjSRX4NVLiBaTUHkpjINpDRd
+
 ## Features
 
 ### Basic features
@@ -100,6 +106,12 @@ make update_sdf
   - `F6` - everything above
 
 - `Esc` - close the game
+
+## Config
+
+Game can be configured through `/game.cfg` file. By default,
+modifications are not saved. To enable saving, change `saveChunks 0`
+to `saveChunks 1`.
 
 ## Dependencies
 
