@@ -631,7 +631,7 @@ bool alphaTest/*isSolid*/(const vec3 atPosition, const vec3 intersectionSide, co
 
 	vec2 alphaUv;
 	if(blockId == 5) {
-		const vec2 offset = sin(uv_ + time*1.31);
+		const vec2 offset = sin(uv_ + time*1.3);
 
 		const vec3 posOffseted = atPosition + vec3(
 			intersectionSide.x == 1 ? 0 : offset.x,
@@ -1040,9 +1040,9 @@ BlocksIntersection blocksIntersection(
 		if(tBlockId == 16) {
 			const ivec3 toBlockAbsoluteCoord = chunksOffset * blocksInChunkDim + toBlockCoord;
 			const vec3 normals[] = {
-				normalize(vec3(+1,  0.6 + (sin( time*0.71)+sin(time))*0.1, 1)),
-				normalize(vec3(-1,  0.6 + (sin(-time*0.71)+sin(time))*0.1, 1)),
-				normalize(vec3(+0, -0.6 - (sin(time*0.71)+sin(-time))*0.1, 1))
+				normalize(vec3(+1,  0.6 + (sin( time*0.7)+sin(time))*0.1, 1)),
+				normalize(vec3(-1,  0.6 + (sin(-time*0.7)+sin(time))*0.1, 1)),
+				normalize(vec3(+0, -0.6 - (sin(time*0.7)+sin(-time))*0.1, 1))
 			};
 
 			const vec3 rand_ = vec3(rand(vec2(toBlockAbsoluteCoord.xy)), rand(vec2(toBlockAbsoluteCoord.yz)), rand(vec2(toBlockAbsoluteCoord.xz)));
@@ -1519,7 +1519,7 @@ void pushShadowEndEmmitter(
 		);
 		const vec3 offset = (dot(offset_, offset_) == 0 ? offset_ : normalize(offset_)) / shadowSmoothness;
 		const vec4 q = vec4(normalize(vec3(-1-sin(time/4)/20,3,2)), cos(time/4)/20);
-		const vec3 v = normalize(vec3(-1.5, 4, 4) + offset);
+		const vec3 v = normalize(vec3(-3, 8, 4) + offset);
 		const vec3 temp = cross(q.xyz, v) + q.w * v;
 		const vec3 rotated = v + 2.0*cross(q.xyz, temp);
 
@@ -1627,9 +1627,9 @@ RayResult resolveIntersection(const int iteration) {
 		if(blockId == 16) {
 			const ivec3 blockAbsolutePos = chunksOffset * blocksInChunkDim + blockCoord;
 			const vec3 normals[] = {
-				normalize(vec3(+1,  0.6 + (sin( time*0.71)+sin(time))*0.1, 1)),
-				normalize(vec3(-1,  0.6 + (sin(-time*0.71)+sin(time))*0.1, 1)),
-				normalize(vec3(+0, -0.6 - (sin(time*0.71)+sin(-time))*0.1, 1))
+				normalize(vec3(+1,  0.6 + (sin( time*0.7)+sin(time))*0.1, 1)),
+				normalize(vec3(-1,  0.6 + (sin(-time*0.7)+sin(time))*0.1, 1)),
+				normalize(vec3(+0, -0.6 - (sin(time*0.7)+sin(-time))*0.1, 1))
 			};
 
 			const int index = int(data);
@@ -1733,7 +1733,7 @@ RayResult resolveIntersection(const int iteration) {
 			if(any(isnan(incoming))) incoming = ray.dir;
 
 			const vec3 normalDir = any(intersectionSide) ? normalize(vec3(normal) + offset * vec3(not(intersectionSide))) : -incoming;
-			const float ior = glass ? 1.15 : (blockId == diamondBlock ? 1.3 : 1.2);
+			const float ior = glass ? 1.15 : (blockId == diamondBlock ? 1.3 : 1.5);
 
 			//https://developer.blender.org/diffusion/B/browse/master/intern/cycles/kernel/closure/bsdf_util.h$13
 			//fresnel_dielectric()

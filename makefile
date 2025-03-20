@@ -2,7 +2,7 @@ INCLUDES=-I .\dependencies\include -I .\src
 SOURCE_DIR=src
 SHADERS_DIR=shaders
 OBJECT_DIR=obj
-WS= -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-label -Wno-unused-private-field
+WS= -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-label -Wno-unused-private-field
 CFLAGS= -O3 -std=c++17 -pedantic -c $(WS) -mssse3
 PPFLAGS=-D GLEW_STATIC -D GLEW_NO_GLU -D _CRT_SECURE_NO_WARNINGS
 
@@ -49,14 +49,14 @@ endef
 
 update_font ./assets/font.txt:$(eval $(call MAKE_EXECUTABLE,$(UPDATE_FONT_EXECUTABLE),UpdateFont.cpp,))\
 								./assets/font.fnt $(UPDATE_FONT_EXECUTABLE)
-	@echo updating font file						
+	@echo updating font file
 	@$(UPDATE_FONT_EXECUTABLE)
-	
+
 update_sdf ./assets/sdfFont.bmp:$(eval $(call MAKE_EXECUTABLE,$(SDF_EXECUTABLE),$(filter SDF/% font/% image/%,$(SOURCE_FILES))))\
 								./assets/font.txt ./assets/font.bmp $(SDF_EXECUTABLE)
 	@echo updating SDF font image
 	@$(SDF_EXECUTABLE)
-	
+
 build_game:: $(eval $(call MAKE_EXECUTABLE,$(GAME_EXECUTABLE),$(filter game/% font/% image/%,$(SOURCE_FILES))))\
 			./assets/font.txt ./assets/sdfFont.bmp $(GAME_EXECUTABLE)
 
