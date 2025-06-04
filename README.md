@@ -116,29 +116,45 @@ to `saveChunks 1`.
 ## Dependencies
 
 In order to build the project you need to have these programs:
-
-[GNU Make](https://www.gnu.org/software/make/)
-
-[Clang](https://github.com/llvm/llvm-project)
+* [CMake](https://cmake.org/) or [GNU Make](https://www.gnu.org/software/make/)
+* [Clang](https://github.com/llvm/llvm-project)
 
 ## Quick start
 
 #### Setup the libraries and other utilities
 
-```console
+```shell
 setup
 ```
 #### Build and run the game
 
-```console
-make build
-game
+
+##### CMake
+
+```shell
+br2
 ```
 
 or
 
-```console
+```shell
+md build
+cmake -B build -G Ninja
+cmake --build build
+.\build\src\game\game.exe
+```
+
+##### Make
+
+```shell
 br
+```
+
+or
+
+```shell
+make build
+game
 ```
 
 ## Libraries
